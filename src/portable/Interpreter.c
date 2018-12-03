@@ -56,14 +56,8 @@ static inline void interpret(uint64_t registers[8], uint16_t data)
         case OP_ROL:  b =  ROTL(b, (data >> 10)); break;
         case OP_MIL:  b += (uint64_t) ((int64_t)a * ((int64_t)b)); break;
         case OP_MUL:  b += mul_hi_plus_lo(a, b); break;
-        case OP_DUV: {
-            b += (b / (a | 1)) + (b % (a | 1));
-            break;
-        }
-        case OP_DIV: {
-            b += (((int64_t)b) / (((int64_t)a)|1)) + (((int64_t)b) % (((int64_t)a)|1));
-            break;
-        }
+        case OP_DUV:  b += (b / (a | 1)) + (b % (a | 1)); break;
+        case OP_DIV:  b += (int64_t)b / ((int64_t)a|1) + (int64_t)b % ((int64_t)a|1); break;
         case OP_CMP: {
             switch ((data >> 10) & 7) {
                 case 0: b += (b < a); break;
