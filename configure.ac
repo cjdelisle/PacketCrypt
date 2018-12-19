@@ -1,0 +1,49 @@
+#                                               -*- Autoconf -*-
+# Process this file with autoconf to produce a configure script.
+
+AC_PREREQ([2.69])
+AC_INIT([randomhash], [0.0.1], [cjd@cjdns.fr])
+AC_CONFIG_SRCDIR([src/Constants.h])
+AM_INIT_AUTOMAKE([1.11 dist-bzip2 tar-ustar foreign subdir-objects])
+AC_CONFIG_HEADERS([config.h])
+
+# Checks for programs.
+AC_PROG_CC
+AC_PROG_RANLIB
+
+# Checks for libraries.
+PKG_CHECK_MODULES([sodium], [libsodium], [], [
+    AC_MSG_ERROR([
+        libsodium not found
+        1. make sure it's installed
+        2. try to locate the file: libsodium.pc and you can inform pkg-config where to find it as
+           follows ( pretending it's in usr/local/libpkgconfig/ )
+           $ PKG_CONFIG_PATH=/usr/local/lib/pkgconfig/ ./configure
+        3. If you have no libsodium.pc file but you're sure it's installed (homebrew on OSX) then
+           you can pass the pass the header and lib arguments for libsodium as follows:
+           $ sodium_CFLAGS=-I/usr/local/include sodium_LIBS=-lsodium ./configure
+    ])
+])
+
+# Checks for header files.
+AC_CHECK_HEADERS([stdint.h stdlib.h string.h sys/time.h])
+
+# Checks for typedefs, structures, and compiler characteristics.
+AC_CHECK_HEADER_STDBOOL
+AC_C_INLINE
+AC_TYPE_INT16_T
+AC_TYPE_INT32_T
+AC_TYPE_INT64_T
+AC_TYPE_INT8_T
+AC_TYPE_UINT16_T
+AC_TYPE_UINT32_T
+AC_TYPE_UINT64_T
+AC_TYPE_UINT8_T
+
+# Checks for library functions.
+AC_FUNC_MALLOC
+AC_FUNC_REALLOC
+AC_CHECK_FUNCS([gettimeofday memset])
+
+AC_CONFIG_FILES([Makefile])
+AC_OUTPUT
