@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <errno.h>
+#include <time.h>
 
 static int usage() {
     printf("Usage: ./pcann [-t] <threads>\n");
@@ -364,8 +365,7 @@ static int search(Worker_t* w)
         if (nonce > 0x00ffffff) { return 0; }
         assert(isAnnOk(&w->ann, &w->activeJob->parentBlockHash));
         if (!w->ctx->test) {
-            ssize_t discard = write(STDOUT_FILENO, &w->ann, sizeof w->ann);
-            discard = discard;
+            (void) write(STDOUT_FILENO, &w->ann, sizeof w->ann);
         }
     }
     w->softNonce = nonce;
@@ -431,6 +431,11 @@ static void setTestVal(Request_t* req) {
     memcpy(req->parentBlockHash.bytes, "abcdefghijklmnopqrstuvwxyz012345", 32);
 }
 
+static void nsleep(long nanos) {
+    struct timespec req = { 0, nanos };
+    nanosleep(&req, NULL);
+}
+
 static void mainLoop(Context_t* ctx)
 {
     Request_t req;
@@ -450,7 +455,7 @@ static void mainLoop(Context_t* ctx)
                     break;
                 }
             }
-            usleep(1000);
+            nsleep(1000000);
         }
         req.hdr.hardNonce = hardNonce;
         Job_t* j = &ctx->jobs[hardNonce & 1];
@@ -460,7 +465,7 @@ static void mainLoop(Context_t* ctx)
             req.hdr.hardNonce = hardNonce;
         }
         stopThreads(ctx);
-        while (!threadsStopped(ctx)) { usleep(100); }
+        while (!threadsStopped(ctx)) { nsleep(100000); }
         if (threadsFinished(ctx)) { return; }
         int softNonceStep = 0x00ffffff / ctx->numWorkers;
         int totalHashes = 0;

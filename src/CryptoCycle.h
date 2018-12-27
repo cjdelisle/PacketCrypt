@@ -1,9 +1,7 @@
 #ifndef CRYPTOCYCLE_H
 #define CRYPTOCYCLE_H
 
-#include <string.h>
 #include <stdint.h>
-#include <assert.h>
 
 /*
  * Crypto query header:
@@ -61,7 +59,7 @@
  * 32 |                                                               |
  *    +                                                               +
  * 36 |                                                               |
- *    +                        encrypted_key                          +
+ *    +                           key_half                            +
  * 40 |                                                               |
  *    +                                                               +
  * 44 |                                                               |
@@ -125,9 +123,7 @@
  *                         authenticator. If you are decrypting, you MUST
  *                         compare this to the authenticator you received.
  * 
- * encrypted_key: In a reply message, this is the low 16 bytes of the
- *                encryption key which are themselves encrypted using the
- *                key and an initialization constant of 2.
+ * key_half: In a reply message, this is the low 16 bytes of the encryption key.
  */
 typedef struct {
     uint64_t nonce;
@@ -174,19 +170,7 @@ CryptoCycle_SETTER_GETTER(17, 7, setLength, getLength)
 CryptoCycle_SETTER_GETTER(24, 1, setFailed, isFailed)
 CryptoCycle_SETTER_GETTER(25, 7, setVersion, getVersion)
 
-static inline void CryptoCycle_makeFuzzable(CryptoCycle_Header_t* hdr)
-{
-    memcpy(hdr->data, hdr->key_high_or_auth, 4);
-
-    CryptoCycle_setVersion(hdr, 0);
-    CryptoCycle_setFailed(hdr, 0);
-
-    assert(CryptoCycle_isFailed(hdr) == 0);
-    assert(CryptoCycle_getVersion(hdr) == 0);
-
-    // Length must be at least 32 blocks (512 bytes) long
-    CryptoCycle_setLength(hdr, CryptoCycle_getLength(hdr) | 32);
-}
+void CryptoCycle_makeFuzzable(CryptoCycle_Header_t* hdr);
 
 void CryptoCycle_crypt(CryptoCycle_Header_t* msg);
 

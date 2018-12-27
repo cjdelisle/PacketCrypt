@@ -4,6 +4,23 @@
 #include "sodium/utils.h"
 #include "sodium/crypto_stream_chacha20.h"
 
+#include <string.h>
+#include <assert.h>
+
+void CryptoCycle_makeFuzzable(CryptoCycle_Header_t* hdr)
+{
+    memcpy(&hdr->data, hdr->key_high_or_auth, 4);
+
+    CryptoCycle_setVersion(hdr, 0);
+    CryptoCycle_setFailed(hdr, 0);
+
+    assert(CryptoCycle_isFailed(hdr) == 0);
+    assert(CryptoCycle_getVersion(hdr) == 0);
+
+    // Length must be at least 32 blocks (512 bytes) long
+    CryptoCycle_setLength(hdr, CryptoCycle_getLength(hdr) | 32);
+}
+
 static inline int getLengthAndTruncate(CryptoCycle_Header_t* hdr)
 {
     int len = CryptoCycle_getLength(hdr);
