@@ -67,7 +67,7 @@ func PacketCryptCycle(announcements [][1024]byte, seed [32]byte, nonce uint32) [
 
 #### CryptoCycle
 In order to understand how the mining algorithm works and why it makes use of the particular
-offsers when copying data, its important to understand exactly what CryptoCycle does. CryptoCycle
+offsets when copying data, its important to understand exactly what CryptoCycle does. CryptoCycle
 is based on an implementation of chacha20/poly1305 as standardized by the IETF in
 [RFC-7539](https://tools.ietf.org/html/rfc7539). Effort was made to ensure that building a device
 for performing CryptoCycle is *not significantly easier than building a device which can encrypt
@@ -75,7 +75,7 @@ internet packets*.
 
 Because encrypting internet traffic requires being able to encrypt messages of differing lengths
 with or without [associated data](https://en.wikipedia.org/wiki/Authenticated_encryption),
-CryptoCycle treats the first 16 bytes of the buffer as a header with certain perameters about the
+CryptoCycle treats the first 16 bytes of the buffer as a header with certain parameters about the
 encryption to be performed. The header specifies the length of the content to encrypt and
 additional data to authenticate as well as a flag to indicate whether the algorithm is in
 encryption or decryption mode. Decryption is slightly different, with the poly1305 authentication
@@ -220,7 +220,7 @@ most significant, this is why algorithm places the Poly1305 authenticator at the
 
 ### Announcement Mining
 Each announcement contains a commitment of the block height (`parent_block_height`) as well as the
-most recent block hash at the time when the announcement was created. An announcement "matured" and
+most recent block hash at the time when the announcement was created. An announcement "matures" and
 becomes usable for mining a block when the block height is `parent_block_height + 2`, this gives
 announcement miners a bit of time to mine their announcements and then gives block miners time to
 receive them. After this height, the work value of an announcement (for the purposes of
@@ -310,11 +310,11 @@ thinking about next generation CPU designs.
 ##### Irreducability
 For the multi-use and the bandwidth-hardness objectives, it is desirable that an announcement miner
 cannot cause their announcements to be compressable to significantly less than 1 KiB in size. The
-content of the announcement itself is separated from the 1 KiB message which is transferred and
-mined so the only parts of the announcement which an announcement miner can really control are
-the `content_type` and `content_hash`. A block miner who has no interest in using casually crafted
-announcements can omit these 40 bytes from the memory locations where they store announcements,
-but these 40 bytes are about all.
+announcement *payload* is separated from the 1 KiB announcement itself so that the only parts of
+the announcement which an announcement miner can really control are the `content_type` and
+`content_hash`. A block miner who has no interest in using casually crafted announcements can omit
+these 40 bytes from the memory locations where they store announcements, but these 40 bytes are
+about all.
 
 The content of the announcement is the 56 byte header plus a Merkle branch 12 hashes long and a
 Merkle root needed to validate the announcement. The Merkle tree used for announcement hashing uses
@@ -325,6 +325,12 @@ from the 4th data item. While the 4th data item is probably the easiest thing to
 only 13% of the announcement data and while it can be omitted from the data sent by the
 announcement miner to the block miner, the work required to redo the RandMemoHash cycle for
 recreating the data is far too much for the miner to omit it from memory.
+
+Announcement layout:
+
+```
+[ header (56 bytes) ][ merkle branch (768 bytes) ][ merkle root (64 bytes) ][ 4th item prefix (136 bytes) ]
+```
 
 ##### Reusability
 With casual announcement miners and "professional" announcement miners both participating in the
@@ -348,8 +354,8 @@ before each encryption cycle. The random programs are generated from the result 
 cycle, which depend in part on the previous random program.
 
 The programs use a stack of 32 bit elements and an instruction set of about 100 instructions.
-There are branches (both predictable and unpredictable) and loops. Programs can either be
-interpreted or output as C language code which looks like the following:
+There are branches (both predictable and unpredictable) and loops. Programs are normally
+interpreted but they can be output as C language code which looks like the following:
 
 ```c
 char* RANDHASH_SEED = "2";
@@ -703,6 +709,6 @@ multiplication is is the high bits of the result.
 This algorithm is not completely done, there are a few things which are still missing:
 
 * [] CPU implementation of the block miner
-* [] Make random programs per-cycle, not 8192 programs
 * [] Can we use more memory in RandHash ?
 * [] SWAP instruction to frustrate program loop parallelization
+* [] re-implement all verification code in golang

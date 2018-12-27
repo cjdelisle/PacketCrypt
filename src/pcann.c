@@ -21,7 +21,8 @@ static int usage() {
     printf("    <threads>    # number of threads to use for hashing\n");
     return 100;
 }
-
+// 01e74a6ef3575839f197c46a54ba8546 000b273b8513fa91bff76f7efccd043c
+// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxx
 static void printhex(uint8_t* buff, int len) {
     for (int i = len - 1; i >= 0; i--) { printf("%02x", buff[i]); }
     printf("\n");
@@ -117,12 +118,7 @@ typedef struct {
 } Item_t;
 
 typedef struct {
-    uint32_t programData[PROGRAM_SPACE4];
-    RandHash_Program_t programTbl[TABLE_SZ];
-
     Item_t table[TABLE_SZ];
-
-    RandHash_Compiled_t* programs;
 
     CCMerkle merkle;
     Buf64_t annHash0; // hash(announce || parentBlockHash)
@@ -189,9 +185,6 @@ static void freeCtx(Context_t* ctx)
 {
     assert(!pthread_cond_destroy(&ctx->cond));
     assert(!pthread_mutex_destroy(&ctx->lock));
-    for (int i = 0; i < ctx->numWorkers; i++) {
-        //RandHash_freeCtx(ctx->workers[i].rh);
-    }
     free(ctx->workers);
     free(ctx);
 }
@@ -227,17 +220,24 @@ static void populateTable(Item_t* table, Buf64_t* annHash0) {
         memcpy(dst, src, srclen);                                 \
     } while (0)
 
-static void ccUpdateState0(PcState_t* state, const Item_t* item)
+static bool ccUpdateState(PcState_t* state, Item_t* item)
 {
-    memcpy(state->sixteens[2].bytes, item, sizeof(Item_t));
-}
+    uint32_t progbuf[2048];
+    RandHash_Program_t rhp = { .insns = progbuf, .len = 2048 };
+    if (RandHash_generate(&rhp, &item->bufs[15].thirtytwos[1]) < 0) { return false; }
+    if (RandHash_interpret(
+        &rhp, &state->sixtyfours[1], item->bufs[0].ints, sizeof *item, PROGRAM_CYCLES))
+    {
+        return false;
+    }
 
-static void ccUpdateState1(PcState_t* state, const Item_t* item)
-{
+    memcpy(state->sixteens[2].bytes, item, sizeof(Item_t));
     ChaCha_makeFuzzable(&state->hdr);
     ChaCha_crypt(&state->hdr);
     assert(!ChaCha_isFailed(&state->hdr));
+    return true;
 }
+
 static void ccInitState(PcState_t* state, const Buf64_t* seed, uint64_t nonce)
 {
     // Note, only using half the seed bytes...
@@ -251,8 +251,6 @@ static int ccItemNo(const PcState_t* state)
 {
     return state->sixteens[1].shorts[0] % TABLE_SZ;
 }
-
-//static inline int log2(uint64_t val) { return (64 - __builtin_clzll(val) - 1); }
 
 static bool isAnnOk(Announce_t* ann, Buf32_t* parentBlockHash) {
     Announce_t _ann;
@@ -282,18 +280,7 @@ static bool isAnnOk(Announce_t* ann, Buf32_t* parentBlockHash) {
     for (int i = 0; i < 3; i++) {
         itemNo = ccItemNo(&state);
         mkitem(itemNo, &item, annHash0.bytes);
-        ccUpdateState0(&state, &item);
-
-        uint32_t progbuf[2048];
-        RandHash_Program_t rhp = { .insns = progbuf, .len = 2048 };
-        if (RandHash_generate(&rhp, &item.bufs[15].thirtytwos[1]) < 0) { return false; }
-        if (RandHash_interpret(
-            &rhp, &state.sixtyfours[1], item.bufs[0].ints, sizeof item, PROGRAM_CYCLES))
-        {
-            return false;
-        }
-    
-        ccUpdateState1(&state, &item);
+        if (!ccUpdateState(&state, &item)) { return false; }
     }
 
     _Static_assert(sizeof ann->item4Prefix == ITEM4_PREFIX_SZ, "");
@@ -321,23 +308,14 @@ static int ccHash(Worker_t* w, uint32_t nonce) {
     for (int i = 0; i < 3; i++) {
         itemNo = ccItemNo(&w->state);
         Item_t* it = &w->activeJob->table[itemNo];
-        ccUpdateState0(&w->state, it);
-        int ret = RandHash_execute(
-            w->activeJob->programs,
-            itemNo,
-            &w->state.sixtyfours[1],
-            it->bufs[0].ints, sizeof *it,
-            PROGRAM_CYCLES);
-        if (ret) {
-            fprintf(stderr, "Program failed [%d]\n", ret);
-            return 0;
-        }
-        ccUpdateState1(&w->state, it);
+        if (!ccUpdateState(&w->state, it)) { return 0; }
     }
     uint32_t target = w->activeJob->annHdr.workBits;
 
-    if (!Work_check(w->state.sixteens[1].bytes, target)) { return 0; }
-    printhex(w->state.sixteens[1].bytes, 32);
+    if (!Work_check(w->state.bytes, target)) { return 0; }
+    memcpy(w->state.bytes, w->state.sixteens[12].bytes, 16);
+    if (!Work_check(w->state.bytes, target)) { return 0; }
+    printhex(w->state.bytes, 32);
 
     memcpy(&w->ann.hdr, &w->activeJob->annHdr, sizeof w->ann.hdr);
     memcpy(w->ann.hdr.softNonce, &nonce, sizeof(w->ann.hdr.softNonce));
@@ -362,22 +340,6 @@ static int buildJob(Context_t* ctx, Request_t* req, Job_t* j)
     Hash_compress64(j->annHash0.bytes, (uint8_t*)req, sizeof *req);
 
     populateTable(j->table, &j->annHash0);
-
-    int bufLen4 = PROGRAM_SPACE4;
-    uint32_t* buf = j->programData;
-    for (int i = 0; i < TABLE_SZ; i++) {
-        j->programTbl[i].insns = buf;
-        j->programTbl[i].len = bufLen4;
-        int res = RandHash_generate(&j->programTbl[i], &j->table[i].bufs[15].thirtytwos[1]);
-        if (res < 0) {
-            fprintf(stderr, "populateTable failed RandGen [%d]", res);
-            return -1;
-        }
-        buf = &buf[res];
-        bufLen4 -= res;
-    }
-    if (j->programs) { RandHash_freeProgram(j->programs); }
-    j->programs = RandHash_compile(j->programTbl, TABLE_SZ);
 
     CCMerkle_build(&j->merkle, (uint8_t*)j->table, sizeof *j->table);
 
