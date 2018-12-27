@@ -251,9 +251,9 @@ receive them. After this height, the work value of an announcement (for the purp
 Announcement mining itself follows a similar pattern to block mining, reusing many of the same
 algorithmic primitives but with a few special tweaks.
 
-First, as there are no Announcements to collect, the miner generates 8192 1 KiB data elements using
-[RandMemoHash](http://www.hashcash.org/papers/memohash.pdf). These items are generated using the
-hash of the announcement header with the `soft_nonce` field blanked.
+First, as there are no Announcements to collect, the miner generates 16384 1 KiB data elements
+using [RandMemoHash](http://www.hashcash.org/papers/memohash.pdf). These items are generated using
+the hash of the announcement header with the `soft_nonce` field blanked.
 
 Secondly, because the verifier can re-generate the 1 KiB data items, the prover need not attach
 the items for verification, nor even the merkle branches except for the last item. This helps
@@ -338,20 +338,20 @@ the announcement which an announcement miner can really control are the `content
 these 40 bytes from the memory locations where they store announcements, but these 40 bytes are
 about all.
 
-The content of the announcement is the 56 byte header plus a Merkle branch 12 hashes long and a
+The content of the announcement is the 56 byte header plus a Merkle branch 13 hashes long and a
 Merkle root needed to validate the announcement. The Merkle tree used for announcement hashing uses
-64 byte Blake2b hashes which creates a total of 832 bytes of hashes which cannot be omitted without
-requiring the recipient to regenerate the 8192 data items used to create the announcement. The 56
-byte header plus the 832 byte Merkle branch and root is 888 bytes, so the final 136 bytes comes
+64 byte Blake2b hashes which creates a total of 896 bytes of hashes which cannot be omitted without
+requiring the recipient to regenerate the 16384 data items used to create the announcement. The 56
+byte header plus the 896 byte Merkle branch and root is 952 bytes, so the final 72 bytes comes
 from the 4th data item. While the 4th data item is probably the easiest thing to recreate, it is
-only 13% of the announcement data and while it can be omitted from the data sent by the
+only 7% of the announcement data and while it can be omitted from the data sent by the
 announcement miner to the block miner, the work required to redo the RandMemoHash cycle for
 recreating the data is far too much for the miner to omit it from memory.
 
 Announcement layout:
 
 ```
-[ header (56 bytes) ][ merkle branch (768 bytes) ][ merkle root (64 bytes) ][ 4th item prefix (136 bytes) ]
+[ header (56 bytes) ][ merkle branch (832 bytes) ][ merkle root (64 bytes) ][ 4th item prefix (72 bytes) ]
 ```
 
 ##### Reusability

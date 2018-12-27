@@ -24,23 +24,17 @@ static int usage() {
     printf("    <threads>    # number of threads to use for hashing\n");
     return 100;
 }
-// 01e74a6ef3575839f197c46a54ba8546 000b273b8513fa91bff76f7efccd043c
-// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxx
+
 static void printhex(uint8_t* buff, int len) {
     for (int i = len - 1; i >= 0; i--) { printf("%02x", buff[i]); }
     printf("\n");
 }
 
 #define ITEM_HASHCOUNT 16
-#define CompuCrypt_HASH_SZ 64
-#define DEPTH 12
-#define PROGRAM_CYCLES 2
-
-// In theory, 2**12 programs can take 33MiB because Constants.h specifies
-// MAX_INSNS at 2048, however this is not likely and since there is also
-// a chance of a bad program, it's better to simply allocate 16MB and hope
-// that on average they're less than half of the max size.
-#define PROGRAM_SPACE4 (1024 * TABLE_SZ)
+#define ANN_HASH_SZ 64
+#define DEPTH 13
+#define PROGRAM_CYCLES 4
+#define MEMOHASH_CYCLES 2
 
 #define Merkle_DEPTH DEPTH
 #define Merkle_NAME CCMerkle
@@ -86,7 +80,7 @@ _Static_assert(sizeof(CCMerkle_Branch) == (DEPTH+1)*64, "");
  * 
  * Announcement:
  * 
- * [ Header 0:56 ][ Merkle proof 56:888 ][ Item 4 Prefix 888:1024 ]
+ * [ Header 0:56 ][ Merkle proof 56:952 ][ Item 4 Prefix 952:1024 ]
  */
 typedef struct {
     uint8_t version;
@@ -203,16 +197,16 @@ static inline void memocycle(Buf64_t* buf, int bufcount, int cycles) {
             Buf64_t* mJ = &buf[j];
             for (int k = 0; k < 8; k++) { tmpbuf[0].longs[k] = mP->longs[k]; }
             for (int k = 0; k < 8; k++) { tmpbuf[1].longs[k] = mJ->longs[k]; }
-            Hash_compress64(buf[i].bytes, tmpbuf[0].bytes, CompuCrypt_HASH_SZ * 2);
+            Hash_compress64(buf[i].bytes, tmpbuf[0].bytes, ANN_HASH_SZ * 2);
         }
     }
 }
 static void mkitem(uint64_t num, Item_t* item, uint8_t seed[64]) {
-    Hash_expand(item[0].bufs[0].bytes, CompuCrypt_HASH_SZ, seed, num);
+    Hash_expand(item[0].bufs[0].bytes, ANN_HASH_SZ, seed, num);
     for (int i = 1; i < ITEM_HASHCOUNT; i++) {
-        Hash_compress64(item->bufs[i].bytes, item->bufs[i-1].bytes, CompuCrypt_HASH_SZ);
+        Hash_compress64(item->bufs[i].bytes, item->bufs[i-1].bytes, ANN_HASH_SZ);
     }
-    memocycle(item->bufs, ITEM_HASHCOUNT, 1);
+    memocycle(item->bufs, ITEM_HASHCOUNT, MEMOHASH_CYCLES);
 }
 static void populateTable(Item_t* table, Buf64_t* annHash0) {
     for (int i = 0; i < TABLE_SZ; i++) { mkitem(i, &table[i], annHash0->bytes); }
