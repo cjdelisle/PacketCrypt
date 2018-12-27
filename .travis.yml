@@ -5,4 +5,6 @@ addons:
     packages:
     - libsodium-dev
     - pkg-config
-script: ./autogen.sh && ./configure && make
+script:
+  - aclocal && autoconf --verbose --force --warnings=all
+  - ./autogen.sh && ./configure && make
