@@ -1,6 +1,4 @@
 *.o
-/randhash
-randhash.dSYM
 Makefile.in
 Makefile
 /depcomp
@@ -16,6 +14,10 @@ stamp-h1
 install-sh
 depcomp
 /config.*
-/src/randhash/config.*
 compile
 configure
+.dirstamp
+
+/libprogsupport.a
+/simplehash
+/pcann

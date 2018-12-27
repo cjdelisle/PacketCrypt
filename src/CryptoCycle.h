@@ -144,50 +144,50 @@ typedef struct {
     uint32_t pad;
     uint8_t key_high_or_auth[16];
     uint8_t key_low[16];
-} ChaCha_Header_t;
+} CryptoCycle_Header_t;
 
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    #define ChaCha_LE(x) ((uint32_t)(x))
+    #define CryptoCycle_LE(x) ((uint32_t)(x))
 #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-    #define ChaCha_LE(x) __builtin_bswap32(((uint32_t)(x)))
+    #define CryptoCycle_LE(x) __builtin_bswap32(((uint32_t)(x)))
 #else
     #error "cannot detect the byte order of the machine"
 #endif
 
-#define ChaCha_SETTER_GETTER(begin, count, setter, getter) \
-    static inline int ChaCha_ ## getter (ChaCha_Header_t* hdr) {                                \
-        return (ChaCha_LE(hdr->data)>>begin) & ((1u<<count)-1);                         \
+#define CryptoCycle_SETTER_GETTER(begin, count, setter, getter) \
+    static inline int CryptoCycle_ ## getter (CryptoCycle_Header_t* hdr) {                                \
+        return (CryptoCycle_LE(hdr->data)>>begin) & ((1u<<count)-1);                         \
     }                                                                                           \
-    static inline void ChaCha_ ## setter (ChaCha_Header_t* hdr, uint32_t val) {                 \
+    static inline void CryptoCycle_ ## setter (CryptoCycle_Header_t* hdr, uint32_t val) {                 \
         val &= (1u<<count) - 1;                                                                 \
-        hdr->data = ChaCha_LE(                                                                  \
-            (ChaCha_LE(hdr->data) & (~(((1u<<count)-1)<<begin))) | (((uint32_t)val)<<begin)   \
+        hdr->data = CryptoCycle_LE(                                                                  \
+            (CryptoCycle_LE(hdr->data) & (~(((1u<<count)-1)<<begin))) | (((uint32_t)val)<<begin)   \
         );                                                                                      \
     }
 
-ChaCha_SETTER_GETTER(12, 1, setDecrypt, isDecrypt)
-ChaCha_SETTER_GETTER(13, 3, setAddLen, getAddLen)
-ChaCha_SETTER_GETTER(16, 1, setTruncated, isTruncated)
-ChaCha_SETTER_GETTER(17, 7, setLength, getLength)
-ChaCha_SETTER_GETTER(24, 1, setFailed, isFailed)
-ChaCha_SETTER_GETTER(25, 7, setVersion, getVersion)
+CryptoCycle_SETTER_GETTER(12, 1, setDecrypt, isDecrypt)
+CryptoCycle_SETTER_GETTER(13, 3, setAddLen, getAddLen)
+CryptoCycle_SETTER_GETTER(16, 1, setTruncated, isTruncated)
+CryptoCycle_SETTER_GETTER(17, 7, setLength, getLength)
+CryptoCycle_SETTER_GETTER(24, 1, setFailed, isFailed)
+CryptoCycle_SETTER_GETTER(25, 7, setVersion, getVersion)
 
 #include <assert.h>
 
-static inline void ChaCha_makeFuzzable(ChaCha_Header_t* hdr)
+static inline void CryptoCycle_makeFuzzable(CryptoCycle_Header_t* hdr)
 {
     hdr->data = *((uint32_t*)hdr->key_high_or_auth);
 
-    ChaCha_setVersion(hdr, 0);
-    ChaCha_setFailed(hdr, 0);
+    CryptoCycle_setVersion(hdr, 0);
+    CryptoCycle_setFailed(hdr, 0);
 
-    assert(ChaCha_isFailed(hdr) == 0);
-    assert(ChaCha_getVersion(hdr) == 0);
+    assert(CryptoCycle_isFailed(hdr) == 0);
+    assert(CryptoCycle_getVersion(hdr) == 0);
 
     // Length must be at least 32 blocks (512 bytes) long
-    ChaCha_setLength(hdr, ChaCha_getLength(hdr) | 32);
+    CryptoCycle_setLength(hdr, CryptoCycle_getLength(hdr) | 32);
 }
 
-void ChaCha_crypt(ChaCha_Header_t* msg);
+void CryptoCycle_crypt(CryptoCycle_Header_t* msg);
 
 #endif

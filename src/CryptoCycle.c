@@ -1,23 +1,23 @@
-#include "ChaCha.h"
+#include "CryptoCycle.h"
 
 #include "sodium/crypto_onetimeauth_poly1305.h"
 #include "sodium/utils.h"
 #include "sodium/crypto_stream_chacha20.h"
 
-static inline int getLengthAndTruncate(ChaCha_Header_t* hdr)
+static inline int getLengthAndTruncate(CryptoCycle_Header_t* hdr)
 {
-    int len = ChaCha_getLength(hdr);
-    int maxLen = 125 - ChaCha_getAddLen(hdr);
+    int len = CryptoCycle_getLength(hdr);
+    int maxLen = 125 - CryptoCycle_getAddLen(hdr);
     int finalLen = (len > maxLen) ? maxLen : len;
-    ChaCha_setTruncated(hdr, (finalLen != len));
-    ChaCha_setLength(hdr, finalLen);
+    CryptoCycle_setTruncated(hdr, (finalLen != len));
+    CryptoCycle_setLength(hdr, finalLen);
     return finalLen;
 }
 
-void ChaCha_crypt(ChaCha_Header_t* msg)
+void CryptoCycle_crypt(CryptoCycle_Header_t* msg)
 {
-    if (ChaCha_getVersion(msg) != 0 || ChaCha_isFailed(msg)) {
-        ChaCha_setFailed(msg, 1);
+    if (CryptoCycle_getVersion(msg) != 0 || CryptoCycle_isFailed(msg)) {
+        CryptoCycle_setFailed(msg, 1);
         return;
     }
 
@@ -31,12 +31,12 @@ void ChaCha_crypt(ChaCha_Header_t* msg)
     }
 
     uint8_t* aead = (uint8_t*) &msg[1];
-    uint64_t aeadLen = ChaCha_getAddLen(msg) * 16;
+    uint64_t aeadLen = CryptoCycle_getAddLen(msg) * 16;
     uint64_t msgLen = getLengthAndTruncate(msg) * 16;
     uint8_t* msgContent = &aead[aeadLen];
     crypto_onetimeauth_poly1305_update(&state, aead, aeadLen);
 
-    int decrypt = ChaCha_isDecrypt(msg);
+    int decrypt = CryptoCycle_isDecrypt(msg);
     if (decrypt) {
         crypto_onetimeauth_poly1305_update(&state, msgContent, msgLen);
     }
@@ -50,8 +50,8 @@ void ChaCha_crypt(ChaCha_Header_t* msg)
     
     {
         uint32_t slen[4] = {0};
-        slen[0] = ChaCha_LE(aeadLen);
-        slen[2] = ChaCha_LE(msgLen);
+        slen[0] = CryptoCycle_LE(aeadLen);
+        slen[2] = CryptoCycle_LE(msgLen);
         crypto_onetimeauth_poly1305_update(&state, (uint8_t*) slen, 16);
     }
 

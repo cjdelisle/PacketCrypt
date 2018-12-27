@@ -9,7 +9,7 @@ pcann_SOURCES = \
     src/RandHash_interpreted.c \
     src/PrintProg.c \
     src/Work.c  \
-    src/ChaCha.c \
+    src/CryptoCycle.c \
     src/Hash.c \
     src/Merkle.c
 

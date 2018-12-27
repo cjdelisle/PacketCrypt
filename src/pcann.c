@@ -1,7 +1,7 @@
 #include "RandHash.h"
 #include "Hash.h"
 #include "Buf.h"
-#include "ChaCha.h"
+#include "CryptoCycle.h"
 #include "Work.h"
 #include "Time.h"
 
@@ -106,7 +106,7 @@ typedef struct {
 _Static_assert(sizeof(Announce_t) == 1024, "");
 
 typedef union {
-    ChaCha_Header_t hdr;
+    CryptoCycle_Header_t hdr;
     Buf_TYPES(2048);
     Buf16_t sixteens[128];
     Buf32_t thirtytwos[64];
@@ -232,9 +232,9 @@ static bool ccUpdateState(PcState_t* state, Item_t* item)
     }
 
     memcpy(state->sixteens[2].bytes, item, sizeof(Item_t));
-    ChaCha_makeFuzzable(&state->hdr);
-    ChaCha_crypt(&state->hdr);
-    assert(!ChaCha_isFailed(&state->hdr));
+    CryptoCycle_makeFuzzable(&state->hdr);
+    CryptoCycle_crypt(&state->hdr);
+    assert(!CryptoCycle_isFailed(&state->hdr));
     return true;
 }
 
@@ -243,9 +243,9 @@ static void ccInitState(PcState_t* state, const Buf64_t* seed, uint64_t nonce)
     // Note, only using half the seed bytes...
     Hash_expand(state->bytes, sizeof(PcState_t), seed->bytes, 0);
     state->hdr.nonce = nonce;
-    ChaCha_makeFuzzable(&state->hdr);
-    ChaCha_crypt(&state->hdr);
-    assert(!ChaCha_isFailed(&state->hdr));
+    CryptoCycle_makeFuzzable(&state->hdr);
+    CryptoCycle_crypt(&state->hdr);
+    assert(!CryptoCycle_isFailed(&state->hdr));
 }
 static int ccItemNo(const PcState_t* state)
 {
