@@ -1,6 +1,7 @@
 # PacketCrypt
 
 Bandwidth-hard proof of work.
+[![Build Status](https://travis-ci.org/cjdelisle/PacketCrypt.svg?branch=master)](https://travis-ci.org/cjdelisle/PacketCrypt)
 
 ## Abstract
 
