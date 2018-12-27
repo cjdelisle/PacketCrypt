@@ -238,7 +238,7 @@ static void printC(Context* ctx)
                 printf("} // 0x%08x @ %d\n", insn, pc);
                 if (ctx->scope < 1) { return; }
                 assert(ctx->vars.count);
-                assert((ctx->vars.elems[ctx->vars.count - 1] >> 16) == ctx->scope);
+                assert((int)(ctx->vars.elems[ctx->vars.count - 1] >> 16) == ctx->scope);
                 ctx->varNum = ctx->vars.elems[ctx->vars.count - 1] & 0xffff;
                 break;
             }

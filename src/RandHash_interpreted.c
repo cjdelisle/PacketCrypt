@@ -251,7 +251,8 @@ int RandHash_interpret(
     for (int i = 0; i < cycles; i++) {
         ctx->opCtr = 0;
         interpret(ctx, 0);
-        if (ctx->opCtr > MAX_OPS || ctx->opCtr < MIN_OPS) {
+        _Static_assert(!MIN_OPS, "");
+        if (ctx->opCtr > MAX_OPS /* || ctx->opCtr < MIN_OPS*/) {
             return (ctx->opCtr > MAX_OPS) ? RandHash_TOO_LONG : RandHash_TOO_SHORT;
         }
         ctx->hashctr = 0;

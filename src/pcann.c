@@ -386,10 +386,8 @@ static bool stop(Worker_t* worker, bool stalled) {
 
 static void* thread(void* vworker) {
     Worker_t* worker = vworker;
-    uint32_t j = 0;
     for (;;) {
         if (getRequestedState(worker) != ThreadState_RUNNING) {
-            j = 0;
             if (stop(worker, false)) { return NULL; }
         }
         search(worker);
@@ -439,7 +437,7 @@ static void mainLoop(Context_t* ctx)
         for (int i = 0; i < 1000; i++) {
             if (!ctx->test) {
                 nextReqOs += read(STDIN_FILENO, &nextReq, sizeof nextReq - nextReqOs);
-                assert(sizeof nextReq - nextReqOs >= 0);
+                assert(((int)sizeof nextReq) - nextReqOs >= 0);
                 if (sizeof nextReq - nextReqOs == 0) {
                     memcpy(&req, &nextReq, sizeof req);
                     nextReqOs = 0;

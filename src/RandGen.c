@@ -310,7 +310,8 @@ int RandGen_generate(uint32_t* buf, int bufLen4, Buf32_t* seed)
 
     Vec_free(&ctx.vars);
 
-    if (ctx.insns.count < MIN_INSNS || ctx.insns.count > MAX_INSNS) {
+    _Static_assert(!MIN_INSNS, "");
+    if (/*ctx.insns.count < MIN_INSNS || */ctx.insns.count > MAX_INSNS) {
         return (ctx.insns.count > MAX_INSNS) ? RandHash_TOO_BIG : RandHash_TOO_SMALL;
     }
 
