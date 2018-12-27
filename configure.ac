@@ -25,6 +25,12 @@ PKG_CHECK_MODULES([sodium], [libsodium], [], [
     ])
 ])
 
+AX_PTHREAD([], [
+    AC_MSG_ERROR([
+        pthread missing
+    ])
+])
+
 # Checks for header files.
 AC_CHECK_HEADERS([stdint.h stdlib.h string.h sys/time.h])
 

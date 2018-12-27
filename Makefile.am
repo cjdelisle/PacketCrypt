@@ -20,8 +20,8 @@ simplehash_SOURCES = src/simplehash.c \
     src/RandHash_interpreted.c \
     src/Hash.c
 
-pcann_CFLAGS = ${sodium_CFLAGS}
-pcann_LDADD = ${sodium_LIBS}
+pcann_CFLAGS = ${sodium_CFLAGS} ${PTHREAD_CFLAGS}
+pcann_LDADD = ${sodium_LIBS} ${PTHREAD_LDFLAGS}
 
 simplehash_CFLAGS = ${sodium_CFLAGS}
 simplehash_LDADD = ${sodium_LIBS}
