@@ -1,7 +1,9 @@
 #ifndef CRYPTOCYCLE_H
 #define CRYPTOCYCLE_H
 
+#include <string.h>
 #include <stdint.h>
+#include <assert.h>
 
 /*
  * Crypto query header:
@@ -172,11 +174,9 @@ CryptoCycle_SETTER_GETTER(17, 7, setLength, getLength)
 CryptoCycle_SETTER_GETTER(24, 1, setFailed, isFailed)
 CryptoCycle_SETTER_GETTER(25, 7, setVersion, getVersion)
 
-#include <assert.h>
-
 static inline void CryptoCycle_makeFuzzable(CryptoCycle_Header_t* hdr)
 {
-    hdr->data = *((uint32_t*)hdr->key_high_or_auth);
+    memcpy(hdr->data, hdr->key_high_or_auth, 4);
 
     CryptoCycle_setVersion(hdr, 0);
     CryptoCycle_setFailed(hdr, 0);

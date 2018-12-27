@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "RandHash.h"
 #include "Hash.h"
 #include "Buf.h"
@@ -361,7 +363,10 @@ static int search(Worker_t* w)
         if (!ccHash(w, nonce++)) { continue; }
         if (nonce > 0x00ffffff) { return 0; }
         assert(isAnnOk(&w->ann, &w->activeJob->parentBlockHash));
-        if (!w->ctx->test) { write(STDOUT_FILENO, &w->ann, sizeof w->ann); }
+        if (!w->ctx->test) {
+            ssize_t discard = write(STDOUT_FILENO, &w->ann, sizeof w->ann);
+            discard = discard;
+        }
     }
     w->softNonce = nonce;
     return 0;
