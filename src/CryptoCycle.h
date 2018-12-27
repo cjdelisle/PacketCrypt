@@ -1,5 +1,5 @@
-#ifndef CHACHA_H
-#define CHACHA_H
+#ifndef CRYPTOCYCLE_H
+#define CRYPTOCYCLE_H
 
 #include <stdint.h>
 

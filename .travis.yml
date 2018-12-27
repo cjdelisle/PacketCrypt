@@ -1,0 +1,7 @@
+dist: xenial
+lang: c
+addons:
+  apt:
+    packages:
+    - libsodium-dev
+script: ./autogen.sh && ./configure && make

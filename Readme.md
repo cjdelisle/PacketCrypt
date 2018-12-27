@@ -19,6 +19,24 @@ order to encourage CPU mining as well as next generation CPU design research. Pe
 significantly, PacketCrypt encourages cooperation between many mining devices, allowing
 *bandwidth* to be expended in lieu of processor effort.
 
+## LEMME TEST IT
+
+First, build it:
+
+    ./autogen.sh
+    ./configure
+    make
+
+Try out a simple hash function based on random programs:
+
+    ./simplehash 'seed to generate random program'  'input to the hash program'
+
+Generate some announcements:
+* -t will generate fake test announcements
+* replace 8 with the number of processor cores on your machine
+
+    ./pcann -t 8
+
 ## How it works
 
 PacketCrypt uses two distinct stages, the first stage mines a 1 KiB proof known as an
@@ -205,6 +223,9 @@ assertion failure.
 3. `len` is OR'd with 32 to make sure that no encryption cycle will ever happen on less than 32
 16-byte elements (512 bytes). This is important to make sure that the miner cannot *search* for
 hashes where the length is zero, thus avoiding the need to encrypt anything at all.
+
+You can see the real code which does this in
+[CryptoCycle_makeFuzzable()](https://github.com/cjdelisle/PacketCrypt/blob/master/src/CryptoCycle.h#L177).
 
 #### General Considerations
 As you will note from the pseudocode above, the miner copies the 1 KiB announcement over bytes
