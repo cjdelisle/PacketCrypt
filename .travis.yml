@@ -7,4 +7,5 @@ addons:
     - pkg-config
 script:
   - aclocal && autoconf --verbose --force --warnings=all
+  - cat ./configure
   - ./autogen.sh && ./configure && make
