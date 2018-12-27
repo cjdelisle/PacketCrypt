@@ -2,6 +2,8 @@
 #include "Vec.h"
 #include "DecodeInsn.h"
 #include "Constants.h"
+#include "Buf.h"
+#include "RandHash.h"
 
 #include "sodium/crypto_stream_chacha20.h"
 
@@ -10,19 +12,15 @@
 #include <stdbool.h>
 #include <string.h>
 
-#define RANDBUF_LEN 16
-#define INSNS_INITIAL 128
-
 typedef struct {
     // Random generator
-    uint8_t randseed[32];
-    uint32_t randbuf[RANDBUF_LEN];
+    Buf32_t randseed;
+    Buf64_t randbuf;
     uint32_t nextInt;
     uint32_t ctr;
 
     // output
     Vec insns;
-
     uint32_t maxInsns;
 
     // variables / scopes
@@ -95,13 +93,13 @@ static void debug(Context* ctx, uint32_t insn) {
 #endif
 
 static uint32_t randu32(Context* ctx) {
-    if (ctx->nextInt >= RANDBUF_LEN) {
+    if (ctx->nextInt >= (sizeof(ctx->randbuf) / sizeof(uint32_t))) {
         crypto_stream_chacha20_xor_ic(
-            (uint8_t*)ctx->randbuf, (uint8_t*)ctx->randbuf, sizeof(ctx->randbuf),
-            (uint8_t*)"RAND_U32", ctx->ctr++, ctx->randseed);
+            ctx->randbuf.bytes, ctx->randbuf.bytes, sizeof(ctx->randbuf),
+            (uint8_t*)"RAND_U32", ctx->ctr++, ctx->randseed.bytes);
         ctx->nextInt = 0;
     }
-    return ctx->randbuf[ctx->nextInt++];
+    return ctx->randbuf.ints[ctx->nextInt++];
 }
 static uint32_t cointoss(Context* ctx, uint32_t oneIn) { return (randu32(ctx) % oneIn) == 0; }
 static int randRange(Context* ctx, int start, int end) { return randu32(ctx) % (end - start) + start; }
@@ -115,6 +113,7 @@ static void emit(Context* ctx, uint32_t insn) {
     debug(ctx, insn);
     assert((insn & 0xff) > OpCode_INVALID_ZERO);
     assert((insn & 0xff) < OpCode_INVALID_BIG);
+    if (ctx->insns.count >= ctx->maxInsns) { return; }
     Vec_push(&ctx->insns, insn);
 }
 
@@ -277,7 +276,7 @@ static int loop(Context* ctx, uint32_t* budget) {
 static int body(Context* ctx, uint32_t* budget, bool createScope) {
     if (createScope) { scope(ctx); }
     for (;;) {
-        if (ctx->insns.count > ctx->maxInsns) { goto out; }
+        if (ctx->insns.count > MAX_INSNS) { goto out; }
         int max = randRange(ctx, 2, 12);
         for (int i = 1; i <= max; i++) {
             if (cointoss(ctx, 4 * max / i) && op(ctx, OpType_4_4, budget)) { continue; }
@@ -296,33 +295,24 @@ out:
     return false;
 }
 
-uint32_t* RandGen_generate(
-    uint8_t seed[32],
-    uint32_t* insnCount,
-    uint32_t minInsns,
-    uint32_t maxInsns
-) {
+int RandGen_generate(uint32_t* buf, int bufLen4, Buf32_t* seed)
+{
     uint32_t budget = BUDGET;
-
-    Context ctx; memset(&ctx, 0, sizeof(ctx));
-    _Static_assert(sizeof ctx.randseed == 32, "");
-    memcpy(ctx.randseed, seed, sizeof ctx.randseed);
+    Context ctx; memset(&ctx, 0, sizeof ctx);
+    _Static_assert(sizeof ctx.randseed == sizeof *seed, "");
+    memcpy(ctx.randseed.bytes, seed->bytes, sizeof ctx.randseed);
     ctx.nextInt = -1;
-    ctx.maxInsns = maxInsns;
-
-    Vec_init(&ctx.insns, 128);
-    Vec_init(&ctx.vars, 64);
+    ctx.maxInsns = bufLen4;
+    ctx.insns.max = bufLen4;
+    ctx.insns.elems = buf;
 
     loop(&ctx, &budget);
 
     Vec_free(&ctx.vars);
 
-    if (ctx.insns.count < minInsns || ctx.insns.count > maxInsns) {
-        if (ctx.insns.count > maxInsns) { *insnCount = 1; }
-        Vec_free(&ctx.insns);
-        return NULL;
+    if (ctx.insns.count < MIN_INSNS || ctx.insns.count > MAX_INSNS) {
+        return (ctx.insns.count > MAX_INSNS) ? RandHash_TOO_BIG : RandHash_TOO_SMALL;
     }
 
-    *insnCount = ctx.insns.count;
-    return ctx.insns.elems;
+    return ctx.insns.count;
 }

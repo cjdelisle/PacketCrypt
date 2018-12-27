@@ -184,7 +184,7 @@ static void printC(Context* ctx)
                 break;
             }
             case OpCode_IN: {
-                out(ctx, 1, "IN(%d)", ((uint32_t) DecodeInsn_immLo(insn)) % HASH_SZ);
+                out(ctx, 1, "IN(%d)", ((uint32_t) DecodeInsn_immLo(insn)) % RandHash_HASH_SZ);
                 break;
             }
             case OpCode_LOOP: {
@@ -254,7 +254,6 @@ void PrintProg_asC(uint32_t* prog, int progLen)
     ctx.prog = prog;
     ctx.progLen = progLen;
 
-    printf("#include \"prelude.h\"\n");
     printf("BEGIN\n");
     printC(&ctx);
     printf("END\n");

@@ -1,4 +1,7 @@
 #include "Constants.h"
+#include "Buf.h"
+#include "Hash.h"
+#include "Time.h"
 
 #include "sodium/crypto_stream_chacha20.h"
 #include "sodium/crypto_generichash_blake2b.h"
@@ -9,13 +12,8 @@
 #include <assert.h>
 
 typedef struct {
-    uint32_t cookie0;
-    uint32_t hashIn[HASH_SZ];
-    uint32_t cookie1;
-    uint32_t hashOut[HASH_SZ];
-    uint32_t cookie2;
-    uint32_t memory[MEMORY_SZ];
-    uint32_t cookie3;
+    Buf64_t hash;
+    uint32_t memory[RandHash_MEMORY_SZ];
 } Context;
 
 char* RANDHASH_SEED;
@@ -31,29 +29,16 @@ int main(int argc, char** argv) {
 
     Context* ctx = calloc(sizeof(Context), 1);
     assert(ctx);
+    Hash_compress64(ctx->hash.bytes, (uint8_t*)argv[1], strlen(argv[1]));
+    Hash_expand((uint8_t*)ctx->memory, sizeof ctx->memory, ctx->hash.bytes, sizeof(ctx->hash));
 
-    crypto_generichash_blake2b(
-        (uint8_t*)ctx->hashIn, sizeof ctx->hashIn,
-        (uint8_t*)argv[1], strlen(argv[1]),
-        (uint8_t*)"RH_ISEED", 8);
+    Time t; Time_BEGIN(t);
+    run(ctx->hash.thirtytwos[1].ints, ctx->hash.thirtytwos[0].ints, ctx->memory, 4000);
+    Time_END(t);
 
-    _Static_assert(sizeof ctx->hashIn >= crypto_stream_chacha20_ietf_KEYBYTES, "");
-    crypto_stream_chacha20_xor_ic(
-            (uint8_t*)ctx->memory, (uint8_t*)ctx->memory, (sizeof(ctx->memory)),
-            (uint8_t*)"RH_MEMRY", 0,
-            (uint8_t*)ctx->hashIn);
+    for (int i = 0; i < RandHash_HASH_SZ; i++) { printf("%08x", ctx->hash.ints[i]); } printf("\n");
 
-    uint32_t cookie = ctx->hashIn[0];
-    ctx->cookie0 = ctx->cookie1 = ctx->cookie2 = ctx->cookie3 = cookie;
-
-    run(ctx->hashOut, ctx->hashIn, ctx->memory, CYCLES);
-
-    assert(ctx->cookie0 == cookie);
-    assert(ctx->cookie1 == cookie);
-    assert(ctx->cookie2 == cookie);
-    assert(ctx->cookie3 == cookie);
-
-    for (int i = 0; i < HASH_SZ; i++) { printf("%08x", ctx->hashIn[i]); } printf("\n");
-
+    printf("Time spent: %llu micros\n", Time_MICROS(t));
+    
     free(ctx);
 }

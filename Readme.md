@@ -1,38 +1,355 @@
-# RandomHash
+# PacketCrypt
 
-A hash function which changes based on the input
+Bandwidth-hard proof of work.
 
-**NOTE:** This is not a secure hash function, it's a primitive for building something
-larger, do not use it unless you know what you're doing.
+## Abstract
 
-## Why
+Since the invention of blockchains, there has been research into how to make the proof of work
+do something useful. Unfortunately, it has been remarkably difficult to make the work useful
+without allowing miners to influence the nature of the work problem to their own advantage,
+destroying the fairness of the algorithm.
 
-If you use a hash function to hash a password (for example), someone who wants to figure
-out your password and they happen to have the hash (from a hacked website for instance),
-their best bet is to try to guess different passwords and try to hash them and compare to
-the output.
+PacketCrypt takes a different approach, while the work done in PacketCrypt is itself useless,
+PacketCrypt is designed to encourage investment into the design and deployment of hardware
+which is useful for other purposes.
 
-With technology like GPUs (video cards), people can make thousands of guesses at the same
-time because GPUs have powerful parallel processors. The way that GPUs are able to be so
-effective at simple repetitive jobs like cracking passwords is because of
-[SIMD](https://en.wikipedia.org/wiki/SIMD).
+PacketCrypt encourages development of hardware solutions for high speed encryption and
+decryption of messages about the size of an internet packet. It also uses randomized code in
+order to encourage CPU mining as well as next generation CPU design research. Perhaps most
+significantly, PacketCrypt encourages cooperation between many mining devices, allowing
+*bandwidth* to be expended in lieu of processor effort.
 
-GPUs in particular have the ability to perform the same operation on an enormous number of
-different pieces of data at the same time, and if that operation is a hash function, then
-they can guess a lot of passwords really quickly.
+## How it works
 
-RandomHash attempts to frustrate parallel cracking attempts by creating a wholly different
-hash function for every password.
+PacketCrypt uses two distinct stages, the first stage mines a 1 KiB proof known as an
+*announcement*. The second stage, which is used to mine a block, gets a difficulty advantage
+based on the number of valid announcements which the miner can prove they had in memory at
+the time of mining. The default behavior of nodes in the network is to *forward* announcements,
+and announcements contain a payload hash, making them a dual use entity which can also be used
+for broadcasting messages across the network as well as for mining.
 
-## How
-https://github.com/cjdelisle/RandomHash/blob/master/src/randhash.c
-There is a code generator in [RandGen.c](https://github.com/cjdelisle/RandomHash/blob/master/RandGen.c)
-which generates a bytecode language from a random seed and a set of parameters. Then there
-are two programs which are able to consume this bytecode, one is an interpreter
-([Interpreter.c](https://github.com/cjdelisle/RandomHash/blob/master/Interpreter.c)) and the
-other is a generator of C code ([PrintProg.c](https://github.com/cjdelisle/RandomHash/blob/master/PrintProg.c)).
+The block miner's job is first to collect or create a set of announcements, they then commit
+the merkle root of their set in the coinbase. They also commit the set size and minimum amount
+of work done on any announcement in that set. Mining consists of performing a sequence of 4
+encryption and memory accesses to announcements in the set. The resulting "hash" from mining the
+data is taken from part of the encrypted data and the final definition of work is the result of:
 
-PrintProg ouputs a preprocessor-heavy C program such as the following:
+        (2**256 - hash) * (2**256 - minimum_announcement_work) * announcement_count
+
+If this work meets the difficulty requirement, the block is valid and the miner sends a proof
+containing the 4 announcements which were accessed in the winning cycle as well as the merkle
+branches necessary to prove that they were included in the committed hash.
+
+Though this proof is probabilistic only, faking the `announcement_count` or otherwise faking the
+announcements is not better than simply mining a smaller announcement set.
+
+### The Mining Algorithm
+
+The core mining algorithm of PacketCrypt is a 4 cycle encryption and memory lookup loop over
+a 2 KiB buffer. Each cycle, a 1 KiB item (announcement) is selected and copied over a portion of
+the encrypted data before the data is encrypted again.
+
+```go
+const zero [16]byte
+func PacketCryptCycle(announcements [][1024]byte, seed [32]byte, nonce uint32) [32]byte {
+  var state [2048]byte
+  chacha20.XORKeyStream(state, state, zero, seed)
+  writeUInt32LE(state[0:4], nonce)
+  CryptoCycle(state)
+  for i := 0; i < 4; i++ {
+      itemNo := readUInt32LE(state[16:20]) % len(announcements)
+      copy(state[32:1056], announcements[itemNo])
+      CryptoCycle(state)
+  }
+  return concat(state[192:208], state[16:32])
+}
+```
+
+#### CryptoCycle
+In order to understand how the mining algorithm works and why it makes use of the particular
+offsers when copying data, its important to understand exactly what CryptoCycle does. CryptoCycle
+is based on an implementation of chacha20/poly1305 as standardized by the IETF in
+[RFC-7539](https://tools.ietf.org/html/rfc7539). Effort was made to ensure that building a device
+for performing CryptoCycle is *not significantly easier than building a device which can encrypt
+internet packets*.
+
+Because encrypting internet traffic requires being able to encrypt messages of differing lengths
+with or without [associated data](https://en.wikipedia.org/wiki/Authenticated_encryption),
+CryptoCycle treats the first 16 bytes of the buffer as a header with certain perameters about the
+encryption to be performed. The header specifies the length of the content to encrypt and
+additional data to authenticate as well as a flag to indicate whether the algorithm is in
+encryption or decryption mode. Decryption is slightly different, with the poly1305 authentication
+occuring *before* the chacha20 instead of after.
+
+When attempting to "decrypt" random data with a random key, it's clear that the authentication
+check will almost certainly fail, so this algorithm requires the caller to verify the
+authenticator manually with an inexpensive constant-time `memcmp()` operation.
+
+##### Crypto Request Layout
+The following is the data structure which represents a request to encrypt or decrypt data:
+
+```
+     0               1               2               3
+     0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  0 |                                                               |
+    +                            nonce                              +
+  4 |                                                               |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  8 |     unused    | add |D| unusd |     len     |T|   version   |F|
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ 12 |                             pad                               |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ 16 |                                                               |
+    +                                                               +
+ 20 |                                                               |
+    +                                                               +
+ 24 |                                                               |
+    +                                                               +
+ 28 |                                                               |
+    +                        encryption_key                         +
+ 32 |                                                               |
+    +                                                               +
+ 36 |                                                               |
+    +                                                               +
+ 40 |                                                               |
+    +                                                               +
+ 44 |                                                               |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ 48 |                                                               |
+    +                          content...
+ 52 |
+```
+
+The meaning of the fields are as follows:
+
+* `nonce` the encryption nonce, as per the IETF chacha20/poly1305 standard
+* `add` the length of the additional data in 16 byte elements
+* `D` if this bit is set, the message is being decrypted (order of chacha20/poly1305 is reversed)
+* `len` the length of the data to encrypt (in 16 byte units)
+* `T` (truncated) this field is ignored in the request but is set if the sum of `len` and `add`
+is greater than 2048
+* `version` this is always set to zero and exists for possible future use
+* `F` this must be cleared by the caller
+* `pad` / `unused` these are unused and ignored
+* `encryption_key` this is the key used for the chacha20 encryption
+* `content` the first `add * 16` bytes of this is additional authenticated data, it is unaltered
+but included in the Poly1305 authenticator calculation as per RFC-7539. The `len * 16` bytes
+following the end of the authenticated data is the data to be encrypted. If the sum of is greater
+than 2048 bytes, the `len` is decreased by the algorithm and the `T` flag is set.
+
+##### Crypto Reply Layout
+The reply is much like the request:
+
+``` 
+     0               1               2               3
+     0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  0 |                                                               |
+    +                            nonce                              +
+  4 |                                                               |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  8 |     unused    | add |D| unusd |      len    |T|   version   |F|
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ 12 |                             pad                               |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ 26 |                                                               |
+    +                                                               +
+ 20 |                                                               |
+    +                    poly1305_authenticator                     +
+ 24 |                                                               |
+    +                                                               +
+ 28 |                                                               |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ 32 |                                                               |
+    +                                                               +
+ 36 |                                                               |
+    +                   key_and_authenticated_data                  +
+ 40 |                                                               |
+    +
+ 44 |
+    +
+
+... 16 + (16 * add) bytes long ...
+                                                                    +
+                                                                    |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ ?? |                                                               |
+    +                       encrypted_content...
+ ?? |
+ ```
+
+The fields which are *updated by the algorithm* are as follows:
+
+* `len` this is *potentially updated* if the length of the message plus length of additional data
+is greater than 2048.
+* `T` (truncated) this flag is set if `len` has been updated, otherwise it is cleared.
+* `F` (failed) this flag is set if there is a failure, during mining this should never happen
+(see: Crypto Request Preparation)
+* `poly1305_authenticator` this is the resulting authenticator from encryption/decryption, if the
+caller is intending to encrypt data, they should send this along with their encrypted message, if
+they are intending to decrypt data, they should compare this value to the poly1305 authenticator
+using a constant-time implementation of `memcmp()`.
+* `key_and_authenticated_data` this is bytes 32 to 48 of the encryption key plus the additional
+authenticated data which are untouched.
+* `encrypted_content` this is the content as it was before, but encrypted
+
+##### Crypto Request Preparation
+There are a few changes which are made to the data input before it is sent to the CryptoCycle core.
+
+1. bytes 8 to 12 are set to the value of bytes 16 to 20, this is to make sure that the length of
+the encrypted data and additional authenticated data are randomized each cycle.
+2. `version` and `F` are set to zero because an unexpected version or `F` flag set will cause the
+algorithm to give up. In the reference implementation, if the `F` flag is ever set, it's an
+assertion failure.
+3. `len` is OR'd with 32 to make sure that no encryption cycle will ever happen on less than 32
+16-byte elements (512 bytes). This is important to make sure that the miner cannot *search* for
+hashes where the length is zero, thus avoiding the need to encrypt anything at all.
+
+#### General Considerations
+As you will note from the pseudocode above, the miner copies the 1 KiB announcement over bytes
+32 to 1056 of the buffer, this is so the first 16 bytes of the announcement content will be mixed
+with the Poly1305 authenticator from the previous cycle to form the next cycle's encryption key.
+
+You will also note that the output of the algorithm is taken from bytes 192 to 208 followed by
+bytes 16 to 32. Bytes 192 to 208 were chosen because they fall beyond the maximum size of
+additional authenticated data but within the minimum size of encrypted data, meaning they will
+always be encrypted. Bytes 16 to 32 are of course the Poly1305 authenticator. As Bitcoin's
+difficulty metric considers the hash as a *little endian* number, the last byte of the hash is
+most significant, this is why algorithm places the Poly1305 authenticator at the end of the output.
+
+### Announcement Mining
+Each announcement contains a commitment of the block height (`parent_block_height`) as well as the
+most recent block hash at the time when the announcement was created. An announcement "matured" and
+becomes usable for mining a block when the block height is `parent_block_height + 2`, this gives
+announcement miners a bit of time to mine their announcements and then gives block miners time to
+receive them. After this height, the work value of an announcement (for the purposes of
+`minimum_announcement_work`) is divided by the number of blocks since it's maturity.
+
+Announcement mining itself follows a similar pattern to block mining, reusing many of the same
+algorithmic primitives but with a few special tweaks.
+
+First, as there are no Announcements to collect, the miner generates 8192 1 KiB data elements using
+[RandMemoHash](http://www.hashcash.org/papers/memohash.pdf). These items are generated using the
+hash of the announcement header with the `soft_nonce` field blanked.
+
+Secondly, because the verifier can re-generate the 1 KiB data items, the prover need not attach
+the items for verification, nor even the merkle branches except for the last item. This helps
+control the size of the resulting announcement which must be precisely 1KiB.
+
+Third, in order to encourage CPU mining and also encourage research into advanced CPU designs, the
+announcement mining process also involves the execution of randomly generated programs.
+
+The announcement header is as follows:
+
+```
+     0               1               2               3
+     0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  0 |    version    |                   soft_nonce                  |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  4 |                          hard_nonce                           |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  8 |                          work_bits                            |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ 12 |                     parent_block_height                       |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ 16 |                                                               |
+    +                         content_type                          +
+ 20 |                                                               |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ 24 |                                                               |
+    +                                                               +
+ 28 |                                                               |
+    +                                                               +
+ 32 |                                                               |
+    +                                                               +
+ 36 |                                                               |
+    +                         content_hash                          +
+ 40 |                                                               |
+    +                                                               +
+ 44 |                                                               |
+    +                                                               +
+ 48 |                                                               |
+    +                                                               +
+ 52 |                                                               |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ 56
+```
+
+* `version` is always zero and exists for future usage
+* `soft_nonce` is the only part of the announcement header which is not used when creating the
+table of data items
+* `work_bits` is the difficulty target for the announcement hashing, represented in the Bitcoin
+standard format
+* `parent_block_height` is the height of the most recent block at the time that the announcement
+was hashed, the hash of this block must be committed when making the table of data items for this
+announcement
+* `content_type` is a value which is opaque to the mining algorithm, it represents the meaning of
+the announcement (if any)
+* `content_hash` is the hash of the announcement, for announcements which were created purely for
+the purpose of creating blocks, miners are encouraged to set both `content_type` and `content_hash`
+to all zeros
+
+#### Announcement Design Objectives
+There are a number of design objectives which went into the design of the announcement:
+
+* Multi-use: An announcement which is mined for the purpose of broadcasting a message to the network
+should not be significantly less useful to a block miner than an announcement which was mined
+for the purpose of helping the block miner mine a block.
+* Bandwidth-hardness: The exchange of announcements in order to get a discount on the proof of work
+necessary to mine a block must be a *bandwidth hard* activity. This implies announcements should be
+difficult to compress and also that miners should be incentivised to prefer many announcements
+rather than few.
+* CPU-favoritism: Announcements are intended not only to serve as proof of work but also to allow
+communication, so announcement mining is designed to favor commodity hardware such as PCs and
+phones.
+* CPU-evolution: Finally, the announcement mining algorithm is intended to provide a basis for
+thinking about next generation CPU designs.
+
+##### Irreducability
+For the multi-use and the bandwidth-hardness objectives, it is desirable that an announcement miner
+cannot cause their announcements to be compressable to significantly less than 1 KiB in size. The
+content of the announcement itself is separated from the 1 KiB message which is transferred and
+mined so the only parts of the announcement which an announcement miner can really control are
+the `content_type` and `content_hash`. A block miner who has no interest in using casually crafted
+announcements can omit these 40 bytes from the memory locations where they store announcements,
+but these 40 bytes are about all.
+
+The content of the announcement is the 56 byte header plus a Merkle branch 12 hashes long and a
+Merkle root needed to validate the announcement. The Merkle tree used for announcement hashing uses
+64 byte Blake2b hashes which creates a total of 832 bytes of hashes which cannot be omitted without
+requiring the recipient to regenerate the 8192 data items used to create the announcement. The 56
+byte header plus the 832 byte Merkle branch and root is 888 bytes, so the final 136 bytes comes
+from the 4th data item. While the 4th data item is probably the easiest thing to recreate, it is
+only 13% of the announcement data and while it can be omitted from the data sent by the
+announcement miner to the block miner, the work required to redo the RandMemoHash cycle for
+recreating the data is far too much for the miner to omit it from memory.
+
+##### Reusability
+With casual announcement miners and "professional" announcement miners both participating in the
+network, one might expect the typical `minimum_announcement_work` to skyrocket as professionals
+generate almost all of the announcements needed for block mining. This is mitigated by the fact
+that announcements are *reusable* for mining multiple blocks - but at a degrading value. So if
+you receive 100 announcements per block period and they're worth 100 CPU-units each, you can start
+out by mining a block with `minimum_announcement_work` of 100, then next cycle you can double your
+announement count by halving `minimum_announcment_work`, keeping the same total effort but now
+being able to also include more casually mined announcements which have a lower amount of work
+done on them.
+
+##### CPU-favoritism
+The announcment mining algorithm uses a couple of tricks to favor CPU mining over GPU and to
+frustrate ASIC design efforts. However, the announcement mining algorithm is not designed to use
+every circuit on current generation CPUs, instead it is designed to try to match general purpose
+computing workloads to encourage research on the next generation of CPUs.
+
+To this end, the announcement mining algorithm creates random programs which must be executed
+before each encryption cycle. The random programs are generated from the result of the previous
+cycle, which depend in part on the previous random program.
+
+The programs use a stack of 32 bit elements and an instruction set of about 100 instructions.
+There are branches (both predictable and unpredictable) and loops. Programs can either be
+interpreted or output as C language code which looks like the following:
 
 ```c
 char* RANDHASH_SEED = "2";
@@ -282,7 +599,7 @@ LOOP(loop_1, 3) { // 0x00300042 @ 0
 END
 ```
 
-#### Instructions
+###### Instructions
 Arithmatic instructions have 4 variants for treating 8 bit, 16 bit, 32 bit and 64 bit numbers.
 If ADD8 for instance will add each 8 bit section of argument one to each 8 bit section of
 argument 2. Arithmatic instructions also have a variant which returns two outputs, a value
@@ -381,9 +698,11 @@ multiplication is is the high bits of the result.
     * JMP unconditional jump (used with IF to implement the "else" block)
     * END end a scope (LOOP, IF)
 
-### Design considerations
-1. There are instructions taken from modern CPUs processors as well as from ARM NEON
-and AVX vector instructions in order that hardware designed to run RandomHash efficiently
-is likely to also be useful as a general purpose CPU.
-2. There is liberal use of loops and branches in order to encourage research in branch
-prediction and speculative execution as well as efficient register allocation.
+## TODO list
+
+This algorithm is not completely done, there are a few things which are still missing:
+
+* [] CPU implementation of the block miner
+* [] Make random programs per-cycle, not 8192 programs
+* [] Can we use more memory in RandHash ?
+* [] SWAP instruction to frustrate program loop parallelization

@@ -1,10 +1,14 @@
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "Constants.h"
+#include "RandHash.h"
 #include "Vec.h"
 #include "OpTemplate.h"
 #include "DecodeInsn.h"
+#include "RandGen.h"
+#include "Buf.h"
+
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 enum OpCodes {
     #define OpCodes_ALL
@@ -29,7 +33,6 @@ typedef struct {
     int varCount;
 
     uint64_t opCtr;
-    uint64_t maxOps;
 
     Vec vars;
     Vec scopes;
@@ -111,7 +114,7 @@ static int interpret(Context* ctx, int pc) {
     }
 
     for (;; pc++) {
-        if (ctx->opCtr > ctx->maxOps) { return 0; }
+        if (ctx->opCtr > MAX_OPS) { return -1; }
         ctx->opCtr++;
         assert(pc < ctx->progLen);
         uint32_t insn = ctx->prog[pc];
@@ -123,16 +126,16 @@ static int interpret(Context* ctx, int pc) {
                 int base = DecodeInsn_MEMORY_BASE(insn);
                 int step = DecodeInsn_MEMORY_STEP(insn);
                 int carry = DecodeInsn_MEMORY_CARRY(insn);
-                // memory[(base + ((loopVar + carry) * step)) % MEMORY_SZ]
+                // memory[(base + ((loopVar + carry) * step)) % RandHash_MEMORY_SZ]
                 DEBUGF("MEMORY(%d, 0x%08x, %d, %d) -> %08x (%08x)\n", ctx->loopCycle, base, step, carry,
-                    ctx->memory[(base + ((ctx->loopCycle + carry) * step)) & (MEMORY_SZ - 1)],
-                    ((base + ((ctx->loopCycle + carry) * step)) % MEMORY_SZ));
-                out1(ctx, ctx->memory[(base + ((ctx->loopCycle + carry) * step)) & (MEMORY_SZ - 1)]);
+                    ctx->memory[(base + ((ctx->loopCycle + carry) * step)) & (RandHash_MEMORY_SZ - 1)],
+                    ((base + ((ctx->loopCycle + carry) * step)) % RandHash_MEMORY_SZ));
+                out1(ctx, ctx->memory[(base + ((ctx->loopCycle + carry) * step)) & (RandHash_MEMORY_SZ - 1)]);
                 break;
             }
             case OpCode_IN: {
-                //printf("// in %08x %d", ctx->hashIn[((uint32_t)DecodeInsn_imm(insn)) % HASH_SZ], (((uint32_t)DecodeInsn_imm(insn)) % HASH_SZ));
-                out1(ctx, ctx->hashIn[((uint32_t)DecodeInsn_imm(insn)) % HASH_SZ]);
+                //printf("// in %08x %d", ctx->hashIn[((uint32_t)DecodeInsn_imm(insn)) % RandHash_HASH_SZ], (((uint32_t)DecodeInsn_imm(insn)) % HASH_SZ));
+                out1(ctx, ctx->hashIn[((uint32_t)DecodeInsn_imm(insn)) % RandHash_HASH_SZ]);
                 break;
             }
             case OpCode_LOOP: {
@@ -142,6 +145,7 @@ static int interpret(Context* ctx, int pc) {
                     ctx->loopCycle = i;
                     ret = interpret(ctx, pc + 1);
                 }
+                if (ctx->opCtr > MAX_OPS) { return -1; }
                 pc = ret;
                 if (pc == ctx->progLen - 1) {
                     assert(ctx->vars.count == 0 && ctx->scopes.count == 0 && ctx->varCount == 0);
@@ -167,7 +171,7 @@ static int interpret(Context* ctx, int pc) {
                     //printf("// out1(%08x) %d\n", ctx->vars.elems[i], ctx->hashctr);
                     DEBUGF("out1 %08x (%d)\n", ctx->vars.elems[i], ctx->hashctr);
                     ctx->hashOut[ctx->hashctr] += ctx->vars.elems[i];
-                    ctx->hashctr = (ctx->hashctr + 1) % HASH_SZ;
+                    ctx->hashctr = (ctx->hashctr + 1) % RandHash_HASH_SZ;
                 }
                 ctx->vars.count -= ctx->varCount;
                 assert(Vec_pop(&ctx->vars) == ~0u);
@@ -212,24 +216,57 @@ static int interpret(Context* ctx, int pc) {
     }
 }
 
-int Interpreter_run(
-    uint32_t* prog, int progLen,
-    uint32_t* hashOut, uint32_t* hashIn, uint32_t* memory, int cycles, int maxOps)
-{
-    Context ctx = {
-        .memory = memory,
-        .hashIn = hashIn,
-        .hashOut = hashOut,
+struct RandHash_Compiled_s {
+    RandHash_Program_t* programs;
+    int count;
+};
 
-        .prog = prog,
-        .progLen = progLen,
-        .maxOps = maxOps
-    };
-    ctx.maxOps *= cycles;
+RandHash_Compiled_t* RandHash_compile_interpreted(RandHash_Program_t* progs, int count) {
+    RandHash_Compiled_t* out = malloc(sizeof(RandHash_Compiled_t));
+    assert(out);
+    out->programs = progs;
+    out->count = count;
+    return out;
+}
+
+void RandHash_freeProgram_interpreted(RandHash_Compiled_t* prog) { free(prog); }
+
+int RandHash_interpret(
+    RandHash_Program_t* prog,
+    Buf64_t* hash,
+    uint32_t* memory,
+    uint32_t memorySizeBytes,
+    int cycles)
+{
+    assert(memorySizeBytes >= RandHash_MEMORY_SZ * sizeof(uint32_t));
+    Context _ctx; memset(&_ctx, 0, sizeof _ctx);
+    Context* ctx = &_ctx;
+
+    ctx->memory = memory;
+    ctx->hashIn = hash->thirtytwos[0].ints;
+    ctx->hashOut = hash->thirtytwos[1].ints;
+    ctx->prog = prog->insns;
+    ctx->progLen = prog->len;
+
     for (int i = 0; i < cycles; i++) {
-        interpret(&ctx, 0);
-        ctx.hashctr = 0;
-        uint32_t* x = ctx.hashOut; ctx.hashOut = ctx.hashIn; ctx.hashIn = x;
+        ctx->opCtr = 0;
+        interpret(ctx, 0);
+        if (ctx->opCtr > MAX_OPS || ctx->opCtr < MIN_OPS) {
+            return (ctx->opCtr > MAX_OPS) ? RandHash_TOO_LONG : RandHash_TOO_SHORT;
+        }
+        ctx->hashctr = 0;
+        uint32_t* x = ctx->hashOut; ctx->hashOut = ctx->hashIn; ctx->hashIn = x;
     }
-    return ctx.opCtr / cycles;
+    return 0;
+}
+
+int RandHash_execute_interpreted(
+    RandHash_Compiled_t* progs,
+    int progNum,
+    Buf64_t* hash,
+    uint32_t* memory,
+    uint32_t memorySizeBytes,
+    int cycles)
+{
+    return RandHash_interpret(&progs->programs[progNum], hash, memory, memorySizeBytes, cycles);
 }

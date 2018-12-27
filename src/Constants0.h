@@ -5,15 +5,17 @@
 #define RandHash_MEMORY_SZ 256
 #define RandHash_HASH_SZ 8
 
+#define RandHash_CYCLES 10
+
 // RandGen parameters
 // How complex of a program do we want to create ?
-#define BUDGET   20000
+#define BUDGET 400000
 
-#define MIN_INSNS    0
-#define MAX_INSNS 2048
+#define MIN_INSNS   20
+#define MAX_INSNS 3000
 
-#define MIN_OPS      0
-#define MAX_OPS  20000
+#define MIN_OPS   2000
+#define MAX_OPS 200000
 
 // How much do we value various operations ?
 #define MEMORY_COST  20
