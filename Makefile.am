@@ -1,9 +1,28 @@
 # what flags you want to pass to the C compiler & linker
-CFLAGS = --pedantic -Wall -Wextra -Wno-pointer-sign -Wno-unused-parameter -std=c11 -O3 -march=native
+CFLAGS = \
+    --pedantic \
+    -Wall \
+    -Wextra \
+    -Wno-pointer-sign \
+    -Wno-unused-parameter \
+    -std=c11 \
+    -Ofast -march=native -flto
 
-bin_PROGRAMS = pcann simplehash
-pcann_SOURCES = \
-    src/pcann.c \
+bin_PROGRAMS = pcblk pcann simplehash difftest
+lib_LIBRARIES = libprogsupport.a
+
+pcblk_SOURCES = src/pcblk.c \
+    src/Hash.c \
+    src/BlkMerkle.c \
+    src/PacketCrypt.c \
+    src/CryptoCycle.c \
+    src/Work.c \
+    src/Difficulty.c \
+    src/Difficulty.h
+pcblk_CFLAGS = ${sodium_CFLAGS} ${PTHREAD_CFLAGS} ${CRYPTO_CFLAGS} -DNO_RANDHASH
+pcblk_LDADD = ${sodium_LIBS} ${PTHREAD_LDFLAGS} ${CRYPTO_LIBS}
+
+pcann_SOURCES = src/pcann.c \
     src/RandGen.c   \
     src/RandHash.c  \
     src/RandHash_interpreted.c \
@@ -11,7 +30,10 @@ pcann_SOURCES = \
     src/Work.c  \
     src/CryptoCycle.c \
     src/Hash.c \
-    src/Merkle.c
+    src/AnnMerkle.c \
+    src/PacketCrypt.c
+pcann_CFLAGS = ${sodium_CFLAGS} ${PTHREAD_CFLAGS} ${CRYPTO_CFLAGS}
+pcann_LDADD = ${sodium_LIBS} ${PTHREAD_LDFLAGS} ${CRYPTO_LIBS}
 
 simplehash_SOURCES = src/simplehash.c \
     src/RandGen.c   \
@@ -19,12 +41,14 @@ simplehash_SOURCES = src/simplehash.c \
     src/RandHash.c  \
     src/RandHash_interpreted.c \
     src/Hash.c
-
-pcann_CFLAGS = ${sodium_CFLAGS} ${PTHREAD_CFLAGS}
-pcann_LDADD = ${sodium_LIBS} ${PTHREAD_LDFLAGS}
-
 simplehash_CFLAGS = ${sodium_CFLAGS}
 simplehash_LDADD = ${sodium_LIBS}
 
-lib_LIBRARIES = libprogsupport.a
+difftest_SOURCES = src/difftest/main.cpp \
+    src/difftest/bignum.h \
+    src/Difficulty.c \
+    src/Difficulty.h
+difftest_CFLAGS = ${CRYPTO_CFLAGS}
+difftest_LDADD = ${CRYPTO_LIBS}
+
 libprogsupport_a_SOURCES = src/ProgSupport.c src/Hash.c

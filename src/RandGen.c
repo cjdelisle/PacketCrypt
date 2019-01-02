@@ -1,7 +1,7 @@
 #include "RandGen.h"
 #include "Vec.h"
 #include "DecodeInsn.h"
-#include "Constants.h"
+#include "Conf.h"
 #include "Buf.h"
 #include "RandHash.h"
 
@@ -142,7 +142,7 @@ static int _getVar(Context* ctx, bool dbl) {
         // end of the line, this is tested after because first frame should always have 4 vars.
         if (!bof) { break; }
         // walk up to a higher scope
-        if (!cointoss(ctx, HIGHER_SCOPE_LIKELYHOOD)) { break; }
+        if (!cointoss(ctx, Conf_RandGen_HIGHER_SCOPE_LIKELYHOOD)) { break; }
     nextFrame:
         eof = bof;
     }
@@ -153,7 +153,7 @@ static int _getVar(Context* ctx, bool dbl) {
     for (int j = start + 1;; j++) {
         if (j >= eof) { j = bof + 1; }
         //printf("%08x %d\n", ctx->vars.elems[j], j);
-        if ((!dbl || (j > bof + 1)) && cointoss(ctx, VAR_REUSE_LIKELYHOOD)) {
+        if ((!dbl || (j > bof + 1)) && cointoss(ctx, Conf_RandGen_VAR_REUSE_LIKELYHOOD)) {
             //printf("reuse\n");
             return j;
         } else if (!(ctx->vars.elems[j] & 1)) {
@@ -177,7 +177,7 @@ static int getVar(Context* ctx, bool dbl) {
 }
 static uint32_t getA(Context* ctx, bool dbl) { return ((uint32_t) getVar(ctx, dbl)) << 9; }
 static uint32_t getB(Context* ctx, bool dbl) {
-    if (cointoss(ctx, IMMEDIATE_LIKELYHOOD)) {
+    if (cointoss(ctx, Conf_RandGen_IMMEDIATE_LIKELYHOOD)) {
         return (randu32(ctx) << 20) | (1 << 18);
     } else {
         return ((uint32_t) getVar(ctx, dbl)) << 20;
@@ -218,7 +218,7 @@ static bool op(Context* ctx, enum OpType type, uint32_t* budget) {
 }
 
 static bool input(Context* ctx, uint32_t* budget) {
-    if (!spend(budget, INPUT_COST)) { return false; }
+    if (!spend(budget, Conf_RandGen_INPUT_COST)) { return false; }
     mkVar(ctx);
     emit(ctx, (randu32(ctx) << 8) | OpCode_IN);
     return true;
@@ -227,18 +227,18 @@ static bool input(Context* ctx, uint32_t* budget) {
 static int body(Context* ctx, uint32_t* budget, bool createScope);
 
 static bool branch(Context* ctx, uint32_t* budget) {
-    if (!spend(budget, BRANCH_COST)) { return false; }
-    uint32_t op = cointoss(ctx, RANDOM_BRANCH_LIKELYHOOD) ? OpCode_IF_RANDOM : OpCode_IF_LIKELY;
+    if (!spend(budget, Conf_RandGen_BRANCH_COST)) { return false; }
+    uint32_t op = cointoss(ctx, Conf_RandGen_RANDOM_BRANCH_LIKELYHOOD) ? OpCode_IF_RANDOM : OpCode_IF_LIKELY;
 
     emit(ctx, getA(ctx, false) | op | (2<<20));
     uint32_t j1 = ctx->insns.count; emit(ctx, OpCode_JMP);
 
-    uint32_t b1 = IF_BODY_BUDGET(*budget, ctx->scope);
+    uint32_t b1 = Conf_RandGen_IF_BODY_BUDGET(*budget, ctx->scope);
     body(ctx, &b1, true);
 
     uint32_t j2 = ctx->insns.count; emit(ctx, OpCode_JMP);
 
-    uint32_t b2 = IF_BODY_BUDGET(*budget, ctx->scope);
+    uint32_t b2 = Conf_RandGen_IF_BODY_BUDGET(*budget, ctx->scope);
     body(ctx, &b2, true);
 
     assert((j2 - j1) < (1<<23));
@@ -253,18 +253,18 @@ static bool branch(Context* ctx, uint32_t* budget) {
 }
 
 static int loop(Context* ctx, uint32_t* budget) {
-    uint32_t loopLen   = randRange(ctx, LOOP_MIN_CYCLES, LOOP_MAX_CYCLES(ctx->scope));
+    uint32_t loopLen   = randRange(ctx, Conf_RandGen_LOOP_MIN_CYCLES, Conf_RandGen_LOOP_MAX_CYCLES(ctx->scope));
     // this must be at least 2
     int numMemAcc = randRange(ctx, 2, 4);
 
-    if (*budget < (MEMORY_COST * loopLen)) { return 0; }
+    if (*budget < (Conf_RandGen_MEMORY_COST * loopLen)) { return 0; }
     *budget /= loopLen;
     emit(ctx, (loopLen << 20) | OpCode_LOOP);
     scope(ctx);
 
     uint32_t memTemplate = (randu32(ctx) << 8) | OpCode_MEMORY;
     for (int i = 0; i < numMemAcc; i++) {
-        if (!spend(budget, MEMORY_COST)) { break; }
+        if (!spend(budget, Conf_RandGen_MEMORY_COST)) { break; }
         mkVar(ctx);
         emit(ctx, DecodeInsn_MEMORY_WITH_CARRY(memTemplate, randu32(ctx)));
     }
@@ -276,7 +276,7 @@ static int loop(Context* ctx, uint32_t* budget) {
 static int body(Context* ctx, uint32_t* budget, bool createScope) {
     if (createScope) { scope(ctx); }
     for (;;) {
-        if (ctx->insns.count > MAX_INSNS) { goto out; }
+        if (ctx->insns.count > Conf_RandGen_MAX_INSNS) { goto out; }
         int max = randRange(ctx, 2, 12);
         for (int i = 1; i <= max; i++) {
             if (cointoss(ctx, 4 * max / i) && op(ctx, OpType_4_4, budget)) { continue; }
@@ -287,8 +287,8 @@ static int body(Context* ctx, uint32_t* budget, bool createScope) {
             if (                              op(ctx, OpType_1_1, budget)) { continue; }
             goto out;
         }
-        if (SHOULD_BRANCH(randu32(ctx), ctx->insns.count) && !branch(ctx, budget)) { goto out; }
-        if (SHOULD_LOOP(randu32(ctx)) && !loop(ctx, budget))   { goto out; }
+        if (Conf_RandGen_SHOULD_BRANCH(randu32(ctx), ctx->insns.count) && !branch(ctx, budget)) { goto out; }
+        if (Conf_RandGen_SHOULD_LOOP(randu32(ctx)) && !loop(ctx, budget))   { goto out; }
     }
 out:
     if (createScope) { end(ctx); }
@@ -297,7 +297,7 @@ out:
 
 int RandGen_generate(uint32_t* buf, int bufLen4, Buf32_t* seed)
 {
-    uint32_t budget = BUDGET;
+    uint32_t budget = Conf_RandGen_INITIAL_BUDGET;
     Context ctx; memset(&ctx, 0, sizeof ctx);
     _Static_assert(sizeof ctx.randseed == sizeof *seed, "");
     memcpy(ctx.randseed.bytes, seed->bytes, sizeof ctx.randseed);
@@ -310,9 +310,9 @@ int RandGen_generate(uint32_t* buf, int bufLen4, Buf32_t* seed)
 
     Vec_free(&ctx.vars);
 
-    _Static_assert(!MIN_INSNS, "");
-    if (/*ctx.insns.count < MIN_INSNS || */ctx.insns.count > MAX_INSNS) {
-        return (ctx.insns.count > MAX_INSNS) ? RandHash_TOO_BIG : RandHash_TOO_SMALL;
+    _Static_assert(!Conf_RandGen_MIN_INSNS, "");
+    if (/*ctx.insns.count < Conf_RandGen_MIN_INSNS || */ctx.insns.count > Conf_RandGen_MAX_INSNS) {
+        return (ctx.insns.count > Conf_RandGen_MAX_INSNS) ? RandHash_TOO_BIG : RandHash_TOO_SMALL;
     }
 
     return ctx.insns.count;

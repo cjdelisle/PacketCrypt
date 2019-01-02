@@ -1,7 +1,8 @@
-#include "Constants.h"
+#include "Conf.h"
 #include "Buf.h"
 #include "Hash.h"
 #include "Time.h"
+#include "RandHash.h"
 
 #include "sodium/crypto_stream_chacha20.h"
 #include "sodium/crypto_generichash_blake2b.h"
@@ -36,7 +37,7 @@ int main(int argc, char** argv) {
     run(ctx->hash.thirtytwos[1].ints, ctx->hash.thirtytwos[0].ints, ctx->memory, 4000);
     Time_END(t);
 
-    for (int i = 0; i < RandHash_HASH_SZ; i++) { printf("%08x", ctx->hash.ints[i]); } printf("\n");
+    for (int i = 0; i < RandHash_INOUT_SZ; i++) { printf("%08x", ctx->hash.ints[i]); } printf("\n");
 
     printf("Time spent: %llu micros\n", Time_MICROS(t));
     

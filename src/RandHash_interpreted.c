@@ -1,4 +1,4 @@
-#include "Constants.h"
+#include "Conf.h"
 #include "RandHash.h"
 #include "Vec.h"
 #include "OpTemplate.h"
@@ -114,7 +114,7 @@ static int interpret(Context* ctx, int pc) {
     }
 
     for (;; pc++) {
-        if (ctx->opCtr > MAX_OPS) { return -1; }
+        if (ctx->opCtr > Conf_RandHash_MAX_OPS) { return -1; }
         ctx->opCtr++;
         assert(pc < ctx->progLen);
         uint32_t insn = ctx->prog[pc];
@@ -134,8 +134,8 @@ static int interpret(Context* ctx, int pc) {
                 break;
             }
             case OpCode_IN: {
-                //printf("// in %08x %d", ctx->hashIn[((uint32_t)DecodeInsn_imm(insn)) % RandHash_HASH_SZ], (((uint32_t)DecodeInsn_imm(insn)) % HASH_SZ));
-                out1(ctx, ctx->hashIn[((uint32_t)DecodeInsn_imm(insn)) % RandHash_HASH_SZ]);
+                //printf("// in %08x %d", ctx->hashIn[((uint32_t)DecodeInsn_imm(insn)) % RandHash_INOUT_SZ], (((uint32_t)DecodeInsn_imm(insn)) % HASH_SZ));
+                out1(ctx, ctx->hashIn[((uint32_t)DecodeInsn_imm(insn)) % RandHash_INOUT_SZ]);
                 break;
             }
             case OpCode_LOOP: {
@@ -145,7 +145,7 @@ static int interpret(Context* ctx, int pc) {
                     ctx->loopCycle = i;
                     ret = interpret(ctx, pc + 1);
                 }
-                if (ctx->opCtr > MAX_OPS) { return -1; }
+                if (ctx->opCtr > Conf_RandHash_MAX_OPS) { return -1; }
                 pc = ret;
                 if (pc == ctx->progLen - 1) {
                     assert(ctx->vars.count == 0 && ctx->scopes.count == 0 && ctx->varCount == 0);
@@ -171,7 +171,7 @@ static int interpret(Context* ctx, int pc) {
                     //printf("// out1(%08x) %d\n", ctx->vars.elems[i], ctx->hashctr);
                     DEBUGF("out1 %08x (%d)\n", ctx->vars.elems[i], ctx->hashctr);
                     ctx->hashOut[ctx->hashctr] += ctx->vars.elems[i];
-                    ctx->hashctr = (ctx->hashctr + 1) % RandHash_HASH_SZ;
+                    ctx->hashctr = (ctx->hashctr + 1) % RandHash_INOUT_SZ;
                 }
                 ctx->vars.count -= ctx->varCount;
                 assert(Vec_pop(&ctx->vars) == ~0u);
@@ -251,9 +251,9 @@ int RandHash_interpret(
     for (int i = 0; i < cycles; i++) {
         ctx->opCtr = 0;
         interpret(ctx, 0);
-        _Static_assert(!MIN_OPS, "");
-        if (ctx->opCtr > MAX_OPS /* || ctx->opCtr < MIN_OPS*/) {
-            return (ctx->opCtr > MAX_OPS) ? RandHash_TOO_LONG : RandHash_TOO_SHORT;
+        _Static_assert(!Conf_RandHash_MIN_OPS, "");
+        if (ctx->opCtr > Conf_RandHash_MAX_OPS /* || ctx->opCtr < Conf_RandHash_MIN_OPS*/) {
+            return (ctx->opCtr > Conf_RandHash_MAX_OPS) ? RandHash_TOO_LONG : RandHash_TOO_SHORT;
         }
         ctx->hashctr = 0;
         uint32_t* x = ctx->hashOut; ctx->hashOut = ctx->hashIn; ctx->hashIn = x;

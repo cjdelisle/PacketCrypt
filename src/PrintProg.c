@@ -1,7 +1,8 @@
 #include "PrintProg.h"
-#include "Constants.h"
+#include "Conf.h"
 #include "Vec.h"
 #include "DecodeInsn.h"
+#include "RandHash.h"
 
 #include <stdint.h>
 #include <assert.h>
@@ -184,7 +185,7 @@ static void printC(Context* ctx)
                 break;
             }
             case OpCode_IN: {
-                out(ctx, 1, "IN(%d)", ((uint32_t) DecodeInsn_immLo(insn)) % RandHash_HASH_SZ);
+                out(ctx, 1, "IN(%d)", ((uint32_t) DecodeInsn_immLo(insn)) % RandHash_INOUT_SZ);
                 break;
             }
             case OpCode_LOOP: {

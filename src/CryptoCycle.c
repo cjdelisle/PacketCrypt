@@ -7,7 +7,7 @@
 #include <string.h>
 #include <assert.h>
 
-void CryptoCycle_makeFuzzable(CryptoCycle_Header_t* hdr)
+void CryptoCycle_makeFuzzable(CryptoCycle_Header_t* restrict hdr)
 {
     memcpy(&hdr->data, hdr->key_high_or_auth, 4);
 
@@ -21,7 +21,7 @@ void CryptoCycle_makeFuzzable(CryptoCycle_Header_t* hdr)
     CryptoCycle_setLength(hdr, CryptoCycle_getLength(hdr) | 32);
 }
 
-static inline int getLengthAndTruncate(CryptoCycle_Header_t* hdr)
+static inline int getLengthAndTruncate(CryptoCycle_Header_t* restrict hdr)
 {
     int len = CryptoCycle_getLength(hdr);
     int maxLen = 125 - CryptoCycle_getAddLen(hdr);
@@ -31,7 +31,7 @@ static inline int getLengthAndTruncate(CryptoCycle_Header_t* hdr)
     return finalLen;
 }
 
-void CryptoCycle_crypt(CryptoCycle_Header_t* msg)
+void CryptoCycle_crypt(CryptoCycle_Header_t* restrict msg)
 {
     if (CryptoCycle_getVersion(msg) != 0 || CryptoCycle_isFailed(msg)) {
         CryptoCycle_setFailed(msg, 1);
@@ -64,7 +64,7 @@ void CryptoCycle_crypt(CryptoCycle_Header_t* msg)
     if (!decrypt) {
         crypto_onetimeauth_poly1305_update(&state, msgContent, msgLen);
     }
-    
+
     {
         uint32_t slen[4] = {0};
         slen[0] = CryptoCycle_LE(aeadLen);

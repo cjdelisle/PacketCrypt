@@ -3,7 +3,6 @@
 #include "RandGen.h"
 #include "PrintProg.h"
 #include "RandHash.h"
-#include "Constants.h"
 #include "Hash.h"
 #include "Time.h"
 
@@ -109,9 +108,9 @@ int main(int argc, char** argv) {
         int ret = doit(ctx, flagC, seedStr, input);
         if (!flagC) {
             if (!ret) { printf("SUCCESS\n"); }
-            for (int i = 0; !ret && i < RandHash_HASH_SZ; i++) { printf("%08x", ctx->hash.ints[i]); }
+            Hash_printHex(ctx->hash.bytes, 64);
             Time_END(t);
-            printf("\nTime spent %lld\n", Time_MICROS(t));
+            printf("\nTime spent %lld microseconds\n", Time_MICROS(t));
         }
         if (!flagS) { break; }
         ctx->seed.longs[0]++;

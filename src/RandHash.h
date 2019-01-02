@@ -12,6 +12,12 @@ typedef struct {
 
 typedef struct RandHash_Compiled_s RandHash_Compiled_t;
 
+// keep these powers of 2 because there is unsigned modulo using &
+// Also be careful not to change these without also checking the buffers
+// which are passed to RandHash_execute()
+#define RandHash_MEMORY_SZ 256
+#define RandHash_INOUT_SZ    8
+
 // Program is too big
 #define RandHash_TOO_BIG   -1
 

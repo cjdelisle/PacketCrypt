@@ -731,6 +731,19 @@ multiplication is is the high bits of the result.
 This algorithm is not completely done, there are a few things which are still missing:
 
 * [] CPU implementation of the block miner
-* [] Can we use more memory in RandHash ?
-* [] SWAP instruction to frustrate program loop parallelization
-* [] re-implement all verification code in golang
+  * [] PacketCryptProof.c
+* [] re-implement verification code in golang
+  * [] CryptoCycle
+  * [] ann verify
+    * [] RandHash
+      * [] RandGen
+      * [] RandHash_interpreted
+    * [] AnnMerkle
+    * [] MemoHash
+  * [] blk verify
+    * [] PacketCryptProof (review)
+* [] RandHash
+  * [] Can we use more memory ?
+  * [] MIX instruction to frustrate program loop parallelization
+  * [] ABS, MIN and MAX insns
+  * [] amd64 jit

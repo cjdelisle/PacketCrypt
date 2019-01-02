@@ -36,7 +36,7 @@
  * 48
  *
  * Crypto reply header:
- * 
+ *
  *     0               1               2               3
  *     0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -65,16 +65,16 @@
  * 44 |                                                               |
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  * 48
- * 
+ *
  * nonce: This is the nonce which will be used by chacha20
- * 
+ *
  * unused: This is for future use, in version 0 it will be returned
  *         untouched.
- * 
+ *
  * add: The size of the "additional data" which should be associated with
  *      the message for authentication purposes but not encrypted or
  *      decrypted. This is measured in 16 byte units.
- * 
+ *
  * D: If set, the algorithm will attempt to decrypt rather than encrypt.
  *    Technically this means Poly1305 will simply be performed before
  *    encryption instead of after. BEWARE: You MUST check that the Poly1305
@@ -86,7 +86,7 @@
  *    * THIS ALGORITHM WILL HAPPILY DECRYPT MESSAGES WHICH HAVE BEEN *
  *    * TAMPERED WITH, YOU MUST CHECK.                               *
  *    ****************************************************************
- * 
+ *
  * unusd: Also unused, returned untouched.
  *
  * len:  The length of the message to encrypt, excluding header and AEAD
@@ -98,7 +98,7 @@
  *           real_length = MIN(header.len, 128 - 3 - header.add)
  *           header.T = real_len != header.len
  *           header.len = real_len
- * 
+ *
  * T: Set by the algorithm len was decreased in order that length +
  *    additional + header size all fit inside of a 2048 byte buffer.
  *    If no truncation of the length took place, this is cleared.
@@ -107,7 +107,7 @@
  * version: The version of the algorithm to use, currently there is only
  *          one version (zero) and so the algorithm will set the fail flag
  *          if ver is non-zero.
- *  
+ *
  * F: This is the fail flag, if it is set by the user then the algorithm
  *    will do nothing, if version is unrecognized then the algorithm will
  *    set the fail flag and return the data without any processing.
@@ -115,14 +115,14 @@
  * pad: This is meant to align the key to a 16 byte memory boundry, it may
  *      be used in future versions but in version 0 it is ignored and
  *      returned untouched.
- * 
+ *
  * encryption_key: In a query message, this is the key to use for
  *                 symmetrical encryption.
- * 
+ *
  * poly1305_authenticator: In a reply message, this is the Poly1305
  *                         authenticator. If you are decrypting, you MUST
  *                         compare this to the authenticator you received.
- * 
+ *
  * key_half: In a reply message, this is the low 16 bytes of the encryption key.
  */
 typedef struct {
@@ -153,13 +153,14 @@ typedef struct {
 #endif
 
 #define CryptoCycle_SETTER_GETTER(begin, count, setter, getter) \
-    static inline int CryptoCycle_ ## getter (CryptoCycle_Header_t* hdr) {                                \
-        return (CryptoCycle_LE(hdr->data)>>begin) & ((1u<<count)-1);                         \
+    static inline int CryptoCycle_ ## getter (CryptoCycle_Header_t* restrict hdr) {             \
+        return (CryptoCycle_LE(hdr->data)>>begin) & ((1u<<count)-1);                            \
     }                                                                                           \
-    static inline void CryptoCycle_ ## setter (CryptoCycle_Header_t* hdr, uint32_t val) {                 \
+    static inline void CryptoCycle_ ## setter \
+        (CryptoCycle_Header_t* restrict hdr, uint32_t val) { \
         val &= (1u<<count) - 1;                                                                 \
-        hdr->data = CryptoCycle_LE(                                                                  \
-            (CryptoCycle_LE(hdr->data) & (~(((1u<<count)-1)<<begin))) | (((uint32_t)val)<<begin)   \
+        hdr->data = CryptoCycle_LE(                                                             \
+            (CryptoCycle_LE(hdr->data) & (~(((1u<<count)-1)<<begin))) | (((uint32_t)val)<<begin)\
         );                                                                                      \
     }
 
@@ -170,8 +171,8 @@ CryptoCycle_SETTER_GETTER(17, 7, setLength, getLength)
 CryptoCycle_SETTER_GETTER(24, 1, setFailed, isFailed)
 CryptoCycle_SETTER_GETTER(25, 7, setVersion, getVersion)
 
-void CryptoCycle_makeFuzzable(CryptoCycle_Header_t* hdr);
+void CryptoCycle_makeFuzzable(CryptoCycle_Header_t* restrict hdr);
 
-void CryptoCycle_crypt(CryptoCycle_Header_t* msg);
+void CryptoCycle_crypt(CryptoCycle_Header_t* restrict msg);
 
 #endif

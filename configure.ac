@@ -3,12 +3,13 @@
 
 AC_PREREQ([2.69])
 AC_INIT([randomhash], [0.0.1], [cjd@cjdns.fr])
-AC_CONFIG_SRCDIR([src/Constants.h])
+AC_CONFIG_SRCDIR([src/Conf.h])
 AM_INIT_AUTOMAKE([1.11 dist-bzip2 tar-ustar foreign subdir-objects])
 AC_CONFIG_HEADERS([config.h])
 
 # Checks for programs.
 AC_PROG_CC
+AC_PROG_CXX
 AC_PROG_RANLIB
 
 # Checks for libraries.
@@ -24,6 +25,9 @@ PKG_CHECK_MODULES([sodium], [libsodium], [], [
            $ sodium_CFLAGS=-I/usr/local/include sodium_LIBS=-lsodium ./configure
     ])
 ])
+
+# PacketCrypt_getEffectiveDifficulty() uses libcrypto
+PKG_CHECK_MODULES([CRYPTO], [libcrypto],, [AC_MSG_ERROR(libcrypto not found.)])
 
 AX_PTHREAD([], [
     AC_MSG_ERROR([

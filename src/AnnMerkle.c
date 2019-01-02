@@ -1,7 +1,7 @@
 #include "Hash.h"
 #include "Buf.h"
-#define Merkle_IMPL
-#include "Merkle.h"
+#define AnnMerkle_IMPL
+#include "AnnMerkle.h"
 
 #include "sodium/crypto_verify_64.h"
 
@@ -9,7 +9,7 @@
 #include <string.h>
 #include <assert.h>
 
-bool Merkle__isItemValid(
+bool AnnMerkle__isItemValid(
     int depth,
     const uint8_t* merkleBranch,
     const Buf64_t* itemHash,
@@ -25,7 +25,7 @@ bool Merkle__isItemValid(
     return !crypto_verify_64(b[itemNo & 1].bytes, &merkleBranch[64 * depth]);
 }
 
-void Merkle__build(int depth, uint8_t* out, uint8_t* table, int itemSz)
+void AnnMerkle__build(int depth, uint8_t* out, uint8_t* table, int itemSz)
 {
     int odx = 0;
     for (int i = 0; i < (1<<depth); i++) {
@@ -44,7 +44,7 @@ void Merkle__build(int depth, uint8_t* out, uint8_t* table, int itemSz)
     assert(idx == odx - 1);
 }
 
-void Merkle__getBranch(int depth, uint8_t* out, uint16_t itemNo, const uint8_t* merkle)
+void AnnMerkle__getBranch(int depth, uint8_t* out, uint16_t itemNo, const uint8_t* merkle)
 {
     uint16_t ino = itemNo;
     int odx = 0;
@@ -62,5 +62,5 @@ void Merkle__getBranch(int depth, uint8_t* out, uint16_t itemNo, const uint8_t* 
     // sanity check
     assert(idx == ((1<<depth) * 2 - 2));
     assert(odx == (depth + 1));
-    assert(Merkle__isItemValid(depth, out, (const Buf64_t*) &merkle[itemNo * 64], itemNo));
+    assert(AnnMerkle__isItemValid(depth, out, (const Buf64_t*) &merkle[itemNo * 64], itemNo));
 }

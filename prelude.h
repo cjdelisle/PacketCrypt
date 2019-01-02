@@ -1,5 +1,5 @@
 #include "src/OpTemplate.h"
-#include "src/Constants.h"
+#include "src/Conf.h"
 
 #include <stdint.h>
 
@@ -7,7 +7,7 @@
 #define IF_RANDOM(x) if (((uint8_t)(x) & 1) != 0)
 #define LOOP(i, count) for (int i = 0; i < count; i++)
 
-#define OUT(x) do { DEBUGF("out1(%08x) %d\n", (x), hashctr); hashOut[hashctr] += (x); hashctr = (hashctr + 1) % RandHash_HASH_SZ; } while (0)
+#define OUT(x) do { DEBUGF("out1(%08x) %d\n", (x), hashctr); hashOut[hashctr] += (x); hashctr = (hashctr + 1) % RandHash_INOUT_SZ; } while (0)
 #define OUT2(x,y) do { OUT(x); OUT(y); } while (0)
 #define OUT4(x,y,z,a) do { OUT2(x,y); OUT2(z,a); } while (0)
 #define OUT8(x,y,z,a,b,c,d,e) do { OUT4(x,y,z,a); OUT4(b,c,d,e); } while (0)

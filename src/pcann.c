@@ -6,6 +6,10 @@
 #include "CryptoCycle.h"
 #include "Work.h"
 #include "Time.h"
+#include "Announce.h"
+#include "PacketCrypt.h"
+#include "Conf.h"
+#include "Compiler.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -25,103 +29,17 @@ static int usage() {
     return 100;
 }
 
-static void printhex(uint8_t* buff, int len) {
-    for (int i = len - 1; i >= 0; i--) { printf("%02x", buff[i]); }
-    printf("\n");
-}
-
-#define ITEM_HASHCOUNT 16
-#define ANN_HASH_SZ 64
-#define DEPTH 13
-#define PROGRAM_CYCLES 4
-#define MEMOHASH_CYCLES 2
-
-#define Merkle_DEPTH DEPTH
-#define Merkle_NAME CCMerkle
-#include "Merkle.h"
-#define TABLE_SZ (1<<DEPTH)
-_Static_assert(sizeof(CCMerkle_Branch) == (DEPTH+1)*64, "");
-
-/**
- * Announcement header:
- *
- *     0               1               2               3
- *     0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
- *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- *  0 |    version    |                   soft_nonce                  |
- *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- *  4 |                          hard_nonce                           |
- *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- *  8 |                          work_bits                            |
- *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * 12 |                     parent_block_height                       |
- *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * 16 |                                                               |
- *    +                         content_type                          +
- * 20 |                                                               |
- *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * 24 |                                                               |
- *    +                                                               +
- * 28 |                                                               |
- *    +                                                               +
- * 32 |                                                               |
- *    +                                                               +
- * 36 |                                                               |
- *    +                         content_hash                          +
- * 40 |                                                               |
- *    +                                                               +
- * 44 |                                                               |
- *    +                                                               +
- * 48 |                                                               |
- *    +                                                               +
- * 52 |                                                               |
- *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * 
- * 
- * Announcement:
- * 
- * [ Header 0:56 ][ Merkle proof 56:952 ][ Item 4 Prefix 952:1024 ]
- */
-typedef struct {
-    uint8_t version;
-    uint8_t softNonce[3];
-    uint32_t hardNonce;
-    uint32_t workBits;
-    uint32_t parentBlockHeight;
-
-    uint64_t contentType;
-    uint8_t contentHash[32];
-} AnnounceHdr_t;
-_Static_assert(sizeof(AnnounceHdr_t) == 56, "");
-
-#define ITEM4_PREFIX_SZ (1024 - sizeof(AnnounceHdr_t) - sizeof(CCMerkle_Branch))
-typedef struct {
-    AnnounceHdr_t hdr;
-    CCMerkle_Branch merkleProof;
-    uint8_t item4Prefix[ITEM4_PREFIX_SZ];
-} Announce_t;
-_Static_assert(sizeof(Announce_t) == 1024, "");
-
-typedef union {
-    CryptoCycle_Header_t hdr;
-    Buf_TYPES(2048);
-    Buf16_t sixteens[128];
-    Buf32_t thirtytwos[64];
-    Buf64_t sixtyfours[32];
-} PcState_t;
+#define ITEM_HASHCOUNT (sizeof(PacketCrypt_Item_t) / 64)
+#define TABLE_SZ (1<<Announce_MERKLE_DEPTH)
 
 typedef struct {
-    Buf64_t bufs[ITEM_HASHCOUNT];
-} Item_t;
+    PacketCrypt_Item_t table[TABLE_SZ];
 
-typedef struct {
-    Item_t table[TABLE_SZ];
-
-    CCMerkle merkle;
+    Announce_Merkle merkle;
     Buf64_t annHash0; // hash(announce || parentBlockHash)
     Buf64_t annHash1; // hash(announce || merkleRoot)
 
-    AnnounceHdr_t annHdr;
+    Announce_Header_t annHdr;
     Buf32_t parentBlockHash;
 } Job_t;
 
@@ -147,7 +65,7 @@ enum ThreadState {
 struct Worker_s {
     Job_t* activeJob;
     Announce_t ann;
-    PcState_t state;
+    PacketCrypt_State_t state;
 
     Context_t* ctx;
     pthread_t thread;
@@ -197,87 +115,48 @@ static inline void memocycle(Buf64_t* buf, int bufcount, int cycles) {
             Buf64_t* mJ = &buf[j];
             for (int k = 0; k < 8; k++) { tmpbuf[0].longs[k] = mP->longs[k]; }
             for (int k = 0; k < 8; k++) { tmpbuf[1].longs[k] = mJ->longs[k]; }
-            Hash_compress64(buf[i].bytes, tmpbuf[0].bytes, ANN_HASH_SZ * 2);
+            Hash_compress64(buf[i].bytes, tmpbuf[0].bytes, sizeof tmpbuf);
         }
     }
 }
-static void mkitem(uint64_t num, Item_t* item, uint8_t seed[64]) {
-    Hash_expand(item[0].bufs[0].bytes, ANN_HASH_SZ, seed, num);
-    for (int i = 1; i < ITEM_HASHCOUNT; i++) {
-        Hash_compress64(item->bufs[i].bytes, item->bufs[i-1].bytes, ANN_HASH_SZ);
+static void mkitem(uint64_t num, PacketCrypt_Item_t* item, uint8_t seed[64]) {
+    Hash_expand(item->bytes, 64, seed, num);
+    for (uint32_t i = 1; i < ITEM_HASHCOUNT; i++) {
+        Hash_compress64(item->sixtyfours[i].bytes, item->sixtyfours[i-1].bytes, 64);
     }
-    memocycle(item->bufs, ITEM_HASHCOUNT, MEMOHASH_CYCLES);
+    memocycle(item->sixtyfours, ITEM_HASHCOUNT, Conf_AnnHash_MEMOHASH_CYCLES);
 }
-static void populateTable(Item_t* table, Buf64_t* annHash0) {
+static void populateTable(PacketCrypt_Item_t* table, Buf64_t* annHash0) {
     for (int i = 0; i < TABLE_SZ; i++) { mkitem(i, &table[i], annHash0->bytes); }
-}
-
-#define MEMCPY4(dst, src, dstlen, srclen) do { \
-        _Static_assert((srclen) == (dstlen), "srclen != dstlen"); \
-        memcpy(dst, src, srclen);                                 \
-    } while (0)
-
-static bool ccUpdateState(PcState_t* state, Item_t* item)
-{
-    uint32_t progbuf[2048];
-    RandHash_Program_t rhp = { .insns = progbuf, .len = 2048 };
-    if (RandHash_generate(&rhp, &item->bufs[15].thirtytwos[1]) < 0) { return false; }
-    if (RandHash_interpret(
-        &rhp, &state->sixtyfours[1], item->bufs[0].ints, sizeof *item, PROGRAM_CYCLES))
-    {
-        return false;
-    }
-
-    memcpy(state->sixteens[2].bytes, item, sizeof(Item_t));
-    CryptoCycle_makeFuzzable(&state->hdr);
-    CryptoCycle_crypt(&state->hdr);
-    assert(!CryptoCycle_isFailed(&state->hdr));
-    return true;
-}
-
-static void ccInitState(PcState_t* state, const Buf64_t* seed, uint64_t nonce)
-{
-    // Note, only using half the seed bytes...
-    Hash_expand(state->bytes, sizeof(PcState_t), seed->bytes, 0);
-    state->hdr.nonce = nonce;
-    CryptoCycle_makeFuzzable(&state->hdr);
-    CryptoCycle_crypt(&state->hdr);
-    assert(!CryptoCycle_isFailed(&state->hdr));
-}
-static int ccItemNo(const PcState_t* state)
-{
-    return state->sixteens[1].shorts[0] % TABLE_SZ;
 }
 
 static bool isAnnOk(Announce_t* ann, Buf32_t* parentBlockHash) {
     Announce_t _ann;
-    MEMCPY4(&_ann.hdr, &ann->hdr, sizeof _ann.hdr, sizeof ann->hdr);
-    MEMCPY4(_ann.merkleProof.thirtytwos[0].bytes, parentBlockHash->bytes,
-        sizeof _ann.merkleProof.thirtytwos[0], sizeof *parentBlockHash);
-    memset(_ann.merkleProof.thirtytwos[1].bytes, 0, 32);
-    memset(_ann.hdr.softNonce, 0, sizeof _ann.hdr.softNonce);
+    Buf_OBJCPY(&_ann.hdr, &ann->hdr);
+    Buf_OBJCPY(&_ann.merkleProof.thirtytwos[0], parentBlockHash);
+    Buf_OBJSET(&_ann.merkleProof.thirtytwos[1], 0);
+    Buf_OBJSET(_ann.hdr.softNonce, 0);
 
     Buf64_t annHash0;
     Hash_compress64(annHash0.bytes, (uint8_t*)&_ann,
         (sizeof _ann.hdr + sizeof _ann.merkleProof.sixtyfours[0]));
 
-    memcpy(_ann.merkleProof.sixtyfours[0].bytes,
-        &ann->merkleProof.bytes[(sizeof ann->merkleProof) - 64], 64);
+    Buf_OBJCPY(&_ann.merkleProof.sixtyfours[0], &ann->merkleProof.sixtyfours[13]);
 
     Buf64_t annHash1;
     Hash_compress64(annHash1.bytes, (uint8_t*)&_ann,
         (sizeof _ann.hdr + sizeof _ann.merkleProof.sixtyfours[0]));
 
-    Item_t item;
-    PcState_t state;
+    PacketCrypt_Item_t item;
+    PacketCrypt_State_t state;
     uint32_t softNonce = 0;
-    memcpy(&softNonce, ann->hdr.softNonce, sizeof ann->hdr.softNonce);
-    ccInitState(&state, &annHash1, softNonce);
+    Buf_OBJCPY_LSRC(&softNonce, ann->hdr.softNonce);
+    PacketCrypt_init(&state, &annHash1.thirtytwos[0], softNonce);
     int itemNo = -1;
     for (int i = 0; i < 3; i++) {
-        itemNo = ccItemNo(&state);
+        itemNo = PacketCrypt_getNum(&state) % TABLE_SZ;
         mkitem(itemNo, &item, annHash0.bytes);
-        if (!ccUpdateState(&state, &item)) { return false; }
+        if (!PacketCrypt_update(&state, &item, Conf_AnnHash_RANDHASH_CYCLES)) { return false; }
     }
 
     _Static_assert(sizeof ann->item4Prefix == ITEM4_PREFIX_SZ, "");
@@ -287,42 +166,46 @@ static bool isAnnOk(Announce_t* ann, Buf32_t* parentBlockHash) {
     }
 
     Buf64_t itemHash; Hash_compress64(itemHash.bytes, (uint8_t*)&item, sizeof item);
-    if (!CCMerkle_isItemValid(&ann->merkleProof, &itemHash, itemNo)) {
+    if (!Announce_Merkle_isItemValid(&ann->merkleProof, &itemHash, itemNo)) {
         assert(0);
         return false;
     }
 
     uint32_t target = ann->hdr.workBits;
-    memcpy(state.bytes, state.sixteens[12].bytes, 16);
-    //printhex(state.bytes, 32);
+    Buf_OBJCPY(&state.sixteens[0], &state.sixteens[12]);
+
+    //Hash_printHex(state.bytes, 32);
     return Work_check(state.bytes, target);
 }
 
 // 1 means success
-static int ccHash(Worker_t* w, uint32_t nonce) {
-    ccInitState(&w->state, &w->activeJob->annHash1, nonce);
+static int annHash(Worker_t* restrict w, uint32_t nonce) {
+    PacketCrypt_init(&w->state, &w->activeJob->annHash1.thirtytwos[0], nonce);
     int itemNo = -1;
     for (int i = 0; i < 3; i++) {
-        itemNo = ccItemNo(&w->state);
-        Item_t* it = &w->activeJob->table[itemNo];
-        if (!ccUpdateState(&w->state, it)) { return 0; }
+        itemNo = PacketCrypt_getNum(&w->state) % TABLE_SZ;
+        PacketCrypt_Item_t* restrict it = &w->activeJob->table[itemNo];
+        if (Compiler_unlikely(!PacketCrypt_update(&w->state, it, Conf_AnnHash_RANDHASH_CYCLES))) {
+            return 0;
+        }
     }
     uint32_t target = w->activeJob->annHdr.workBits;
 
+    if (Compiler_likely(!Work_check(w->state.bytes, target))) { return 0; }
+    PacketCrypt_final(&w->state);
     if (!Work_check(w->state.bytes, target)) { return 0; }
-    memcpy(w->state.bytes, w->state.sixteens[12].bytes, 16);
-    if (!Work_check(w->state.bytes, target)) { return 0; }
-    printhex(w->state.bytes, 32);
+    if (w->ctx->test) { Hash_printHex(w->state.bytes, 32); }
 
-    memcpy(&w->ann.hdr, &w->activeJob->annHdr, sizeof w->ann.hdr);
-    memcpy(w->ann.hdr.softNonce, &nonce, sizeof(w->ann.hdr.softNonce));
-    CCMerkle_getBranch(&w->ann.merkleProof, itemNo, &w->activeJob->merkle);
-    memcpy(w->ann.item4Prefix, &w->activeJob->table[itemNo], sizeof w->ann.item4Prefix);
+    Buf_OBJCPY(&w->ann.hdr, &w->activeJob->annHdr);
+    Buf_OBJCPY_LDST(w->ann.hdr.softNonce, &nonce);
+    Announce_Merkle_getBranch(&w->ann.merkleProof, itemNo, &w->activeJob->merkle);
+    Buf_OBJCPY_LDST(w->ann.item4Prefix, &w->activeJob->table[itemNo]);
+    //printf("itemNo %d\n", itemNo);
     return 1;
 }
 
 typedef struct {
-    AnnounceHdr_t hdr;
+    Announce_Header_t hdr;
     Buf64_t parentBlockHash;
 } Request_t;
 
@@ -330,17 +213,17 @@ static int buildJob(Context_t* ctx, Request_t* req, Job_t* j)
 {
     Time t; Time_BEGIN(t);
 
-    MEMCPY4(&j->annHdr, &req->hdr, sizeof j->annHdr, sizeof req->hdr);
-    MEMCPY4(j->parentBlockHash.bytes, req->parentBlockHash.thirtytwos[0].bytes,
-        sizeof j->parentBlockHash, sizeof req->parentBlockHash.thirtytwos[0]);
-    memset(req->parentBlockHash.thirtytwos[1].bytes, 0, sizeof req->parentBlockHash.thirtytwos[1]);
+    Buf_OBJCPY(&j->annHdr, &req->hdr);
+    Buf_OBJCPY(&j->parentBlockHash, &req->parentBlockHash.thirtytwos[0]);
+    Buf_OBJSET(&req->parentBlockHash.thirtytwos[1], 0);
     Hash_compress64(j->annHash0.bytes, (uint8_t*)req, sizeof *req);
 
     populateTable(j->table, &j->annHash0);
 
-    CCMerkle_build(&j->merkle, (uint8_t*)j->table, sizeof *j->table);
+    Announce_Merkle_build(&j->merkle, (uint8_t*)j->table, sizeof *j->table);
 
-    memcpy(req->parentBlockHash.bytes, CCMerkle_root(&j->merkle), 64);
+    Buf64_t* root = Announce_Merkle_root(&j->merkle);
+    Buf_OBJCPY(&req->parentBlockHash, root);
     Hash_compress64(j->annHash1.bytes, (uint8_t*)req, sizeof *req);
 
     Time_END(t);
@@ -351,13 +234,14 @@ static int buildJob(Context_t* ctx, Request_t* req, Job_t* j)
 #define CYCLES_PER_SEARCH 100
 
 // 1 == found
-static int search(Worker_t* w)
+static int search(Worker_t* restrict w)
 {
     int nonce = w->softNonce;
     for (int i = 1; i < CYCLES_PER_SEARCH; i++) {
-        if (!ccHash(w, nonce++)) { continue; }
+        if (Compiler_likely(!annHash(w, nonce++))) { continue; }
         if (nonce > 0x00ffffff) { return 0; }
         assert(isAnnOk(&w->ann, &w->activeJob->parentBlockHash));
+        //fprintf(stderr, "found\n");
         if (!w->ctx->test) {
             (void) write(STDOUT_FILENO, &w->ann, sizeof w->ann);
         }
@@ -421,8 +305,8 @@ static void stopThreads(Context_t* ctx) {
 static void setTestVal(Request_t* req) {
     memset(req, 0, sizeof *req);
     req->hdr.parentBlockHeight = 122;
-    req->hdr.workBits = 0x20000fff;
-    memcpy(req->parentBlockHash.bytes, "abcdefghijklmnopqrstuvwxyz012345", 32);
+    req->hdr.workBits = 0x1e0fffff;
+    Buf_OBJCPY(&req->parentBlockHash.thirtytwos[0], "abcdefghijklmnopqrstuvwxyz01234");
 }
 
 static void nsleep(long nanos) {
@@ -440,13 +324,18 @@ static void mainLoop(Context_t* ctx)
     for (int hardNonce = 0; hardNonce < 0x7fffffff; hardNonce++) {
         for (int i = 0; i < 1000; i++) {
             if (!ctx->test) {
-                nextReqOs += read(STDIN_FILENO, &nextReq, sizeof nextReq - nextReqOs);
-                assert(((int)sizeof nextReq) - nextReqOs >= 0);
-                if (sizeof nextReq - nextReqOs == 0) {
-                    memcpy(&req, &nextReq, sizeof req);
-                    nextReqOs = 0;
-                    hardNonce = 0;
-                    break;
+                ssize_t r = read(STDIN_FILENO, &nextReq, sizeof nextReq - nextReqOs);
+                if (r > 0) {
+                    nextReqOs += r;
+                    //fprintf(stderr, "read %ld, %d\n", r, nextReqOs);
+                    assert(((int)sizeof nextReq) - nextReqOs >= 0);
+                    if (sizeof nextReq - nextReqOs == 0) {
+                        //Hash_eprintHex((uint8_t*)&nextReq, sizeof nextReq);
+                        Buf_OBJCPY(&req, &nextReq);
+                        nextReqOs = 0;
+                        hardNonce = nextReq.hdr.hardNonce;
+                        break;
+                    }
                 }
             }
             nsleep(1000000);
@@ -458,6 +347,7 @@ static void mainLoop(Context_t* ctx)
             hardNonce += 2;
             req.hdr.hardNonce = hardNonce;
         }
+        fprintf(stderr, "Starting job with difficulty %08x\n", req.hdr.workBits);
         stopThreads(ctx);
         while (!threadsStopped(ctx)) { nsleep(100000); }
         if (threadsFinished(ctx)) { return; }
@@ -502,8 +392,10 @@ int main(int argc, char** argv) {
     Context_t* ctx = allocCtx(n);
     ctx->test = test;
     for (int i = 0; i < n; i++) {
-        pthread_create(&ctx->workers[i].thread, NULL, thread, &ctx->workers[i]); 
+        pthread_create(&ctx->workers[i].thread, NULL, thread, &ctx->workers[i]);
     }
+
+    assert(fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK) != -1);
 
     mainLoop(ctx);
     freeCtx(ctx);
