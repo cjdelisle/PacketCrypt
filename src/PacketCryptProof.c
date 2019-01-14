@@ -65,8 +65,8 @@ static void hashBranchBig(
         DEBUGF("-\n");
         DEBUG_OBJ(&e[0]);
         DEBUG_OBJ(&e[1]);
-        assert(e[0].end > e[0].start || e[0].end == UINT64_MAX && e[0].start == UINT64_MAX);
-        assert(e[1].end > e[1].start || e[1].end == UINT64_MAX && e[1].start == UINT64_MAX);
+        assert(e[0].end > e[0].start || (e[0].end == UINT64_MAX && e[0].start == UINT64_MAX));
+        assert(e[1].end > e[1].start || (e[1].end == UINT64_MAX && e[1].start == UINT64_MAX));
         assert(e[1].start == e[0].end);
         annNum >>= 1;
         Hash_COMPRESS32_OBJ(&e[annNum & 1].hash, &e);
