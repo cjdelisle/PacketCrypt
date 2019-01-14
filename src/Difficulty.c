@@ -37,11 +37,11 @@ static uint32_t bnGetCompact(const BIGNUM* bn)
     else
     {
         //CBigNum x;
-        BIGNUM x;
-        BN_init(&x);
-        assert(BN_rshift(&x, bn, 8*(nSize-3)));
-        nCompact = BN_get_word(&x);
-        BN_free(&x);
+        BIGNUM* x = BN_new();
+        assert(x);
+        assert(BN_rshift(x, bn, 8*(nSize-3)));
+        nCompact = BN_get_word(x);
+        BN_free(x);
     }
     // The 0x00800000 bit denotes the sign.
     // Thus, if it is already set, divide the mantissa by 256 and increase the exponent.
@@ -129,14 +129,14 @@ static inline void getEffectiveWork(
     // workOut /= annWork
     assert(BN_div(workOut, NULL, workOut, annWork, ctx));
 
-    BIGNUM bnAnnCount;
-    BN_init(&bnAnnCount);
-    setuint64(&bnAnnCount, annCount);
+    BIGNUM* bnAnnCount = BN_new();
+    assert(bnAnnCount);
+    setuint64(bnAnnCount, annCount);
 
     // workOut /= annCount
-    assert(BN_div(workOut, NULL, workOut, &bnAnnCount, ctx));
+    assert(BN_div(workOut, NULL, workOut, bnAnnCount, ctx));
 
-    BN_free(&bnAnnCount);
+    BN_free(bnAnnCount);
 }
 
 uint32_t Difficulty_getEffectiveDifficulty(uint32_t blockTar, uint32_t annTar, uint64_t annCount)
@@ -144,24 +144,24 @@ uint32_t Difficulty_getEffectiveDifficulty(uint32_t blockTar, uint32_t annTar, u
     BN_CTX* ctx = BN_CTX_new();
     assert(ctx);
 
-    BIGNUM x; BN_init(&x);
-    BIGNUM bnBlockWork; BN_init(&bnBlockWork);
-    BIGNUM bnAnnWork; BN_init(&bnAnnWork);
+    BIGNUM* x = BN_new(); assert(x);
+    BIGNUM* bnBlockWork = BN_new(); assert(bnBlockWork);
+    BIGNUM* bnAnnWork = BN_new(); assert(bnAnnWork);
 
-    bnSetCompact(&x, blockTar);
-    bnWorkForDiff(ctx, &bnBlockWork, &x);
+    bnSetCompact(x, blockTar);
+    bnWorkForDiff(ctx, bnBlockWork, x);
 
-    bnSetCompact(&x, annTar);
-    bnWorkForDiff(ctx, &bnAnnWork, &x);
+    bnSetCompact(x, annTar);
+    bnWorkForDiff(ctx, bnAnnWork, x);
 
-    getEffectiveWork(ctx, &x, &bnBlockWork, &bnAnnWork, annCount);
+    getEffectiveWork(ctx, x, bnBlockWork, bnAnnWork, annCount);
 
-    bnDiffForWork(ctx, &bnBlockWork, &x);
-    uint32_t res = bnGetCompact(&bnBlockWork);
+    bnDiffForWork(ctx, bnBlockWork, x);
+    uint32_t res = bnGetCompact(bnBlockWork);
 
-    BN_free(&x);
-    BN_free(&bnBlockWork);
-    BN_free(&bnAnnWork);
+    BN_free(x);
+    BN_free(bnBlockWork);
+    BN_free(bnAnnWork);
     BN_CTX_free(ctx);
 
     return res > 0x207fffff ? 0x207fffff : res;

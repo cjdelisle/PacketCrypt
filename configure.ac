@@ -57,5 +57,13 @@ AC_FUNC_MALLOC
 AC_FUNC_REALLOC
 AC_CHECK_FUNCS([gettimeofday memset])
 
+# conditionals
+AC_ARG_ENABLE([difftest],
+    AS_HELP_STRING([--enable-difftest], [Build difftest which requires an old version of openssl,
+ only needed for testing]),
+    [ enable_difftest=yes ]
+)
+AM_CONDITIONAL([ENABLE_DIFFTEST], [test x$enable_difftest = xyes])
+
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT
