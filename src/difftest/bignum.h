@@ -14,6 +14,8 @@
 #include <stdexcept>
 #include <stdint.h>
 #include <vector>
+#include <limits>
+#include <algorithm>
 
 #ifdef __APPLE__
 // Apple ships with openssl and then complains when you use it
