@@ -52,6 +52,12 @@ _Static_assert(sizeof(Buf64_t) == 64, "buf64 size");
         memset((dst), (val), Buf_SIZEOF(dst)); \
     } while (0)
 
+#define Buf_OBJCMP(dst, src) __extension__ ({ \
+        _Static_assert(Buf_SIZEOF(dst) == Buf_SIZEOF(src), "sizeof *(dst) != sizeof *(src)"); \
+        _Static_assert(Buf_SIZEOF(dst) != sizeof(char*), "sizeof *(dst) is size of a pointer"); \
+        memcmp((dst), (src), Buf_SIZEOF(dst)); \
+    })
+
 static __attribute__((unused)) inline void Buf_test() {
     struct {
         struct {
@@ -69,5 +75,10 @@ static __attribute__((unused)) inline void Buf_test() {
     _Static_assert(Buf_SIZEOF(&_ann.hdr.version) == 1, "");
     _Static_assert(Buf_SIZEOF(&_ann.hdr.workBits) == 4, "");
 }
+
+typedef struct {
+    uint32_t len;
+    uint8_t bytes[];
+} Buf_VarLen_t;
 
 #endif

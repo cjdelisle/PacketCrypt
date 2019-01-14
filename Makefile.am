@@ -6,19 +6,24 @@ CFLAGS = \
     -Wno-pointer-sign \
     -Wno-unused-parameter \
     -std=c11 \
-    -Ofast -march=native -flto
+    -g \
+    -O0 -march=native -Werror
 
 bin_PROGRAMS = pcblk pcann simplehash difftest
 lib_LIBRARIES = libprogsupport.a
 
 pcblk_SOURCES = src/pcblk.c \
     src/Hash.c \
-    src/BlkMerkle.c \
     src/PacketCrypt.c \
     src/CryptoCycle.c \
     src/Work.c \
     src/Difficulty.c \
-    src/Difficulty.h
+    src/Difficulty.h \
+    src/PacketCryptProof.c \
+    src/PacketCryptProof.h \
+    src/PcCompress.h \
+    src/PcCompress.c \
+    src/Bits.h
 pcblk_CFLAGS = ${sodium_CFLAGS} ${PTHREAD_CFLAGS} ${CRYPTO_CFLAGS} -DNO_RANDHASH
 pcblk_LDADD = ${sodium_LIBS} ${PTHREAD_LDFLAGS} ${CRYPTO_LIBS}
 

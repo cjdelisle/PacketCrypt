@@ -21,3 +21,5 @@ configure
 /libprogsupport.a
 /simplehash
 /pcann
+/pcblk
+/announcements.bin
