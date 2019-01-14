@@ -33,7 +33,7 @@ pcblk_SOURCES = src/pcblk.c \
     src/PcCompress.h \
     src/PcCompress.c \
     src/Bits.h
-pcblk_CFLAGS = ${sodium_CFLAGS} ${PTHREAD_CFLAGS} ${CRYPTO_CFLAGS} -DNO_RANDHASH
+pcblk_CFLAGS = ${sodium_CFLAGS} ${PTHREAD_CFLAGS} ${CRYPTO_CFLAGS} -DNO_RANDHASH -fsanitize=address -lasan
 pcblk_LDADD = ${sodium_LIBS} ${PTHREAD_LDFLAGS} ${CRYPTO_LIBS}
 
 pcann_SOURCES = src/pcann.c \

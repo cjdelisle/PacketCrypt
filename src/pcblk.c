@@ -171,10 +171,10 @@ static void test(
     Announce_t* anns
 ) {
     hdr->timeSeconds = 0;
-    tree->totalAnns = 16384;
+    //uint64_t x = 16384; assert(tree->totalAnns > x); tree->totalAnns = x;
     for(;;) {
         printf("Set tree size %lu\n", (unsigned long)tree->totalAnns);
-        //PacketCryptProof_prepareTree(tree);
+        PacketCryptProof_prepareTree(tree);
         PacketCryptProof_computeTree(tree);
         for (int i = 0; i < 50; i++) {
             fprintf(stderr, "Time             %08x\n", hdr->timeSeconds);
@@ -212,6 +212,7 @@ int main(int argc, char** argv) {
     if (getAnns(&anns, &count, testing)) {
         return 100;
     }
+    assert(anns);
 
     PacketCryptProof_Tree_t* tree = PacketCryptProof_allocTree(count);
     for (uint64_t i = 0; i < count; i++) {
@@ -222,6 +223,7 @@ int main(int argc, char** argv) {
 
     // Order tbe big buffer
     Announce_t* anns2 = malloc(sizeof(Announce_t) * tree->totalAnns);
+    assert(anns2);
     for (uint64_t i = 0; i < tree->totalAnns; i++) {
         Buf_OBJCPY(&anns2[i], &anns[tree->entries[i].start]);
     }

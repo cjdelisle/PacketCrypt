@@ -98,10 +98,15 @@ static void hashBig(
     Buf_OBJCPY(bufOut, &root[0]);
 }
 
+static uint64_t mkSize(uint64_t totalAnns)
+{
+    return entryCount(totalAnns) * sizeof(Entry_t) + sizeof(PacketCryptProof_Tree_t);
+}
+
 PacketCryptProof_Tree_t* PacketCryptProof_allocTree(uint64_t totalAnns)
 {
-    uint64_t size = entryCount(totalAnns) * sizeof(Entry_t) + sizeof(PacketCryptProof_Tree_t);
-    PacketCryptProof_Tree_t* out = calloc(size, 1);
+    uint64_t size = mkSize(totalAnns);
+    PacketCryptProof_Tree_t* out = malloc(size);
     assert(out);
     out->totalAnns = totalAnns;
     return out;
@@ -116,25 +121,24 @@ static int sortingComparitor(const void* negIfFirst, const void* posIfFirst)
 }
 uint64_t PacketCryptProof_prepareTree(PacketCryptProof_Tree_t* tree) {
     // store the index so the caller can sort their buffer
-    for (uint64_t i = 1; i < tree->totalAnns; i++) { tree->entries[i].start = i; }
+    for (uint64_t i = 0; i < tree->totalAnns; i++) { tree->entries[i].start = i; }
     // sort
     qsort(tree->entries, tree->totalAnns, sizeof(Entry_t), sortingComparitor);
-    uint64_t o = 0;
-    uint64_t i = 0;
 
     // hashes beginning with 0x0000000000000000 are forbidden
+    uint64_t i = 0;
     for (; i < tree->totalAnns; i++) {
         if (tree->entries[i].hash.longs[0]) { break; }
     }
-    i++;
 
+    uint64_t o = 0;
     // Remove duplicates
-    for (; i < tree->totalAnns; i++) {
-        if (tree->entries[i].hash.longs[0] == tree->entries[o].hash.longs[0]) { continue; }
-        o++;
+    for (; i < tree->totalAnns;) {
         if (i > o) { Buf_OBJCPY(&tree->entries[o], &tree->entries[i]); }
+        i++;
+        if (tree->entries[i].hash.longs[0] != tree->entries[o].hash.longs[0]) { o++; }
     }
-    o++;
+
     // hashes beginning with 0xffffffffffffffff are not accepted either
     while (o > 0 && tree->entries[o - 1].hash.longs[0] == UINT64_MAX) { o--; }
 
@@ -145,11 +149,12 @@ uint64_t PacketCryptProof_prepareTree(PacketCryptProof_Tree_t* tree) {
 void PacketCryptProof_computeTree(PacketCryptProof_Tree_t* tree)
 {
     // setup the start and end fields
+    Buf_OBJSET(&tree->entries[tree->totalAnns], 0xff);
     for (uint64_t i = 0; i < tree->totalAnns; i++) {
         tree->entries[i].start = tree->entries[i].hash.longs[0];
         tree->entries[i].end = tree->entries[i+1].hash.longs[0];
+        assert(tree->entries[i].end > tree->entries[i].start);
     }
-    tree->entries[tree->totalAnns-1].end = UINT64_MAX;
 
     uint64_t countThisLayer = tree->totalAnns;
     uint64_t odx = countThisLayer;
@@ -162,7 +167,7 @@ void PacketCryptProof_computeTree(PacketCryptProof_Tree_t* tree)
         }
         for (uint64_t i = 0; i < countThisLayer; i += 2) {
             struct TwoEntries { Entry_t e[2]; };
-            Hash_COMPRESS32_OBJ(&tree->entries[odx].hash, (struct TwoEntries*)&tree->entries[idx]);
+            Hash_COMPRESS32_OBJ(&tree->entries[odx].hash, (struct TwoEntries*)(&tree->entries[idx]));
             tree->entries[odx].start = tree->entries[idx].start;
             tree->entries[odx].end = tree->entries[idx+1].end;
             assert(tree->entries[idx].end > tree->entries[idx].start);
