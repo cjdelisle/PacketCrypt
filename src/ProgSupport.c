@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
 
     for (int i = 0; i < RandHash_INOUT_SZ; i++) { printf("%08x", ctx->hash.ints[i]); } printf("\n");
 
-    printf("Time spent: %llu micros\n", Time_MICROS(t));
-    
+    printf("Time spent: %lu micros\n", (unsigned long)Time_MICROS(t));
+
     free(ctx);
 }

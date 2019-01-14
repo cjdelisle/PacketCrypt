@@ -178,10 +178,13 @@ static void test(
         PacketCryptProof_computeTree(tree);
         for (int i = 0; i < 50; i++) {
             fprintf(stderr, "Time             %08x\n", hdr->timeSeconds);
-            fprintf(stderr, "Ann count        %llu\n", tree->totalAnns);
+            fprintf(stderr, "Ann count        %lu\n", (unsigned long)tree->totalAnns);
             Result_t res = mine(hdr, anns, (uint32_t) tree->totalAnns, effectiveTarget, true); //todo count 64
-            fprintf(stderr, "found! %llu %llu %llu %llu %d\n",
-                res.items[0], res.items[1], res.items[2], res.items[3], res.nonce);
+            fprintf(stderr, "found! %lu %lu %lu %lu %d\n",
+                (unsigned long)res.items[0],
+                (unsigned long)res.items[1],
+                (unsigned long)res.items[2],
+                (unsigned long)res.items[3], res.nonce);
 
             int proofSz = -1;
             uint8_t* proof = PacketCryptProof_mkProof(&proofSz, tree, res.items);

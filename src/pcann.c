@@ -227,7 +227,7 @@ static int buildJob(Context_t* ctx, Request_t* req, Job_t* j)
     Hash_compress64(j->annHash1.bytes, (uint8_t*)req, sizeof *req);
 
     Time_END(t);
-    fprintf(stderr, "populateTable took:  %llu microseconds\n", Time_MICROS(t));
+    fprintf(stderr, "populateTable took:  %lu microseconds\n", (unsigned long)Time_MICROS(t));
     return 0;
 }
 
@@ -364,8 +364,8 @@ static void mainLoop(Context_t* ctx)
         }
 
         Time_END(ctx->time);
-        fprintf(stderr, "%llu hashes per second\n",
-            (totalHashes * 1024) / (Time_MICROS(ctx->time) / 1024));
+        fprintf(stderr, "%lu hashes per second\n",
+            (unsigned long)((totalHashes * 1024) / (Time_MICROS(ctx->time) / 1024)));
         Time_NEXT(ctx->time);
 
         pthread_cond_broadcast(&ctx->cond);
