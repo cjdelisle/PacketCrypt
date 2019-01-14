@@ -12,9 +12,8 @@ static uint64_t pathForNum(uint64_t num, int branchHeight) {
 
 // consensus-critical
 static PcCompress_Entry_t* getEntryByIndex(PcCompress_t* tbl, uint16_t num) {
-    assert(num < tbl->capacity);
+    assert(num < tbl->count);
     PcCompress_Entry_t* e = &tbl->entries[num];
-    assert(e->flags & PcCompress_F_PRESENT);
     return e;
 }
 
@@ -36,7 +35,7 @@ PcCompress_Entry_t* PcCompress_getAnn(PcCompress_t* tbl, uint64_t annNum) {
 
 // consensus-critical
 PcCompress_Entry_t* PcCompress_getParent(PcCompress_t* tbl, PcCompress_Entry_t* e) {
-    if (e->parent >= tbl->capacity) {
+    if (e->parent >= tbl->count) {
         assert(e->parent == UINT16_MAX);
         assert(e == tbl->entries);
         return NULL;
@@ -64,16 +63,17 @@ static int mkEntries2(
     uint64_t annCount
 ) {
     uint16_t eNum = *nextFree;
-    Util_BUG_IF(eNum >= tbl->capacity);
+    Util_BUG_IF(eNum >= tbl->count);
     *nextFree = eNum + 1;
     PcCompress_Entry_t* e = &tbl->entries[eNum];
     e->parent = parentNum;
 
     uint64_t mask = UINT64_MAX << iDepth;
 
-    uint16_t flags = PcCompress_F_PRESENT;
+    uint16_t flags = 0;
     flags |= ((bits >> iDepth) & 1) ? PcCompress_F_RIGHT : 0;
     flags |= (iDepth == 0) ? PcCompress_F_LEAF : 0;
+    flags |= ((bits & mask) == 0) ? PcCompress_F_FIRST_ENTRY : 0;
 
     for (int i = 0; i < NUM_PROOFS; i++) {
         if ((annNumbers[i] ^ bits) & mask) { continue; }
@@ -95,7 +95,7 @@ static int mkEntries2(
         Util_BUG_IF(mkEntries2(tbl, annNumbers, nextBits, iDepth - 1, eNum, nextFree, annCount));
 
         if (tbl->entries[e->childRight].flags & PcCompress_F_PAD_ENTRY) {
-            e->flags |= PcCompress_F_PAD_SIBLING;
+            tbl->entries[e->childLeft].flags |= PcCompress_F_PAD_SIBLING;
         }
         return 0;
     }
@@ -129,13 +129,14 @@ PcCompress_t* PcCompress_mkEntryTable2(
     int capacity = branchHeight * NUM_PROOFS * 3;
     PcCompress_t* out = calloc(sizeof(PcCompress_t) + sizeof(PcCompress_Entry_t) * capacity, 1);
     assert(out);
-    out->capacity = capacity;
+    out->count = capacity;
     out->branchHeight = branchHeight;
     uint16_t nextFree = 0;
     if (mkEntries2(out, annNumbers, 0, branchHeight, UINT16_MAX, &nextFree, annCount)) {
         free(out);
         return NULL;
     }
+    out->count = nextFree;
     return out;
 }
 
@@ -152,7 +153,7 @@ static void mkEntries(
     uint16_t right
 ) {
     uint16_t eNum = *nextFree;
-    assert(eNum < tbl->capacity);
+    assert(eNum < tbl->count);
     *nextFree = eNum + 1;
     PcCompress_Entry_t* e = &tbl->entries[eNum];
     e->parent = parentNum;
@@ -166,7 +167,7 @@ static void mkEntries(
             // this entry IS an announcement
             e->childLeft = UINT16_MAX;
             e->childRight = UINT16_MAX;
-            e->flags = right | PcCompress_F_PRESENT | PcCompress_F_LEAF | PcCompress_F_COMPUTABLE;
+            e->flags = right | PcCompress_F_LEAF | PcCompress_F_COMPUTABLE;
             return;
         }
         assert(depth != tbl->branchHeight);
@@ -178,7 +179,13 @@ static void mkEntries(
         mkEntries(tbl, annPaths, nextBits, depth+1, nextFree,
             eNum, pathCount, annCount, PcCompress_F_RIGHT);
 
-        e->flags = right | PcCompress_F_PRESENT | PcCompress_F_COMPUTABLE;
+        e->flags = right | PcCompress_F_COMPUTABLE;
+        if (tbl->entries[e->childRight].flags & PcCompress_F_PAD_ENTRY) {
+            tbl->entries[e->childLeft].flags |= PcCompress_F_PAD_SIBLING;
+        }
+        if (!(bits & mask)) {
+            e->flags |= PcCompress_F_FIRST_ENTRY;
+        }
         return;
     }
 
@@ -189,7 +196,7 @@ static void mkEntries(
     if (pathForNum(bits, tbl->branchHeight) >= annCount) {
         assert(right);
         // It's a pad entry
-        e->flags = right | PcCompress_F_PRESENT | PcCompress_F_PAD_ENTRY |
+        e->flags = right | PcCompress_F_PAD_ENTRY |
             PcCompress_F_HAS_HASH | PcCompress_F_HAS_RANGE | PcCompress_F_HAS_START;
         if (depth == tbl->branchHeight) { e->flags |= PcCompress_F_LEAF; }
         Buf_OBJSET(&e->e, 0xff);
@@ -197,9 +204,12 @@ static void mkEntries(
     }
 
     // it's a sibling for which data must be provided
-    e->flags = right | PcCompress_F_PRESENT;
+    e->flags = right;
     if (depth == tbl->branchHeight) {
         e->flags |= PcCompress_F_LEAF;
+    }
+    if (!(bits & mask)) {
+        e->flags |= PcCompress_F_FIRST_ENTRY;
     }
     return;
 }
@@ -223,17 +233,25 @@ PcCompress_t* PcCompress_mkEntryTable(
     int capacity = branchHeight * NUM_PROOFS * 3;
     PcCompress_t* out = calloc(sizeof(PcCompress_t) + sizeof(PcCompress_Entry_t) * capacity, 1);
     assert(out);
-    out->capacity = capacity;
+    out->count = capacity;
     out->branchHeight = branchHeight;
     uint16_t nextFree = 0;
     mkEntries(out, annPaths, 0, 0, &nextFree, UINT16_MAX, pathCount, annCount, 0);
-    return out;
+    out->count = nextFree;
+
+    PcCompress_t* out2 = PcCompress_mkEntryTable2(annCount, annNumbers);
+    assert(out->count == out2->count);
+    assert(!memcmp(out, out2, sizeof(PcCompress_t) + sizeof(PcCompress_Entry_t) * out->count));
+    free(out);
+    return out2;
 }
 
 bool PcCompress_hasExplicitRange(PcCompress_Entry_t* e)
 {
     // right leaf needs an explicit range provided at the beginning
-    if (PcCompress_HAS_ALL(e->flags, (PcCompress_F_LEAF | PcCompress_F_RIGHT))) {
+    if ((e->flags & (PcCompress_F_LEAF | PcCompress_F_RIGHT | PcCompress_F_PAD_ENTRY)) ==
+        (PcCompress_F_LEAF | PcCompress_F_RIGHT))
+    {
         return true;
     }
 

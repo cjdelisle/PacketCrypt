@@ -173,13 +173,13 @@ static void test(
     hdr->timeSeconds = 0;
     //uint64_t x = 16384; assert(tree->totalAnns > x); tree->totalAnns = x;
     for(;;) {
-        printf("Set tree size %lu\n", (unsigned long)tree->totalAnns);
-        PacketCryptProof_prepareTree(tree);
+        uint64_t annCount = PacketCryptProof_prepareTree(tree);
+        printf("Set tree size %lu\n", (unsigned long)annCount);
         PacketCryptProof_computeTree(tree);
         for (int i = 0; i < 50; i++) {
             fprintf(stderr, "Time             %08x\n", hdr->timeSeconds);
-            fprintf(stderr, "Ann count        %lu\n", (unsigned long)tree->totalAnns);
-            Result_t res = mine(hdr, anns, (uint32_t) tree->totalAnns, effectiveTarget, true); //todo count 64
+            fprintf(stderr, "Ann count        %lu\n", (unsigned long)annCount);
+            Result_t res = mine(hdr, anns, (uint32_t) annCount, effectiveTarget, true); //todo count 64
             fprintf(stderr, "found! %lu %lu %lu %lu %d\n",
                 (unsigned long)res.items[0],
                 (unsigned long)res.items[1],
@@ -199,7 +199,7 @@ static void test(
 
             hdr->timeSeconds++;
         }
-        tree->totalAnns--;
+        tree->totalAnnsZeroIncluded--;
     }
 }
 
@@ -222,9 +222,9 @@ int main(int argc, char** argv) {
     count = PacketCryptProof_prepareTree(tree);
 
     // Order tbe big buffer
-    Announce_t* anns2 = malloc(sizeof(Announce_t) * tree->totalAnns);
+    Announce_t* anns2 = malloc(sizeof(Announce_t) * count);
     assert(anns2);
-    for (uint64_t i = 0; i < tree->totalAnns; i++) {
+    for (uint64_t i = 0; i < count; i++) {
         Buf_OBJCPY(&anns2[i], &anns[tree->entries[i].start]);
     }
     free(anns);
@@ -236,7 +236,7 @@ int main(int argc, char** argv) {
     fflush(stdout);
 
     uint32_t minAnnounceWork = 0;
-    for (uint64_t i = 0; i < tree->totalAnns; i++) {
+    for (uint64_t i = 0; i < count; i++) {
         //fprintf(stderr, "ann work %08x\n", anns[i].hdr.workBits);
         minAnnounceWork = (anns[i].hdr.workBits > minAnnounceWork) ?
             anns[i].hdr.workBits : minAnnounceWork;
@@ -246,14 +246,14 @@ int main(int argc, char** argv) {
     if (getBlockHdr(&hdr, testing)) { return 100; }
 
     uint32_t effectiveTarget =
-        Difficulty_getEffectiveDifficulty(hdr.workBits, minAnnounceWork, tree->totalAnns);
+        Difficulty_getEffectiveDifficulty(hdr.workBits, minAnnounceWork, count);
 
     fprintf(stderr, "Effective target %08x\n", effectiveTarget);
 
     if (testing) {
         test(effectiveTarget, &hdr, tree, anns);
     } else {
-        Result_t res = mine(&hdr, anns, (uint32_t) tree->totalAnns, effectiveTarget, testing); //todo count 64
+        Result_t res = mine(&hdr, anns, (uint32_t) count, effectiveTarget, testing); //todo count 64
 
         int proofSz = -1;
         uint8_t* proof = PacketCryptProof_mkProof(&proofSz, tree, res.items);

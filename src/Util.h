@@ -28,7 +28,7 @@ static inline uint64_t Util_reverse64(uint64_t x)
     #undef RM
 }
 
-//#define DEBUG
+#define DEBUG
 #ifdef DEBUG
 #define Util_INVAL_IF(expr) assert(!(expr))
 #define Util_BUG_IF(expr) assert(!(expr))
@@ -36,7 +36,7 @@ static inline uint64_t Util_reverse64(uint64_t x)
 #define Util_INVAL_IF(expr) do { if (expr) { return -1; } } while (0)
 #define Util_BUG_IF(expr) do { \
     if (!(expr)) { break; } \
-    fprintf(stderr, "BUG %s%d (%s)\n", __FILE__, __LINE__, #expr); \
+    fprintf(stderr, "BUG %s:%d (%s)\n", __FILE__, __LINE__, #expr); \
     return -2; \
 } while (0)
 #endif

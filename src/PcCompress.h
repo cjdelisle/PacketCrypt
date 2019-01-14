@@ -7,15 +7,18 @@
 #include <stdbool.h>
 
 enum {
+    // constants
     PcCompress_F_COMPUTABLE =   1,
     PcCompress_F_PAD_ENTRY =   (1<<1),
-    PcCompress_F_HAS_HASH =    (1<<2),
-    PcCompress_F_HAS_RANGE =   (1<<3),
-    PcCompress_F_HAS_START =   (1<<4),
-    PcCompress_F_LEAF =        (1<<5),
-    PcCompress_F_RIGHT =       (1<<6),
-    PcCompress_F_PAD_SIBLING = (1<<7),
-    PcCompress_F_PRESENT =     (1<<8),
+    PcCompress_F_LEAF =        (1<<2),
+    PcCompress_F_RIGHT =       (1<<3),
+    PcCompress_F_PAD_SIBLING = (1<<4),
+    PcCompress_F_FIRST_ENTRY = (1<<5),
+
+    // manipulated by PacketCryptProof.c
+    PcCompress_F_HAS_HASH =    (1<<8),
+    PcCompress_F_HAS_RANGE =   (1<<9),
+    PcCompress_F_HAS_START =   (1<<10)
 };
 
 typedef struct {
@@ -35,7 +38,7 @@ _Static_assert(sizeof(PcCompress_Entry_t) == 8+sizeof(Entry_t), "");
 
 typedef struct {
     int branchHeight;
-    int capacity;
+    int count;
     PcCompress_Entry_t entries[];
 } PcCompress_t;
 _Static_assert(sizeof(PcCompress_t) == 8, "");

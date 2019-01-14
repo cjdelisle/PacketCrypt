@@ -20,6 +20,13 @@
 #define DEBUGF(...)
 #endif
 
+typedef struct {
+    uint64_t totalAnns;
+    Buf32_t root;
+    Entry_t entries[];
+} Tree_t;
+_Static_assert(sizeof(Tree_t) == sizeof(PacketCryptProof_Tree_t) - sizeof(Entry_t), "");
+
 static uint64_t entryCount(uint64_t totalAnns) {
     uint64_t out = 0;
     while (totalAnns > 1) {
@@ -98,17 +105,13 @@ static void hashBig(
     Buf_OBJCPY(bufOut, &root[0]);
 }
 
-static uint64_t mkSize(uint64_t totalAnns)
-{
-    return entryCount(totalAnns) * sizeof(Entry_t) + sizeof(PacketCryptProof_Tree_t);
-}
-
 PacketCryptProof_Tree_t* PacketCryptProof_allocTree(uint64_t totalAnns)
 {
-    uint64_t size = mkSize(totalAnns);
-    PacketCryptProof_Tree_t* out = malloc(size);
+    uint64_t totalAnnsZeroIncluded = totalAnns + 1;
+    uint64_t size = entryCount(totalAnnsZeroIncluded) * sizeof(Entry_t) + sizeof(Tree_t);
+    PacketCryptProof_Tree_t* out = calloc(size, 1);
     assert(out);
-    out->totalAnns = totalAnns;
+    out->totalAnnsZeroIncluded = totalAnnsZeroIncluded;
     return out;
 }
 
@@ -120,20 +123,22 @@ static int sortingComparitor(const void* negIfFirst, const void* posIfFirst)
         (nif->hash.longs[0] > pif->hash.longs[0]) ? 1 : 0;
 }
 uint64_t PacketCryptProof_prepareTree(PacketCryptProof_Tree_t* tree) {
+    uint64_t totalAnns = tree->totalAnnsZeroIncluded - 1;
+
     // store the index so the caller can sort their buffer
-    for (uint64_t i = 0; i < tree->totalAnns; i++) { tree->entries[i].start = i; }
+    for (uint64_t i = 0; i < totalAnns; i++) { tree->entries[i].start = i; }
     // sort
-    qsort(tree->entries, tree->totalAnns, sizeof(Entry_t), sortingComparitor);
+    qsort(tree->entries, totalAnns, sizeof(Entry_t), sortingComparitor);
 
     // hashes beginning with 0x0000000000000000 are forbidden
     uint64_t i = 0;
-    for (; i < tree->totalAnns; i++) {
+    for (; i < totalAnns; i++) {
         if (tree->entries[i].hash.longs[0]) { break; }
     }
 
     uint64_t o = 0;
     // Remove duplicates
-    for (; i < tree->totalAnns;) {
+    for (; i < totalAnns;) {
         if (i > o) { Buf_OBJCPY(&tree->entries[o], &tree->entries[i]); }
         i++;
         if (tree->entries[i].hash.longs[0] != tree->entries[o].hash.longs[0]) { o++; }
@@ -142,12 +147,14 @@ uint64_t PacketCryptProof_prepareTree(PacketCryptProof_Tree_t* tree) {
     // hashes beginning with 0xffffffffffffffff are not accepted either
     while (o > 0 && tree->entries[o - 1].hash.longs[0] == UINT64_MAX) { o--; }
 
-    tree->totalAnns = o;
-    return tree->totalAnns;
+    tree->totalAnnsZeroIncluded = o + 1;
+    return o;
 }
 
-void PacketCryptProof_computeTree(PacketCryptProof_Tree_t* tree)
+void PacketCryptProof_computeTree(PacketCryptProof_Tree_t* _tree)
 {
+    Tree_t* tree = (Tree_t*) _tree;
+
     // setup the start and end fields
     Buf_OBJSET(&tree->entries[tree->totalAnns], 0xff);
     for (uint64_t i = 0; i < tree->totalAnns; i++) {
@@ -198,9 +205,10 @@ static void freeProofBig(PacketCryptProof_Big_t* pcpb)
 }
 
 static PacketCryptProof_Big_t* mkProofBig(
-    const PacketCryptProof_Tree_t* tree,
+    const PacketCryptProof_Tree_t* _tree,
     const uint64_t annNumbers[static NUM_PROOFS]
 ) {
+    const Tree_t* tree = (const Tree_t*) _tree;
     PacketCryptProof_Big_t* out = malloc(sizeof(PacketCryptProof_Big_t));
     assert(out);
     out->totalAnns = tree->totalAnns;
@@ -284,8 +292,7 @@ static uint8_t* compress(int* sizeOut,
 
     int hashes = 0;
     int ranges = 0;
-    for (int i = 0; i < tbl->capacity; i++) {
-        if (!(tbl->entries[i].flags & PcCompress_F_PRESENT)) { break; }
+    for (int i = 0; i < tbl->count; i++) {
         ranges += PcCompress_hasExplicitRange(&tbl->entries[i]);
         hashes += !(tbl->entries[i].flags & (PcCompress_F_COMPUTABLE | PcCompress_F_PAD_ENTRY));
     }
@@ -309,8 +316,7 @@ static uint8_t* compress(int* sizeOut,
     } while (0)
 
     // Write out the main hashes and ranges needed to make the proof
-    for (int i = 0; i < tbl->capacity; i++) {
-        if (!(tbl->entries[i].flags & PcCompress_F_PRESENT)) { break; }
+    for (int i = 0; i < tbl->count; i++) {
         if (PcCompress_hasExplicitRange(&tbl->entries[i])) {
             assert(PcCompress_HAS_ALL(tbl->entries[i].flags,
                 (PcCompress_F_HAS_START | PcCompress_F_HAS_RANGE)));
@@ -357,9 +363,8 @@ int PacketCryptProof_hashProof(
     }
 
     // Fill in the hashes and ranges which are provided
-    for (int i = 0; i < tbl->capacity; i++) {
+    for (int i = 0; i < tbl->count; i++) {
         PcCompress_Entry_t* e = &tbl->entries[i];
-        if (!(e->flags & PcCompress_F_PRESENT)) { break; }
         if (PcCompress_hasExplicitRange(e)) {
             READ(&e->e.end);
             e->flags |= PcCompress_F_HAS_RANGE;
@@ -407,9 +412,7 @@ int PacketCryptProof_hashProof(
             // No sum of ranges can be greater than UINT_MAX or less than 1
             Util_INVAL_IF(sib->e.end <= sib->e.start);
         }
-        e->flags &= ~PcCompress_F_COMPUTABLE;
         e->flags |= PcCompress_F_HAS_START | PcCompress_F_HAS_RANGE;
-        sib->flags &= ~PcCompress_F_COMPUTABLE;
         sib->flags |= PcCompress_F_HAS_START | PcCompress_F_HAS_RANGE;
     }
 
@@ -435,7 +438,10 @@ int PacketCryptProof_hashProof(
             // We can't compute any further because we need to compute the other
             // sibling in order to continue. When we get to the last announcement,
             // that will hash up the whole way.
-            if (sib->flags & PcCompress_F_COMPUTABLE) { break; }
+            if (!PcCompress_HAS_ALL(sib->flags, (PcCompress_F_HAS_HASH | PcCompress_F_HAS_RANGE)))
+            {
+                break;
+            }
 
             // assertions
             Util_BUG_IF(!(parent->flags & PcCompress_F_COMPUTABLE));
@@ -488,7 +494,6 @@ int PacketCryptProof_hashProof(
             Hash_COMPRESS32_OBJ(&parent->e.hash, &buf);
             parent->e.start = buf[0].start;
             parent->e.end = buf[1].end;
-            parent->flags &= ~PcCompress_F_COMPUTABLE;
             parent->flags |= (
                 PcCompress_F_HAS_HASH | PcCompress_F_HAS_RANGE | PcCompress_F_HAS_START);
             e = parent;
@@ -497,9 +502,11 @@ int PacketCryptProof_hashProof(
 
     PcCompress_Entry_t* root = PcCompress_getRoot(tbl);
 
-    Util_BUG_IF(!(root && root->flags == (
-        PcCompress_F_PRESENT | PcCompress_F_HAS_START |
-        PcCompress_F_HAS_HASH | PcCompress_F_HAS_RANGE)));
+    Util_BUG_IF(!(root->flags == (
+        PcCompress_F_HAS_START | PcCompress_F_HAS_HASH |
+        PcCompress_F_HAS_RANGE | PcCompress_F_COMPUTABLE |
+        PcCompress_F_FIRST_ENTRY)));
+    Util_BUG_IF(root->e.start != 0 || root->e.end != UINT64_MAX);
 
     Hash_COMPRESS32_OBJ(hashOut, &root->e);
     free(tbl);
@@ -511,11 +518,13 @@ uint8_t* PacketCryptProof_mkProof(
     const PacketCryptProof_Tree_t* tree,
     const uint64_t annNumbers[static NUM_PROOFS]
 ) {
-    PacketCryptProof_Big_t* big = mkProofBig(tree, annNumbers);
-    const Entry_t* announces[] = {
-        &tree->entries[annNumbers[0]], &tree->entries[annNumbers[1]],
-        &tree->entries[annNumbers[2]], &tree->entries[annNumbers[3]],
-    };
+    uint64_t annNumbers2[NUM_PROOFS];
+    const Entry_t* announces[NUM_PROOFS];
+    for (int i = 0; i < NUM_PROOFS; i++) {
+        annNumbers2[i] = annNumbers[i] + 1;
+        announces[i] = &tree->entries[annNumbers[i]];
+    }
+    PacketCryptProof_Big_t* big = mkProofBig(tree, annNumbers2);
     uint8_t* ret = compress(sizeOut, big, announces);
     freeProofBig(big);
 

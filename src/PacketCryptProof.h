@@ -15,7 +15,7 @@ typedef struct {
 _Static_assert(sizeof(Entry_t) == 32+8+8, "");
 
 typedef struct {
-    uint64_t totalAnns;
+    uint64_t totalAnnsZeroIncluded;
     Buf32_t root;
     Entry_t zeroEntry;
     Entry_t entries[];
