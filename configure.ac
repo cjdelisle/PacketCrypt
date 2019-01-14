@@ -12,6 +12,8 @@ AC_PROG_CC
 AC_PROG_CXX
 AC_PROG_RANLIB
 
+AX_CXX_COMPILE_STDCXX_11([ext],[mandatory])
+
 # Checks for libraries.
 PKG_CHECK_MODULES([sodium], [libsodium], [], [
     AC_MSG_ERROR([

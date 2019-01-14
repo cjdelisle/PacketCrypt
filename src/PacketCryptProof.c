@@ -98,15 +98,10 @@ static void hashBig(
     Buf_OBJCPY(bufOut, &root[0]);
 }
 
-static uint64_t mkSize(uint64_t totalAnns)
-{
-    return entryCount(totalAnns) * sizeof(Entry_t) + sizeof(PacketCryptProof_Tree_t);
-}
-
 PacketCryptProof_Tree_t* PacketCryptProof_allocTree(uint64_t totalAnns)
 {
-    uint64_t size = mkSize(totalAnns);
-    PacketCryptProof_Tree_t* out = malloc(size);
+    uint64_t size = entryCount(totalAnns) * sizeof(Entry_t) + sizeof(PacketCryptProof_Tree_t);
+    PacketCryptProof_Tree_t* out = calloc(size, 1);
     assert(out);
     out->totalAnns = totalAnns;
     return out;
@@ -125,8 +120,16 @@ uint64_t PacketCryptProof_prepareTree(PacketCryptProof_Tree_t* tree) {
     // sort
     qsort(tree->entries, tree->totalAnns, sizeof(Entry_t), sortingComparitor);
     uint64_t o = 0;
+    uint64_t i = 0;
+
+    // hashes beginning with 0x0000000000000000 are forbidden
+    for (; i < tree->totalAnns; i++) {
+        if (tree->entries[i].hash.longs[0]) { break; }
+    }
+    i++;
+
     // Remove duplicates
-    for (uint64_t i = 1; i < tree->totalAnns; i++) {
+    for (; i < tree->totalAnns; i++) {
         if (tree->entries[i].hash.longs[0] == tree->entries[o].hash.longs[0]) { continue; }
         o++;
         if (i > o) { Buf_OBJCPY(&tree->entries[o], &tree->entries[i]); }

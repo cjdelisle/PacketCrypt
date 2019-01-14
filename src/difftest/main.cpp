@@ -78,7 +78,7 @@ static inline void checkEffectiveWork(
             return;
         }
         printf("\n");
-        printf("annCount           %08llx\n", annCount);
+        printf("annCount           %08lx\n", (unsigned long)annCount);
         printf("specifiedWork      %s\n", specifiedWork.GetHex().c_str());
         printf("effectiveWork      %s\n", effectiveWork.GetHex().c_str());
         printf("annWork            %s\n", annWork.GetHex().c_str());

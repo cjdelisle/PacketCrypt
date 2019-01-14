@@ -9,6 +9,15 @@ CFLAGS = \
     -g \
     -O0 -march=native -Werror
 
+CXXFLAGS = \
+    --pedantic \
+    -Wall \
+    -Wextra \
+    -Wno-unused-parameter \
+    -std=c++11 \
+    -g \
+    -O0 -march=native -Werror
+
 bin_PROGRAMS = pcblk pcann simplehash difftest
 lib_LIBRARIES = libprogsupport.a
 

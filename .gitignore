@@ -24,4 +24,6 @@ configure
 /pcblk
 /announcements.bin
 /difftest
+/*.dSYM
+
 
