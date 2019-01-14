@@ -173,7 +173,7 @@ static void test(
     hdr->timeSeconds = 0;
     tree->totalAnns = 16384;
     for(;;) {
-        printf("Set tree size %llu\n", tree->totalAnns);
+        printf("Set tree size %lu\n", (unsigned long)tree->totalAnns);
         //PacketCryptProof_prepareTree(tree);
         PacketCryptProof_computeTree(tree);
         for (int i = 0; i < 50; i++) {
