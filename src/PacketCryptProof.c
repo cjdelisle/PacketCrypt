@@ -378,6 +378,7 @@ int PacketCryptProof_hashProof(
     #undef READ
 
     // Calculate the start and end for each of the announcements and their siblings
+    // We treat leaf siblings specially because right leafs have no explicit range
     for (int i = 0; i < NUM_PROOFS; i++) {
         PcCompress_Entry_t* e = PcCompress_getAnn(tbl, hdr.annNumbers[i]);
         Util_BUG_IF(!PcCompress_HAS_ALL(e->flags, (PcCompress_F_HAS_HASH | PcCompress_F_LEAF)));
@@ -406,12 +407,6 @@ int PacketCryptProof_hashProof(
             sib->e.end += sib->e.start;
         }
         Util_INVAL_IF(e->e.end <= e->e.start);
-        if (sib->flags & PcCompress_F_PAD_ENTRY) {
-            Util_BUG_IF(!IS_FFFF(&sib->e));
-        } else {
-            // No sum of ranges can be greater than UINT_MAX or less than 1
-            Util_INVAL_IF(sib->e.end <= sib->e.start);
-        }
         e->flags |= PcCompress_F_HAS_START | PcCompress_F_HAS_RANGE;
         sib->flags |= PcCompress_F_HAS_START | PcCompress_F_HAS_RANGE;
     }
@@ -438,10 +433,7 @@ int PacketCryptProof_hashProof(
             // We can't compute any further because we need to compute the other
             // sibling in order to continue. When we get to the last announcement,
             // that will hash up the whole way.
-            if (!PcCompress_HAS_ALL(sib->flags, (PcCompress_F_HAS_HASH | PcCompress_F_HAS_RANGE)))
-            {
-                break;
-            }
+            if (!(sib->flags & PcCompress_F_HAS_HASH)) { break; }
 
             // assertions
             Util_BUG_IF(!(parent->flags & PcCompress_F_COMPUTABLE));
@@ -449,19 +441,14 @@ int PacketCryptProof_hashProof(
                 PcCompress_F_HAS_HASH | PcCompress_F_HAS_RANGE | PcCompress_F_HAS_START));
             const bool eIsRight = !!(e->flags & PcCompress_F_RIGHT);
 
-            if (sib->flags & PcCompress_F_PAD_SIBLING) {
-                if (eIsRight) {
-                    sib->e.start = 0;
-                    sib->e.end = e->e.start;
-                } else {
-                    sib->e.start = e->e.end;
-                    sib->e.end = UINT64_MAX;
-                }
+            if (!(sib->flags & PcCompress_F_HAS_RANGE)) {
+                Util_BUG_IF(!(sib->flags & PcCompress_F_PAD_SIBLING) || eIsRight);
+                sib->e.end = UINT64_MAX - e->e.end;
+                sib->flags |= PcCompress_F_HAS_RANGE;
             }
 
             Util_BUG_IF(!PcCompress_HAS_ALL(sib->flags, (
                 PcCompress_F_HAS_HASH | PcCompress_F_HAS_RANGE)));
-
 
             if (!(sib->flags & PcCompress_F_HAS_START)) {
                 if (eIsRight) {

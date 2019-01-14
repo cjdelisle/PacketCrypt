@@ -255,8 +255,11 @@ bool PcCompress_hasExplicitRange(PcCompress_Entry_t* e)
         return true;
     }
 
-    // anything that is not a leaf, not computable, and not a pad entry nor a sibling of one
+    // anything that is not a LEAF
+    // not a COMPUTABLE
+    // not a PAD_ENTRY nor a sibling of one
     return (!(e->flags & (
-        PcCompress_F_PAD_SIBLING | PcCompress_F_LEAF |
-        PcCompress_F_COMPUTABLE | PcCompress_F_PAD_ENTRY)));
+        PcCompress_F_LEAF |
+        PcCompress_F_COMPUTABLE |
+        PcCompress_F_PAD_ENTRY | PcCompress_F_PAD_SIBLING)));
 }

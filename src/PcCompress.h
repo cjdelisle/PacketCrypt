@@ -12,8 +12,10 @@ enum {
     PcCompress_F_PAD_ENTRY =   (1<<1),
     PcCompress_F_LEAF =        (1<<2),
     PcCompress_F_RIGHT =       (1<<3),
+
     PcCompress_F_PAD_SIBLING = (1<<4),
-    PcCompress_F_FIRST_ENTRY = (1<<5),
+    PcCompress_F_FIRST_ENTRY = (1<<5), // 0x20
+
 
     // manipulated by PacketCryptProof.c
     PcCompress_F_HAS_HASH =    (1<<8),

@@ -28,7 +28,7 @@ static inline uint64_t Util_reverse64(uint64_t x)
     #undef RM
 }
 
-#define DEBUG
+//#define DEBUG
 #ifdef DEBUG
 #define Util_INVAL_IF(expr) assert(!(expr))
 #define Util_BUG_IF(expr) assert(!(expr))
