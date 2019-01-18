@@ -59,14 +59,14 @@ pcblk_SOURCES = src/pcblk.c \
                                 include/BlockMiner.h \
                                 include/PacketCrypt.h
 pcblk_CFLAGS = -Iinclude
-pcblk_LDADD = ${sodium_LIBS} ${PTHREAD_LDFLAGS} ${CRYPTO_LIBS} libpacketcrypt.a
+pcblk_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_LDFLAGS} ${CRYPTO_LIBS}
 
 bin_PROGRAMS += pcann
 pcann_SOURCES = src/pcann.c \
                                 include/AnnMiner.h \
                                 include/PacketCrypt.h
 pcann_CFLAGS = -Iinclude
-pcann_LDADD = ${sodium_LIBS} ${PTHREAD_LDFLAGS} ${CRYPTO_LIBS} libpacketcrypt.a
+pcann_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_LDFLAGS} ${CRYPTO_LIBS}
 
 bin_PROGRAMS += simplehash
 simplehash_SOURCES = src/simplehash.c \
