@@ -5,4 +5,6 @@
 
 uint32_t Difficulty_getEffectiveDifficulty(uint32_t blockTar, uint32_t annTar, uint64_t annCount);
 
+uint32_t Difficulty_degradeAnnouncementDifficulty(uint32_t annTar, uint32_t annAgeBlocks);
+
 #endif

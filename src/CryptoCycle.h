@@ -1,7 +1,10 @@
 #ifndef CRYPTOCYCLE_H
 #define CRYPTOCYCLE_H
 
+#include "Buf.h"
+
 #include <stdint.h>
+#include <stdbool.h>
 
 /*
  * Crypto query header:
@@ -174,5 +177,32 @@ CryptoCycle_SETTER_GETTER(25, 7, setVersion, getVersion)
 void CryptoCycle_makeFuzzable(CryptoCycle_Header_t* restrict hdr);
 
 void CryptoCycle_crypt(CryptoCycle_Header_t* restrict msg);
+
+typedef union {
+    CryptoCycle_Header_t hdr;
+    Buf_TYPES(2048);
+    Buf16_t sixteens[128];
+    Buf32_t thirtytwos[64];
+    Buf64_t sixtyfours[32];
+} CryptoCycle_State_t;
+_Static_assert(sizeof(CryptoCycle_State_t) == 2048, "");
+
+typedef union {
+    Buf_TYPES(1024);
+    Buf16_t sixteens[64];
+    Buf32_t thirtytwos[32];
+    Buf64_t sixtyfours[16];
+} CryptoCycle_Item_t;
+_Static_assert(sizeof(CryptoCycle_Item_t) == 1024, "");
+
+void CryptoCycle_init(CryptoCycle_State_t* state, Buf32_t* seed, uint64_t nonce);
+
+bool CryptoCycle_update(CryptoCycle_State_t* state, CryptoCycle_Item_t* item, int randHashCycles);
+
+void CryptoCycle_final(CryptoCycle_State_t* state);
+
+static inline uint32_t PacketCrypt_getNum(CryptoCycle_State_t* state) {
+    return state->sixteens[1].shorts[0];
+}
 
 #endif

@@ -55,7 +55,7 @@ PcCompress_Entry_t* PcCompress_getSibling(PcCompress_t* tbl, PcCompress_Entry_t*
 
 static int mkEntries2(
     PcCompress_t* tbl,
-    const uint64_t annNumbers[static NUM_PROOFS],
+    const uint64_t annNumbers[static PacketCrypt_NUM_ANNS],
     uint64_t bits,
     uint16_t iDepth,
     uint16_t parentNum,
@@ -75,7 +75,7 @@ static int mkEntries2(
     flags |= (iDepth == 0) ? PcCompress_F_LEAF : 0;
     flags |= ((bits & mask) == 0) ? PcCompress_F_FIRST_ENTRY : 0;
 
-    for (int i = 0; i < NUM_PROOFS; i++) {
+    for (int i = 0; i < PacketCrypt_NUM_ANNS; i++) {
         if ((annNumbers[i] ^ bits) & mask) { continue; }
         e->flags = flags | PcCompress_F_COMPUTABLE;
 
@@ -120,13 +120,13 @@ static int mkEntries2(
 
 PcCompress_t* PcCompress_mkEntryTable2(
     uint64_t annCount,
-    const uint64_t annNumbers[static NUM_PROOFS]
+    const uint64_t annNumbers[static PacketCrypt_NUM_ANNS]
 ) {
-    for (int i = 0; i < NUM_PROOFS; i++) {
+    for (int i = 0; i < PacketCrypt_NUM_ANNS; i++) {
         if (annNumbers[i] >= annCount) { return NULL; }
     }
     int branchHeight = Util_log2ceil(annCount);
-    int capacity = branchHeight * NUM_PROOFS * 3;
+    int capacity = branchHeight * PacketCrypt_NUM_ANNS * 3;
     PcCompress_t* out = calloc(sizeof(PcCompress_t) + sizeof(PcCompress_Entry_t) * capacity, 1);
     assert(out);
     out->count = capacity;
@@ -143,7 +143,7 @@ PcCompress_t* PcCompress_mkEntryTable2(
 // consensus-critical
 static void mkEntries(
     PcCompress_t* tbl,
-    const uint64_t annPaths[static NUM_PROOFS],
+    const uint64_t annPaths[static PacketCrypt_NUM_ANNS],
     uint64_t bits,
     int depth,
     uint16_t* nextFree,
@@ -159,7 +159,7 @@ static void mkEntries(
     e->parent = parentNum;
 
     uint64_t mask = (1ull << depth) - 1;
-    for (int i = 0; i < NUM_PROOFS; i++) {
+    for (int i = 0; i < PacketCrypt_NUM_ANNS; i++) {
         if ((annPaths[i] ^ bits) & mask) { continue; }
         // This entry is a parent of an announcement
 
@@ -217,9 +217,9 @@ static void mkEntries(
 // consensus-critical
 PcCompress_t* PcCompress_mkEntryTable(
     uint64_t annCount,
-    const uint64_t annNumbers[static NUM_PROOFS]
+    const uint64_t annNumbers[static PacketCrypt_NUM_ANNS]
 ) {
-    for (int i = 0; i < NUM_PROOFS; i++) {
+    for (int i = 0; i < PacketCrypt_NUM_ANNS; i++) {
         if (annNumbers[i] >= annCount) { return NULL; }
     }
     int branchHeight = Util_log2ceil(annCount);
@@ -230,7 +230,7 @@ PcCompress_t* PcCompress_mkEntryTable(
         pathForNum(annNumbers[2], branchHeight), pathForNum(annNumbers[3], branchHeight)
     };
 
-    int capacity = branchHeight * NUM_PROOFS * 3;
+    int capacity = branchHeight * PacketCrypt_NUM_ANNS * 3;
     PcCompress_t* out = calloc(sizeof(PcCompress_t) + sizeof(PcCompress_Entry_t) * capacity, 1);
     assert(out);
     out->count = capacity;

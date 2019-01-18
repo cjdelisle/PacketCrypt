@@ -1,4 +1,6 @@
 #include "CryptoCycle.h"
+#include "RandHash.h"
+#include "Hash.h"
 
 #include "sodium/crypto_onetimeauth_poly1305.h"
 #include "sodium/utils.h"
@@ -73,4 +75,47 @@ void CryptoCycle_crypt(CryptoCycle_Header_t* restrict msg)
     }
 
     crypto_onetimeauth_poly1305_final(&state, msg->key_high_or_auth);
+}
+
+void CryptoCycle_init(
+    CryptoCycle_State_t* restrict state,
+    Buf32_t* restrict seed,
+    uint64_t nonce)
+{
+    Hash_expand(state->bytes, sizeof(CryptoCycle_State_t), seed->bytes, 0);
+    state->hdr.nonce = nonce;
+    CryptoCycle_makeFuzzable(&state->hdr);
+    CryptoCycle_crypt(&state->hdr);
+    assert(!CryptoCycle_isFailed(&state->hdr));
+}
+
+bool CryptoCycle_update(
+    CryptoCycle_State_t* restrict state,
+    CryptoCycle_Item_t* restrict item,
+    int randHashCycles)
+{
+    if (randHashCycles) {
+        #ifdef NO_RANDHASH
+            assert(0);
+        #else
+        uint32_t progbuf[2048];
+        RandHash_Program_t rhp = { .insns = progbuf, .len = 2048 };
+        if (RandHash_generate(&rhp, &item->thirtytwos[31]) < 0) { return false; }
+        if (RandHash_interpret(
+            &rhp, &state->sixtyfours[1], item->ints, sizeof *item, randHashCycles))
+        {
+            return false;
+        }
+        #endif
+    }
+
+    memcpy(state->sixteens[2].bytes, item, sizeof *item);
+    CryptoCycle_makeFuzzable(&state->hdr);
+    CryptoCycle_crypt(&state->hdr);
+    assert(!CryptoCycle_isFailed(&state->hdr));
+    return true;
+}
+
+void CryptoCycle_final(CryptoCycle_State_t* restrict state) {
+    memcpy(state->bytes, state->sixteens[12].bytes, 16);
 }

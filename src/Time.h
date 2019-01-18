@@ -1,4 +1,8 @@
+#ifndef TIME_H
+#define TIME_H
+
 #include <sys/time.h>
+#include <time.h>
 
 typedef struct {
     struct timeval tv0;
@@ -11,3 +15,10 @@ typedef struct {
 #define Time_MICROS(t) ( \
     ((t).tv1.tv_sec - (t).tv0.tv_sec) * 1000000ull + (t).tv1.tv_usec - (t).tv0.tv_usec \
 )
+
+static inline void Time_nsleep(long nanos) {
+    struct timespec req = { 0, nanos };
+    nanosleep(&req, NULL);
+}
+
+#endif

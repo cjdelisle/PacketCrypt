@@ -9,6 +9,8 @@ CFLAGS = \
     -g \
     -O0 -march=native -Werror
 
+#-fsanitize=address -lasan
+
 CXXFLAGS = \
     --pedantic \
     -Wall \
@@ -21,35 +23,50 @@ CXXFLAGS = \
 bin_PROGRAMS =
 lib_LIBRARIES =
 
+lib_LIBRARIES += libprogsupport.a
+libprogsupport_a_SOURCES = src/ProgSupport.c src/Hash.c
+
+lib_LIBRARIES += libpacketcrypt.a
+libpacketcrypt_a_SOURCES = Makefile\
+                                include/PacketCrypt.h \
+    src/Validate.c              include/Validate.h \
+    src/AnnMiner.c              include/AnnMiner.h \
+    src/BlockMiner.c            include/BlockMiner.h \
+    src/AnnMerkle.c             src/AnnMerkle.h \
+    src/Announce.c              src/Announce.h \
+                                src/Buf.h \
+                                src/Conf.h \
+    src/CryptoCycle.c           src/CryptoCycle.h \
+                                src/DecodeInsn.h \
+    src/Difficulty.c            src/Difficulty.h \
+    src/Hash.c                  src/Hash.h \
+                                src/OpCodes.h \
+                                src/OpTemplate.h \
+    src/PacketCryptProof.c      src/PacketCryptProof.h \
+    src/PcCompress.c            src/PcCompress.h \
+    src/RandGen.c               src/RandGen.h \
+    src/RandHash_interpreted.c \
+    src/RandHash.c              src/RandHash.h \
+                                src/Time.h \
+                                src/Util.h \
+                                src/Vec.h \
+    src/Work.c                  src/Work.h
+
+libpacketcrypt_a_CFLAGS = ${CRYPTO_CFLAGS} ${sodium_CFLAGS} ${PTHREAD_CFLAGS} -Iinclude
+
 bin_PROGRAMS += pcblk
 pcblk_SOURCES = src/pcblk.c \
-    src/Hash.c \
-    src/PacketCrypt.c \
-    src/CryptoCycle.c \
-    src/Work.c \
-    src/Difficulty.c \
-    src/Difficulty.h \
-    src/PacketCryptProof.c \
-    src/PacketCryptProof.h \
-    src/PcCompress.h \
-    src/PcCompress.c \
-    src/Bits.h
-pcblk_CFLAGS = ${sodium_CFLAGS} ${PTHREAD_CFLAGS} ${CRYPTO_CFLAGS} -DNO_RANDHASH
-pcblk_LDADD = ${sodium_LIBS} ${PTHREAD_LDFLAGS} ${CRYPTO_LIBS}
+                                include/BlockMiner.h \
+                                include/PacketCrypt.h
+pcblk_CFLAGS = -Iinclude
+pcblk_LDADD = ${sodium_LIBS} ${PTHREAD_LDFLAGS} ${CRYPTO_LIBS} libpacketcrypt.a
 
 bin_PROGRAMS += pcann
 pcann_SOURCES = src/pcann.c \
-    src/RandGen.c   \
-    src/RandHash.c  \
-    src/RandHash_interpreted.c \
-    src/PrintProg.c \
-    src/Work.c  \
-    src/CryptoCycle.c \
-    src/Hash.c \
-    src/AnnMerkle.c \
-    src/PacketCrypt.c
-pcann_CFLAGS = ${sodium_CFLAGS} ${PTHREAD_CFLAGS} ${CRYPTO_CFLAGS}
-pcann_LDADD = ${sodium_LIBS} ${PTHREAD_LDFLAGS} ${CRYPTO_LIBS}
+                                include/AnnMiner.h \
+                                include/PacketCrypt.h
+pcann_CFLAGS = -Iinclude
+pcann_LDADD = ${sodium_LIBS} ${PTHREAD_LDFLAGS} ${CRYPTO_LIBS} libpacketcrypt.a
 
 bin_PROGRAMS += simplehash
 simplehash_SOURCES = src/simplehash.c \
@@ -70,6 +87,3 @@ difftest_SOURCES = src/difftest/main.cpp \
 difftest_CFLAGS = ${CRYPTO_CFLAGS}
 difftest_LDADD = ${CRYPTO_LIBS}
 endif
-
-lib_LIBRARIES += libprogsupport.a
-libprogsupport_a_SOURCES = src/ProgSupport.c src/Hash.c

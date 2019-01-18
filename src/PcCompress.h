@@ -47,7 +47,7 @@ _Static_assert(sizeof(PcCompress_t) == 8, "");
 
 PcCompress_t* PcCompress_mkEntryTable(
     uint64_t annCount,
-    const uint64_t annNumbers[static NUM_PROOFS]
+    const uint64_t annNumbers[static PacketCrypt_NUM_ANNS]
 );
 
 PcCompress_Entry_t* PcCompress_getRoot(PcCompress_t* tbl);

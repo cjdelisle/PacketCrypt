@@ -1,6 +1,11 @@
 #ifndef ANNOUNCE_H
 #define ANNOUNCE_H
 
+#include "packetcrypt/PacketCrypt.h"
+#include "CryptoCycle.h"
+
+#define Announce_ITEM_HASHCOUNT (sizeof(CryptoCycle_Item_t) / 64)
+
 #define Announce_MERKLE_DEPTH 13
 
 #define AnnMerkle_DEPTH Announce_MERKLE_DEPTH
@@ -8,65 +13,24 @@
 #include "AnnMerkle.h"
 _Static_assert(sizeof(Announce_Merkle_Branch) == (Announce_MERKLE_DEPTH+1)*64, "");
 
-/**
- * Announcement header:
- *
- *     0               1               2               3
- *     0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
- *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- *  0 |    version    |                   soft_nonce                  |
- *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- *  4 |                          hard_nonce                           |
- *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- *  8 |                          work_bits                            |
- *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * 12 |                     parent_block_height                       |
- *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * 16 |                                                               |
- *    +                         content_type                          +
- * 20 |                                                               |
- *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * 24 |                                                               |
- *    +                                                               +
- * 28 |                                                               |
- *    +                                                               +
- * 32 |                                                               |
- *    +                                                               +
- * 36 |                                                               |
- *    +                         content_hash                          +
- * 40 |                                                               |
- *    +                                                               +
- * 44 |                                                               |
- *    +                                                               +
- * 48 |                                                               |
- *    +                                                               +
- * 52 |                                                               |
- *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- *
- *
- * Announcement:
- *
- * [ Header 0:56 ][ AnnMerkle proof 56:952 ][ Item 4 Prefix 952:1024 ]
- */
-typedef struct {
-    uint8_t version;
-    uint8_t softNonce[3];
-    uint32_t hardNonce;
-    uint32_t workBits;
-    uint32_t parentBlockHeight;
+#define Announce_TABLE_SZ (1<<Announce_MERKLE_DEPTH)
 
-    uint64_t contentType;
-    uint8_t contentHash[32];
-} Announce_Header_t;
-_Static_assert(sizeof(Announce_Header_t) == 56, "");
+#define Announce_lastAnnPfx_SZ \
+    (1024 - sizeof(PacketCrypt_AnnounceHdr_t) - sizeof(Announce_Merkle_Branch))
+_Static_assert(Announce_lastAnnPfx_SZ == 72, "");
 
-#define ITEM4_PREFIX_SZ (1024 - sizeof(Announce_Header_t) - sizeof(Announce_Merkle_Branch))
 typedef struct {
-    Announce_Header_t hdr;
+    PacketCrypt_AnnounceHdr_t hdr;
     Announce_Merkle_Branch merkleProof;
-    uint8_t item4Prefix[ITEM4_PREFIX_SZ];
+    uint8_t lastAnnPfx[Announce_lastAnnPfx_SZ];
 } Announce_t;
 _Static_assert(sizeof(Announce_t) == 1024, "");
 
+union Announce_Union {
+    PacketCrypt_Announce_t pcAnn;
+    Announce_t ann;
+};
+
+void Announce_mkitem(uint64_t num, CryptoCycle_Item_t* item, uint8_t seed[64]);
 
 #endif

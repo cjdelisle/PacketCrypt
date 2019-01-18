@@ -1,6 +1,10 @@
 #ifndef CONF_H
 #define CONF_H
 
+// parentBlockHeight -> x -> y -> valid
+//         0            1    2      3
+#define Conf_PacketCrypt_ANN_WAIT_PERIOD 3
+
 // How many times to run the random hash program per announcement hash cycle
 #define Conf_AnnHash_RANDHASH_CYCLES 4
 

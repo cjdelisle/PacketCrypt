@@ -1,4 +1,5 @@
 #include "Difficulty.h"
+#include "Conf.h"
 
 #include <assert.h>
 #include <stdbool.h>
@@ -165,4 +166,30 @@ uint32_t Difficulty_getEffectiveDifficulty(uint32_t blockTar, uint32_t annTar, u
     BN_CTX_free(ctx);
 
     return res > 0x207fffff ? 0x207fffff : res;
+}
+
+uint32_t Difficulty_degradeAnnouncementDifficulty(uint32_t annTar, uint32_t annAgeBlocks)
+{
+    if (annAgeBlocks < Conf_PacketCrypt_ANN_WAIT_PERIOD) { return -1; }
+    if (annAgeBlocks == Conf_PacketCrypt_ANN_WAIT_PERIOD) { return annTar; }
+    annAgeBlocks -= Conf_PacketCrypt_ANN_WAIT_PERIOD;
+    BN_CTX* ctx = BN_CTX_new(); assert(ctx);
+    BIGNUM* bnAnnTar = BN_new(); assert(bnAnnTar);
+    BIGNUM* bnAnnWork = BN_new(); assert(bnAnnWork);
+    BIGNUM* bnAnnAgeBlocks = BN_new(); assert(bnAnnAgeBlocks);
+    setuint64(bnAnnAgeBlocks, annAgeBlocks);
+
+    bnSetCompact(bnAnnTar, annTar);
+    bnWorkForDiff(ctx, bnAnnWork, bnAnnTar);
+    assert(BN_div(bnAnnWork, NULL, bnAnnWork, bnAnnAgeBlocks, ctx));
+    bnDiffForWork(ctx, bnAnnTar, bnAnnWork);
+    uint32_t out = bnGetCompact(bnAnnTar);
+
+    BN_free(bnAnnTar);
+    BN_free(bnAnnWork);
+    BN_free(bnAnnAgeBlocks);
+    BN_CTX_free(ctx);
+
+    // if out > 0x207fffff then it rounds to zero, meaning the announcement cannot be mined
+    return out > 0x207fffff ? 0xffffffff : out;
 }

@@ -42,8 +42,8 @@ static uint64_t entryCount(uint64_t totalAnns) {
 
 typedef struct {
     uint64_t totalAnns;
-    uint64_t annNumbers[NUM_PROOFS];
-    Entry_t* branches[NUM_PROOFS];
+    uint64_t annNumbers[PacketCrypt_NUM_ANNS];
+    Entry_t* branches[PacketCrypt_NUM_ANNS];
 } PacketCryptProof_Big_t;
 
 // for self-testing
@@ -94,11 +94,11 @@ static void hashBranchBig(
 static void hashBig(
     Buf32_t* bufOut,
     const PacketCryptProof_Big_t* pcp,
-    const Buf32_t* annHashes[static NUM_PROOFS]
+    const Buf32_t* annHashes[static PacketCrypt_NUM_ANNS]
 ) {
     Buf32_t root[2];
     int bh = BRANCH_HEIGHT(pcp);
-    for (int i = 0; i < NUM_PROOFS; i++) {
+    for (int i = 0; i < PacketCrypt_NUM_ANNS; i++) {
         hashBranchBig(&root[i&1], annHashes[i], pcp->annNumbers[i], pcp->branches[i], bh);
         assert(i == 0 || !Buf_OBJCMP(&root[0], &root[1]));
     }
@@ -126,7 +126,10 @@ uint64_t PacketCryptProof_prepareTree(PacketCryptProof_Tree_t* tree) {
     uint64_t totalAnns = tree->totalAnnsZeroIncluded - 1;
 
     // store the index so the caller can sort their buffer
-    for (uint64_t i = 0; i < totalAnns; i++) { tree->entries[i].start = i; }
+    for (uint64_t i = 0; i < totalAnns; i++) {
+        tree->entries[i].start = i;
+        tree->entries[i].end = UINT64_MAX;
+    }
     // sort
     qsort(tree->entries, totalAnns, sizeof(Entry_t), sortingComparitor);
 
@@ -200,20 +203,20 @@ void PacketCryptProof_freeTree(PacketCryptProof_Tree_t* bm) {
 
 static void freeProofBig(PacketCryptProof_Big_t* pcpb)
 {
-    for (int i = 0; i < NUM_PROOFS; i++) { free(pcpb->branches[i]); }
+    for (int i = 0; i < PacketCrypt_NUM_ANNS; i++) { free(pcpb->branches[i]); }
     free(pcpb);
 }
 
 static PacketCryptProof_Big_t* mkProofBig(
     const PacketCryptProof_Tree_t* _tree,
-    const uint64_t annNumbers[static NUM_PROOFS]
+    const uint64_t annNumbers[static PacketCrypt_NUM_ANNS]
 ) {
     const Tree_t* tree = (const Tree_t*) _tree;
     PacketCryptProof_Big_t* out = malloc(sizeof(PacketCryptProof_Big_t));
     assert(out);
     out->totalAnns = tree->totalAnns;
     const int bh = BRANCH_HEIGHT(tree);
-    for (int i = 0; i < NUM_PROOFS; i++) {
+    for (int i = 0; i < PacketCrypt_NUM_ANNS; i++) {
         uint64_t offset = out->annNumbers[i] = annNumbers[i];
         uint64_t base = 0;
         uint64_t count = tree->totalAnns;
@@ -245,12 +248,6 @@ static PacketCryptProof_Big_t* mkProofBig(
     return out;
 }
 
-typedef struct {
-    uint64_t totalAnns;
-    uint64_t annNumbers[NUM_PROOFS];
-} PacketCryptProof_Compressed_t;
-_Static_assert(sizeof(PacketCryptProof_Compressed_t) == 8+(8*NUM_PROOFS), "");
-
 static const char* FFFF =
     "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
     "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
@@ -262,10 +259,10 @@ static const char* FFFF =
 
 static uint8_t* compress(int* sizeOut,
                          const PacketCryptProof_Big_t* pcp,
-                         const Entry_t* announcements[static NUM_PROOFS])
+                         const Entry_t* announcements[static PacketCrypt_NUM_ANNS])
 {
     PcCompress_t* tbl = PcCompress_mkEntryTable(pcp->totalAnns, pcp->annNumbers);
-    for (int i = 0; i < NUM_PROOFS; i++) {
+    for (int i = 0; i < PacketCrypt_NUM_ANNS; i++) {
         PcCompress_Entry_t* e = PcCompress_getAnn(tbl, pcp->annNumbers[i]);
         Buf_OBJCPY(&e->e, announcements[i]);
         e->flags |= PcCompress_F_HAS_HASH | PcCompress_F_HAS_START | PcCompress_F_HAS_RANGE;
@@ -297,22 +294,16 @@ static uint8_t* compress(int* sizeOut,
         hashes += !(tbl->entries[i].flags & (PcCompress_F_COMPUTABLE | PcCompress_F_PAD_ENTRY));
     }
 
-    int size = sizeof(PacketCryptProof_Compressed_t) +
-        hashes * sizeof(Buf32_t) +
-        ranges * sizeof(uint64_t);
-    PacketCryptProof_Compressed_t* out = malloc(size);
+    int size = hashes * sizeof(Buf32_t) + ranges * sizeof(uint64_t);
+    uint8_t* out = malloc(size);
     assert(out);
 
-    // Total announcements and the announce numbers
-    out->totalAnns = pcp->totalAnns;
-    for (int i = 0; i < NUM_PROOFS; i++) { out->annNumbers[i] = pcp->annNumbers[i]; }
-
-    uint8_t* ptr = (uint8_t*) &out[1];
+    int offset = 0;
     #define WRITE(val) do { \
         uint32_t sz = Buf_SIZEOF(val); \
-        memcpy(ptr, (val), sz); \
-        (ptr) += sz; \
-        assert((ptr) <= &((uint8_t*)out)[size]); \
+        memcpy(&out[offset], (val), sz); \
+        offset += sz; \
+        assert(offset <= size); \
     } while (0)
 
     // Write out the main hashes and ranges needed to make the proof
@@ -331,17 +322,19 @@ static uint8_t* compress(int* sizeOut,
     }
     #undef WRITE
 
-    assert(ptr == &((uint8_t*)out)[size]);
+    assert(offset == size);
     *sizeOut = size;
     free(tbl);
-    return (uint8_t*) out;
+    return out;
 }
 
 // consensus-critical
 int PacketCryptProof_hashProof(
     Buf32_t* hashOut,
-    const Buf32_t annHashes[static NUM_PROOFS],
-    uint8_t* cpcp, int cpcpSize
+    const Buf32_t annHashes[static PacketCrypt_NUM_ANNS],
+    uint64_t totalAnns,
+    const uint64_t annIndexes[static PacketCrypt_NUM_ANNS],
+    const uint8_t* cpcp, int cpcpSize
 ) {
     #define READ(out) do { \
             uint32_t count = Buf_SIZEOF(out); \
@@ -351,13 +344,19 @@ int PacketCryptProof_hashProof(
             cpcp += count; \
         } while (0)
 
-    PacketCryptProof_Compressed_t hdr; READ(&hdr);
-    PcCompress_t* tbl = PcCompress_mkEntryTable(hdr.totalAnns, hdr.annNumbers);
+    // We need to bump the numbers to account for the zero entry
+    uint64_t annIdxs[PacketCrypt_NUM_ANNS];
+    for (int i = 0; i < PacketCrypt_NUM_ANNS; i++) {
+        annIdxs[i] = (annIndexes[i] % totalAnns) + 1;
+    }
+    totalAnns++;
+
+    PcCompress_t* tbl = PcCompress_mkEntryTable(totalAnns, annIdxs);
     Util_INVAL_IF(!tbl);
 
     // fill in announcement hashes
-    for (int i = 0; i < NUM_PROOFS; i++) {
-        PcCompress_Entry_t* e = PcCompress_getAnn(tbl, hdr.annNumbers[i]);
+    for (int i = 0; i < PacketCrypt_NUM_ANNS; i++) {
+        PcCompress_Entry_t* e = PcCompress_getAnn(tbl, annIdxs[i]);
         Buf_OBJCPY(&e->e.hash, &annHashes[i]);
         e->flags |= PcCompress_F_HAS_HASH;
     }
@@ -379,8 +378,8 @@ int PacketCryptProof_hashProof(
 
     // Calculate the start and end for each of the announcements and their siblings
     // We treat leaf siblings specially because right leafs have no explicit range
-    for (int i = 0; i < NUM_PROOFS; i++) {
-        PcCompress_Entry_t* e = PcCompress_getAnn(tbl, hdr.annNumbers[i]);
+    for (int i = 0; i < PacketCrypt_NUM_ANNS; i++) {
+        PcCompress_Entry_t* e = PcCompress_getAnn(tbl, annIdxs[i]);
         Util_BUG_IF(!PcCompress_HAS_ALL(e->flags, (PcCompress_F_HAS_HASH | PcCompress_F_LEAF)));
 
         // same announcement used in two proofs OR two of the announcements are neighbors
@@ -413,15 +412,15 @@ int PacketCryptProof_hashProof(
 
     // for each announcement, walk up the tree computing as far back as possible
     // at the last announcement, we must reach the root.
-    for (int i = 0; i < NUM_PROOFS; i++) {
-        PcCompress_Entry_t* e = PcCompress_getAnn(tbl, hdr.annNumbers[i]);
+    for (int i = 0; i < PacketCrypt_NUM_ANNS; i++) {
+        PcCompress_Entry_t* e = PcCompress_getAnn(tbl, annIdxs[i]);
         Util_BUG_IF(!PcCompress_HAS_ALL(e->flags, (
             PcCompress_F_HAS_HASH | PcCompress_F_HAS_RANGE | PcCompress_F_HAS_START)));
         for (;;) {
             PcCompress_Entry_t* parent = PcCompress_getParent(tbl, e);
 
             // hit the root, this means we're done.
-            // i may not be equal to NUM_PROOFS-1 if there is a duplicate announcement
+            // i may not be equal to PacketCrypt_NUM_ANNS-1 if there is a duplicate announcement
             if (!parent) { break; }
 
             // Parent has already been computed, dupe or neighboring anns
@@ -503,11 +502,11 @@ int PacketCryptProof_hashProof(
 uint8_t* PacketCryptProof_mkProof(
     int* sizeOut,
     const PacketCryptProof_Tree_t* tree,
-    const uint64_t annNumbers[static NUM_PROOFS]
+    const uint64_t annNumbers[static PacketCrypt_NUM_ANNS]
 ) {
-    uint64_t annNumbers2[NUM_PROOFS];
-    const Entry_t* announces[NUM_PROOFS];
-    for (int i = 0; i < NUM_PROOFS; i++) {
+    uint64_t annNumbers2[PacketCrypt_NUM_ANNS];
+    const Entry_t* announces[PacketCrypt_NUM_ANNS];
+    for (int i = 0; i < PacketCrypt_NUM_ANNS; i++) {
         annNumbers2[i] = annNumbers[i] + 1;
         announces[i] = &tree->entries[annNumbers[i]];
     }

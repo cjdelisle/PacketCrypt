@@ -18,6 +18,7 @@ compile
 configure
 .dirstamp
 
+/libpacketcrypt.a
 /libprogsupport.a
 /simplehash
 /pcann

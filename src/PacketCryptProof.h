@@ -2,10 +2,10 @@
 #define PACKETCRYPTPROOF_H
 #include "Buf.h"
 #include "Hash.h"
+#include "packetcrypt/PacketCrypt.h"
 
 #include <stdint.h>
 
-#define NUM_PROOFS 4
 
 typedef struct {
     Buf32_t hash;
@@ -33,14 +33,16 @@ void PacketCryptProof_freeTree(PacketCryptProof_Tree_t* bm);
 uint8_t* PacketCryptProof_mkProof(
     int* sizeOut,
     const PacketCryptProof_Tree_t* tree,
-    const uint64_t annNumbers[static NUM_PROOFS]
+    const uint64_t annNumbers[static PacketCrypt_NUM_ANNS]
 );
 
 // returns zero if the hash is valid
 int PacketCryptProof_hashProof(
     Buf32_t* hashOut,
-    const Buf32_t annHashes[static NUM_PROOFS],
-    uint8_t* cpcp, int cpcpSize
+    const Buf32_t annHashes[static PacketCrypt_NUM_ANNS],
+    uint64_t totalAnns,
+    const uint64_t annIndexes[static PacketCrypt_NUM_ANNS],
+    const uint8_t* cpcp, int cpcpSize
 );
 
 #endif

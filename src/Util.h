@@ -28,6 +28,11 @@ static inline uint64_t Util_reverse64(uint64_t x)
     #undef RM
 }
 
+#define Util_fallthrough()   __attribute__ ((fallthrough))
+
+#define Util_likely(x)       __builtin_expect((x),1)
+#define Util_unlikely(x)     __builtin_expect((x),0)
+
 //#define DEBUG
 #ifdef DEBUG
 #define Util_INVAL_IF(expr) assert(!(expr))

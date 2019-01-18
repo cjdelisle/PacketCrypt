@@ -248,17 +248,23 @@ int RandHash_interpret(
     ctx->prog = prog->insns;
     ctx->progLen = prog->len;
 
+    int ret = 0;
+
     for (int i = 0; i < cycles; i++) {
         ctx->opCtr = 0;
         interpret(ctx, 0);
+
         _Static_assert(!Conf_RandHash_MIN_OPS, "");
         if (ctx->opCtr > Conf_RandHash_MAX_OPS /* || ctx->opCtr < Conf_RandHash_MIN_OPS*/) {
-            return (ctx->opCtr > Conf_RandHash_MAX_OPS) ? RandHash_TOO_LONG : RandHash_TOO_SHORT;
+            ret = (ctx->opCtr > Conf_RandHash_MAX_OPS) ? RandHash_TOO_LONG : RandHash_TOO_SHORT;
+            break;
         }
         ctx->hashctr = 0;
         uint32_t* x = ctx->hashOut; ctx->hashOut = ctx->hashIn; ctx->hashIn = x;
     }
-    return 0;
+    Vec_free(&ctx->vars);
+    Vec_free(&ctx->scopes);
+    return ret;
 }
 
 int RandHash_execute_interpreted(

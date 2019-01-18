@@ -2,6 +2,7 @@
 #define BUF_H
 
 #include <stdint.h>
+#include <string.h>
 
 #define Buf_TYPES(byteCt) \
     uint8_t bytes[(byteCt)];  \
@@ -75,10 +76,5 @@ static __attribute__((unused)) inline void Buf_test() {
     _Static_assert(Buf_SIZEOF(&_ann.hdr.version) == 1, "");
     _Static_assert(Buf_SIZEOF(&_ann.hdr.workBits) == 4, "");
 }
-
-typedef struct {
-    uint32_t len;
-    uint8_t bytes[];
-} Buf_VarLen_t;
 
 #endif

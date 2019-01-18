@@ -50,14 +50,17 @@ for broadcasting messages across the network as well as for mining.
 The block miner's job is first to collect or create a set of announcements, they then commit
 the merkle root of their set in the coinbase. They also commit the set size and minimum amount
 of work done on any announcement in that set. Mining consists of performing a sequence of 4
-encryption and memory accesses to announcements in the set. The resulting "hash" from mining the
-data is taken from part of the encrypted data and the final definition of work is the result of:
+encryption and memory accesses to announcements in the set. The hash of the work done on the
+block must be less than the effectiveTarget, where the effectiveTarget is defined as:
 
-        (2**256 - hash) * (2**256 - minimum_announcement_work) * announcement_count
+        target_for_work( work_for_target(block_header.nBits)**3 / minimum_announcement_work / announcement_count )
+          where:
+            target_for_work(t) = 2**256 / (t + 1)
+            target_for_work(w) = (2**256 - w) / w
 
-If this work meets the difficulty requirement, the block is valid and the miner sends a proof
-containing the 4 announcements which were accessed in the winning cycle as well as the merkle
-branches necessary to prove that they were included in the committed hash.
+If this work meets the target specified in the bitcoin block header, the block is valid and the
+miner sends a proof containing the 4 announcements which were accessed in the winning cycle as
+well as the merkle branches necessary to prove that they were included in the committed hash.
 
 Though this proof is probabilistic only, faking the `announcement_count` or otherwise faking the
 announcements is not better than simply mining a smaller announcement set.
@@ -160,7 +163,7 @@ than 2048 bytes, the `len` is decreased by the algorithm and the `T` flag is set
 ##### Crypto Reply Layout
 The reply is much like the request:
 
-``` 
+```
      0               1               2               3
      0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -730,20 +733,9 @@ multiplication is is the high bits of the result.
 
 This algorithm is not completely done, there are a few things which are still missing:
 
-* [] CPU implementation of the block miner
-  * [] PacketCryptProof.c
-* [] re-implement verification code in golang
-  * [] CryptoCycle
-  * [] ann verify
-    * [] RandHash
-      * [] RandGen
-      * [] RandHash_interpreted
-    * [] AnnMerkle
-    * [] MemoHash
-  * [] blk verify
-    * [] PacketCryptProof (review)
 * [] RandHash
   * [] Can we use more memory ?
   * [] MIX instruction to frustrate program loop parallelization
   * [] ABS, MIN and MAX insns
+  * [] float instructions ?
   * [] amd64 jit
