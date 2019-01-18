@@ -1,26 +1,19 @@
 #include "packetcrypt/BlockMiner.h"
-
-//#include <stdint.h>
-
+#include "packetcrypt/PacketCrypt.h"
 #include "Buf.h"
 #include "Hash.h"
 #include "PacketCryptProof.h"
 #include "CryptoCycle.h"
-//#include "Announce.h"
 #include "Time.h"
-#include "packetcrypt/PacketCrypt.h"
 #include "Difficulty.h"
 #include "Work.h"
 #include "Util.h"
 
-//#include <stdio.h>
-//#include <string.h>
 #include <stdlib.h>
 #include <assert.h>
-//#include <errno.h>
-//#include <fcntl.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <signal.h>
 
 typedef struct Worker_s Worker_t;
 

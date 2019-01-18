@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <time.h>
+#include <signal.h>
 
 typedef struct {
     PacketCrypt_AnnounceHdr_t annHdr;
