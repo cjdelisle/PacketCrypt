@@ -16,9 +16,6 @@ typedef struct {
     ((t).tv1.tv_sec - (t).tv0.tv_sec) * 1000000ull + (t).tv1.tv_usec - (t).tv0.tv_usec \
 )
 
-static inline void Time_nsleep(long nanos) {
-    struct timespec req = { 0, nanos };
-    nanosleep(&req, NULL);
-}
+void Time_nsleep(long nanos);
 
 #endif

@@ -47,7 +47,7 @@ libpacketcrypt_a_SOURCES = Makefile\
     src/RandGen.c               src/RandGen.h \
     src/RandHash_interpreted.c \
     src/RandHash.c              src/RandHash.h \
-                                src/Time.h \
+    src/Time.c                  src/Time.h \
                                 src/Util.h \
                                 src/Vec.h \
     src/Work.c                  src/Work.h
