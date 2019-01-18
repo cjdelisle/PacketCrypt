@@ -28,7 +28,11 @@ static inline uint64_t Util_reverse64(uint64_t x)
     #undef RM
 }
 
-#define Util_fallthrough()   __attribute__ ((fallthrough))
+#if defined(__GNUC__) && __GNUC__ >= 7
+    #define Util_fallthrough() __attribute__ ((fallthrough))
+#else
+    #define Util_fallthrough() ((void)0)
+#endif
 
 #define Util_likely(x)       __builtin_expect((x),1)
 #define Util_unlikely(x)     __builtin_expect((x),0)
