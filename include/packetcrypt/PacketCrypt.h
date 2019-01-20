@@ -140,7 +140,7 @@ typedef struct {
     uint64_t numAnns;
 
     // The target representing the least work of any of the announcements in the set
-    uint32_t annTarget;
+    uint32_t annLeastWorkTarget;
 
     uint32_t effectiveTarget;
 } PacketCrypt_Coinbase_t;
