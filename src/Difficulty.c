@@ -79,7 +79,7 @@ static inline void bnDiffForWork(BN_CTX* ctx, BIGNUM* diffOut, const BIGNUM* wor
     // diffOut = 2**256
     bn256(diffOut);
 
-    // if work is zero then diff is maximum difficulty
+    // if work is zero then target is maximum (minimum difficulty)
     if (BN_is_zero(work)) { return; }
 
     // diffOut -= work
@@ -140,7 +140,7 @@ static inline void getEffectiveWork(
     BN_free(bnAnnCount);
 }
 
-uint32_t Difficulty_getEffectiveDifficulty(uint32_t blockTar, uint32_t annTar, uint64_t annCount)
+uint32_t Difficulty_getEffectiveTarget(uint32_t blockTar, uint32_t annTar, uint64_t annCount)
 {
     BN_CTX* ctx = BN_CTX_new();
     assert(ctx);
@@ -168,7 +168,7 @@ uint32_t Difficulty_getEffectiveDifficulty(uint32_t blockTar, uint32_t annTar, u
     return res > 0x207fffff ? 0x207fffff : res;
 }
 
-uint32_t Difficulty_degradeAnnouncementDifficulty(uint32_t annTar, uint32_t annAgeBlocks)
+uint32_t Difficulty_degradeAnnouncementTarget(uint32_t annTar, uint32_t annAgeBlocks)
 {
     if (annAgeBlocks < Conf_PacketCrypt_ANN_WAIT_PERIOD) { return -1; }
     if (annAgeBlocks == Conf_PacketCrypt_ANN_WAIT_PERIOD) { return annTar; }

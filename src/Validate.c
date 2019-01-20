@@ -106,10 +106,10 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
         if (Validate_checkAnn(ann, &blockHashes[i * 32])) {
             return Validate_checkBlock_ANN_INVALID(i);
         }
-        uint32_t effectiveAnnWork =
-            Difficulty_degradeAnnouncementDifficulty(ann->hdr.workBits,
+        uint32_t effectiveAnnTarget =
+            Difficulty_degradeAnnouncementTarget(ann->hdr.workBits,
                 (blockHeight - ann->hdr.parentBlockHeight));
-        if (effectiveAnnWork < coinbaseCommitment->annMinWork) {
+        if (effectiveAnnTarget < coinbaseCommitment->annLeastWorkTarget) {
             return Validate_checkBlock_ANN_INSUF_POW(i);
         }
         Hash_COMPRESS32_OBJ(&annHashes[i], ann);

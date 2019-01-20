@@ -1,9 +1,9 @@
 const Spawn = require('child_process').spawn;
 const THREADS = require('os').cpus().length;
 
-const start = (threads, difficulty, parentBlockHeight, parentBlockHash) => {
+const start = (threads, target, parentBlockHeight, parentBlockHash) => {
     const msg = Buffer.alloc(56 + 32 + 32);
-    msg.writeUInt32LE(difficulty, 8);
+    msg.writeUInt32LE(target, 8);
     msg.writeUInt32LE(parentBlockHeight, 12);
     parentBlockHash.copy(msg, 56);
 
@@ -17,7 +17,7 @@ const start = (threads, difficulty, parentBlockHeight, parentBlockHash) => {
 
 const usage = () => {
     console.error("Usage: anngen.js OPTIONS");
-    console.error("    -d <difficulty>");
+    console.error("    -w <work target>");
     console.error("    -p <parent_block_height>:<parent_block_hash>");
     console.error("    -t <threads>   # default is number of cores");
     console.error("    -h, --help     # print this message");
@@ -25,14 +25,14 @@ const usage = () => {
 
 const main = (argv) => {
     let threads = THREADS;
-    let diff = 0x2000ffff;
+    let tar = 0x2000ffff;
     let parentBlockHeight;
     let parentBlockHash;
     for (let i = 0; i < argv.length; i++) {
-        if (argv[i] === '-d') {
-            diff = Number(argv[i+1]);
-            if (diff < 0 || diff > 0x207fffff) {
-                return void console.error("invalid difficulty");
+        if (argv[i] === '-w') {
+            tar = Number(argv[i+1]);
+            if (tar < 0 || tar > 0x207fffff) {
+                return void console.error("invalid work target");
             }
         }
         if (argv[i] === '-p') {
@@ -68,6 +68,6 @@ const main = (argv) => {
         console.error("must specify -p");
         return void usage();
     }
-    start(threads, diff, parentBlockHeight, parentBlockHash);
+    start(threads, tar, parentBlockHeight, parentBlockHash);
 }
 main(process.argv);

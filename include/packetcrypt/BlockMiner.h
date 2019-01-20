@@ -46,7 +46,7 @@ void BlockMiner_addAnns(BlockMiner_t* bm, PacketCrypt_Announce_t* anns, uint64_t
  *     blockchain.acceptBlock(block);
  *     PacketCrypt_Coinbase_t coinbase;
  *     height = blockchain.getNextHeight();
- *     diff = blockchain.getNextDifficulty();
+ *     diff = blockchain.getNextTarget();
  *     if ((err = BlockMiner_lockForMining(bm, &coinbase, height, diff))) {
  *         return handleError(err);
  *     }
@@ -61,7 +61,7 @@ int BlockMiner_lockForMining(
     BlockMiner_t* bm,
     PacketCrypt_Coinbase_t* commitOut,
     uint32_t nextBlockHeight,
-    uint32_t nextBlockDifficulty);
+    uint32_t nextBlockTarget);
 
 /**
  * Begin mining a block, the miner must be locked for mining before this can happen.

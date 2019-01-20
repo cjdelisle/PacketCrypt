@@ -2,13 +2,13 @@ const Spawn = require('child_process').spawn;
 const Fs = require('fs');
 const THREADS = require('os').cpus().length;
 
-const mkFakeHeader = (difficulty) => {
+const mkFakeHeader = (target) => {
     const b = Buffer.alloc(80);
-    b.writeUInt32LE(difficulty, 72);
+    b.writeUInt32LE(target, 72);
     return b;
 }
 
-const start = (threads, difficulty, file) => {
+const start = (threads, target, file) => {
     Fs.readFile(file, (err, announcements) => {
         if (err) { throw err; }
         const pcblk = Spawn('./pcblk', [ String(threads) ]);
@@ -17,7 +17,7 @@ const start = (threads, difficulty, file) => {
                 console.log(d.toString('utf8'));
                 return;
             }
-            const fh = mkFakeHeader(difficulty);
+            const fh = mkFakeHeader(target);
             pcblk.stdin.write(fh);
         });
         pcblk.stderr.on('data', (d) => { process.stderr.write(d); });
@@ -33,7 +33,7 @@ const start = (threads, difficulty, file) => {
 
 const usage = () => {
     console.error("Usage: testblockmine.js OPTIONS");
-    console.error("    -d <difficulty>");
+    console.error("    -w <work target>");
     console.error("    -t <threads>            # default is number of cores");
     console.error("    -f <announcement_file>  # file containing announcements");
     console.error("    -h, --help              # print this message");
@@ -44,10 +44,10 @@ const main = (argv) => {
     let diff = 0x2000ffff;
     let file;
     for (let i = 0; i < argv.length; i++) {
-        if (argv[i] === '-d') {
+        if (argv[i] === '-w') {
             diff = Number(argv[i+1]);
             if (diff < 0 || diff > 0x207fffff) {
-                return void console.error("invalid difficulty");
+                return void console.error("invalid work target");
             }
         }
         if (argv[i] === '-t') {

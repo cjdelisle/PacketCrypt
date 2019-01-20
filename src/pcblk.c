@@ -46,13 +46,13 @@ static void getAnns(BlockMiner_t* bm, bool testing) {
     }
 }
 
-#define DIFFICULTY 0x207fffff
+#define WORK_TARGET 0x207fffff
 #define BLOCK_HEIGHT 125
 
 static void lockForMining(BlockMiner_t* bm, PacketCrypt_Coinbase_t* coinbase, bool testing)
 {
     if (testing) {
-        assert(!BlockMiner_lockForMining(bm, coinbase, BLOCK_HEIGHT, DIFFICULTY));
+        assert(!BlockMiner_lockForMining(bm, coinbase, BLOCK_HEIGHT, WORK_TARGET));
         return;
     }
     assert(0 && "not implemented");
@@ -62,7 +62,7 @@ static void getBlockHdr(PacketCrypt_BlockHeader_t* bmOut, bool testing)
 {
     Buf_OBJSET(bmOut, 0);
     if (testing) {
-        bmOut->workBits = DIFFICULTY;
+        bmOut->workBits = WORK_TARGET;
         bmOut->hashMerkleRoot[0] = 18;
         return;
     }
@@ -128,7 +128,7 @@ int main(int argc, char** argv) {
         Buf_OBJCPY(&blockHashes[i], "abcdefghijklmnopqrstuvwxyz01234");
     }
 
-    assert(!Validate_checkBlock(hap, BLOCK_HEIGHT, &coinbase, blockHashes[0].bytes));
+    assert(!Validate_checkBlock(hap, BLOCK_HEIGHT, &coinbase, (uint8_t*)blockHashes));
     free(hap);
 
     BlockMiner_free(bm);

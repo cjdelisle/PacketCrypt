@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
             newData = true;
         }
         if (newData) {
-            fprintf(stderr, "Starting job with difficulty %08x\n", req.hdr.workBits);
+            fprintf(stderr, "Starting job with work target %08x\n", req.hdr.workBits);
             AnnMiner_start(annMiner,
                 req.hdr.contentHash,
                 req.hdr.contentType,

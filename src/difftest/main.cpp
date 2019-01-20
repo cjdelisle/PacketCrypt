@@ -117,7 +117,7 @@ int main() {
         uint32_t annCount = randCompact(gen) & 0xffffff;
 
         uint32_t x = getEffectiveDifficulty(blockTar, annTar, annCount);
-        uint32_t y = Difficulty_getEffectiveDifficulty(blockTar, annTar, annCount);
+        uint32_t y = Difficulty_getEffectiveTarget(blockTar, annTar, annCount);
 
         if (x != y) {
             printf("blockTar %08x\n", blockTar);

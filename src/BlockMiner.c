@@ -313,14 +313,14 @@ int BlockMiner_lockForMining(
     BlockMiner_t* bm,
     PacketCrypt_Coinbase_t* commitOut,
     uint32_t nextBlockHeight,
-    uint32_t nextBlockDifficulty)
+    uint32_t nextBlockTarget)
 {
     if (bm->state == State_MINING) {
         assert(!BlockMiner_stop(bm));
     }
 
     for (uint64_t i = 0; i < bm->annCount; i++) {
-        bm->anns[i].effectiveWork = Difficulty_degradeAnnouncementDifficulty(
+        bm->anns[i].effectiveWork = Difficulty_degradeAnnouncementTarget(
             bm->anns[i].ann.hdr.workBits,
             nextBlockHeight - bm->anns[i].ann.hdr.parentBlockHeight);
         if (bm->anns[i].effectiveWork == 0xffffffffu) {
@@ -343,7 +343,7 @@ int BlockMiner_lockForMining(
         while (l) {
             for (uint64_t i = 0; i < l->count; i++) {
                 effectiveWork[newCount].ann = &l->anns[i];
-                effectiveWork[newCount].effectiveWork = Difficulty_degradeAnnouncementDifficulty(
+                effectiveWork[newCount].effectiveWork = Difficulty_degradeAnnouncementTarget(
                     l->anns[i].hdr.workBits, nextBlockHeight - l->anns[i].hdr.parentBlockHeight);
                 newCount++;
             }
@@ -402,9 +402,9 @@ int BlockMiner_lockForMining(
     }
 
     commitOut->numAnns = bm->annCount;
-    commitOut->annMinWork = minWork;
+    commitOut->annLeastWorkTarget = minWork;
     commitOut->effectiveTarget =
-        Difficulty_getEffectiveDifficulty(nextBlockDifficulty, minWork, bm->annCount);
+        Difficulty_getEffectiveTarget(nextBlockTarget, minWork, bm->annCount);
     bm->effectiveTarget = commitOut->effectiveTarget;
 
     PacketCryptProof_computeTree(bm->tree);

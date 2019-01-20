@@ -332,7 +332,7 @@ void AnnMiner_start(
     AnnMiner_t* ctx,
     uint8_t contentHash[32],
     uint64_t contentType,
-    uint32_t difficulty,
+    uint32_t workTarget,
     uint32_t parentBlockHeight,
     uint8_t parentBlockHash[32])
 {
@@ -341,7 +341,7 @@ void AnnMiner_start(
     memcpy(cmd.hah.annHdr.contentHash, contentHash, 32);
     cmd.hah.annHdr.contentType = contentType;
     cmd.hah.annHdr.parentBlockHeight = parentBlockHeight;
-    cmd.hah.annHdr.workBits = difficulty;
+    cmd.hah.annHdr.workBits = workTarget;
     memcpy(cmd.hah.hash.bytes, parentBlockHash, 32);
 
     cmd.command = Command_START;

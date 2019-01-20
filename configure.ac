@@ -28,7 +28,7 @@ PKG_CHECK_MODULES([sodium], [libsodium], [], [
     ])
 ])
 
-# PacketCrypt_getEffectiveDifficulty() uses libcrypto
+# Difficulty_getEffectiveTarget() uses libcrypto
 PKG_CHECK_MODULES([CRYPTO], [libcrypto],, [AC_MSG_ERROR(libcrypto not found.)])
 
 AX_PTHREAD([], [

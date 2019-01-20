@@ -138,7 +138,10 @@ _Static_assert(sizeof(PacketCrypt_HeaderAndProof_t) ==
 typedef struct {
     uint8_t merkleRoot[32];
     uint64_t numAnns;
-    uint32_t annMinWork;
+
+    // The target representing the least work of any of the announcements in the set
+    uint32_t annTarget;
+
     uint32_t effectiveTarget;
 } PacketCrypt_Coinbase_t;
 _Static_assert(sizeof(PacketCrypt_Coinbase_t) == 32+8+4+4, "");
