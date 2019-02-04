@@ -55,7 +55,7 @@ block must be less than the effectiveTarget, where the effectiveTarget is define
 
         target_for_work( work_for_target(block_header.nBits)**3 / minimum_announcement_work / announcement_count )
           where:
-            target_for_work(t) = 2**256 / (t + 1)
+            work_for_target(t) = 2**256 / (t + 1)
             target_for_work(w) = (2**256 - w) / w
 
 If this work meets the target specified in the bitcoin block header, the block is valid and the
