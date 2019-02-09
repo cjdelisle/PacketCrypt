@@ -133,7 +133,7 @@ static void found(MineResult_t* res, PacketCrypt_BlockHeader_t* hdr, Worker_t* w
 
     // we are writing the pointer, not the content
     PacketCrypt_Find_t x = {
-        .ptr = (uint64_t) &output,
+        .ptr = (uint64_t) output,
         .size = sizeof(PacketCrypt_HeaderAndProof_t) + proofSz
     };
     (void) write(w->bm->fileNo, &x, sizeof x);
@@ -169,6 +169,7 @@ static bool mine(Worker_t* w)
                 CryptoCycle_Item_t* it = (CryptoCycle_Item_t*) &w->bm->anns[x].ann;
                 if (Util_unlikely(!CryptoCycle_update(&w->pcState, it, 0))) { continue; }
             }
+            CryptoCycle_smul(&w->pcState);
             CryptoCycle_final(&w->pcState);
             if (!Work_check(w->pcState.bytes, w->bm->effectiveTarget)) { continue; }
             res.lowNonce = lowNonce;
@@ -407,9 +408,7 @@ int BlockMiner_lockForMining(
 
     commitOut->numAnns = bm->annCount;
     commitOut->annLeastWorkTarget = minWork;
-    commitOut->effectiveTarget =
-        Difficulty_getEffectiveTarget(nextBlockTarget, minWork, bm->annCount);
-    bm->effectiveTarget = commitOut->effectiveTarget;
+    bm->effectiveTarget = Difficulty_getEffectiveTarget(nextBlockTarget, minWork, bm->annCount);
 
     PacketCryptProof_computeTree(bm->tree);
     Buf_OBJCPY(commitOut->merkleRoot, &bm->tree->root);

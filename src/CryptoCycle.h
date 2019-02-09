@@ -195,14 +195,15 @@ typedef union {
 } CryptoCycle_Item_t;
 _Static_assert(sizeof(CryptoCycle_Item_t) == 1024, "");
 
-void CryptoCycle_init(CryptoCycle_State_t* state, Buf32_t* seed, uint64_t nonce);
+static inline uint64_t CryptoCycle_getItemNo(CryptoCycle_State_t* state) {
+    return state->sixteens[1].longs[0];
+}
+
+void CryptoCycle_init(CryptoCycle_State_t* state, const Buf32_t* seed, uint64_t nonce);
 
 bool CryptoCycle_update(CryptoCycle_State_t* state, CryptoCycle_Item_t* item, int randHashCycles);
 
+void CryptoCycle_smul(CryptoCycle_State_t* state);
 void CryptoCycle_final(CryptoCycle_State_t* state);
-
-static inline uint32_t PacketCrypt_getNum(CryptoCycle_State_t* state) {
-    return state->sixteens[1].shorts[0];
-}
 
 #endif

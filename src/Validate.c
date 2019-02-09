@@ -36,7 +36,7 @@ int Validate_checkAnn(const PacketCrypt_Announce_t* pcAnn, const uint8_t* parent
     CryptoCycle_init(&state, &annHash1.thirtytwos[0], softNonce);
     int itemNo = -1;
     for (int i = 0; i < 3; i++) {
-        itemNo = PacketCrypt_getNum(&state) % Announce_TABLE_SZ;
+        itemNo = CryptoCycle_getItemNo(&state) % Announce_TABLE_SZ;
         Announce_mkitem(itemNo, &item, annHash0.bytes);
         if (!CryptoCycle_update(&state, &item, Conf_AnnHash_RANDHASH_CYCLES)) {
             return Validate_checkAnn_INVAL;
@@ -54,20 +54,17 @@ int Validate_checkAnn(const PacketCrypt_Announce_t* pcAnn, const uint8_t* parent
     }
 
     uint32_t target = ann->hdr.workBits;
-    Buf_OBJCPY(&state.sixteens[0], &state.sixteens[12]);
+    CryptoCycle_final(&state);
 
     if (!Work_check(state.bytes, target)) { return Validate_checkAnn_INSUF_POW; }
 
     return Validate_checkAnn_OK;
 }
 
-#include <assert.h>
-#include <stdio.h>
-
-
 // 0 == ok
 static int checkPcHash(uint64_t indexesOut[PacketCrypt_NUM_ANNS],
-                       const PacketCrypt_HeaderAndProof_t* hap)
+                       const PacketCrypt_HeaderAndProof_t* hap,
+                       const PacketCrypt_Coinbase_t* cb)
 {
     CryptoCycle_State_t pcState;
     _Static_assert(sizeof(PacketCrypt_Announce_t) == sizeof(CryptoCycle_Item_t), "");
@@ -75,15 +72,17 @@ static int checkPcHash(uint64_t indexesOut[PacketCrypt_NUM_ANNS],
     Buf32_t hdrHash;
     Hash_COMPRESS32_OBJ(&hdrHash, &hap->blockHeader);
     CryptoCycle_init(&pcState, &hdrHash, hap->nonce2);
-
     for (int j = 0; j < 4; j++) {
-        indexesOut[j] = PacketCrypt_getNum(&pcState);
+        indexesOut[j] = CryptoCycle_getItemNo(&pcState);
         CryptoCycle_Item_t* it = (CryptoCycle_Item_t*) &hap->announcements[j];
         if (Util_unlikely(!CryptoCycle_update(&pcState, it, 0))) { return -1; }
     }
+    CryptoCycle_smul(&pcState);
     CryptoCycle_final(&pcState);
 
-    return !Work_check(pcState.bytes, hap->blockHeader.workBits);
+    uint32_t effectiveTarget = Difficulty_getEffectiveTarget(
+        hap->blockHeader.workBits, cb->annLeastWorkTarget, cb->numAnns);
+    return !Work_check(pcState.bytes, effectiveTarget);
 }
 
 
@@ -94,7 +93,7 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
 {
     // Check that final work result meets difficulty requirement
     uint64_t annIndexes[PacketCrypt_NUM_ANNS] = {0};
-    if (checkPcHash(annIndexes, hap)) {
+    if (checkPcHash(annIndexes, hap, coinbaseCommitment)) {
         return Validate_checkBlock_INSUF_POW;
     }
 

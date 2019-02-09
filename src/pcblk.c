@@ -46,7 +46,7 @@ static void getAnns(BlockMiner_t* bm, bool testing) {
     }
 }
 
-#define WORK_TARGET 0x207fffff
+#define WORK_TARGET 0x200fffff
 #define BLOCK_HEIGHT 125
 
 static void lockForMining(BlockMiner_t* bm, PacketCrypt_Coinbase_t* coinbase, bool testing)
@@ -120,8 +120,11 @@ int main(int argc, char** argv) {
     assert(!BlockMiner_start(bm, &blockHdr));
 
     PacketCrypt_HeaderAndProof_t* hap = NULL;
-    assert(sizeof hap == read(fileNos[0], &hap, sizeof hap));
-    assert(hap);
+    PacketCrypt_Find_t f;
+    assert(sizeof f == read(fileNos[0], &f, sizeof f));
+    assert(f.size >= sizeof(PacketCrypt_HeaderAndProof_t));
+    assert(f.ptr);
+    hap = (PacketCrypt_HeaderAndProof_t*)f.ptr;
 
     Buf32_t blockHashes[PacketCrypt_NUM_ANNS];
     for (int i = 0; i < PacketCrypt_NUM_ANNS; i++) {

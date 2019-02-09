@@ -141,8 +141,6 @@ typedef struct {
 
     // The target representing the least work of any of the announcements in the set
     uint32_t annLeastWorkTarget;
-
-    uint32_t effectiveTarget;
 } PacketCrypt_Coinbase_t;
 _Static_assert(sizeof(PacketCrypt_Coinbase_t) == 32+8+4+4, "");
 

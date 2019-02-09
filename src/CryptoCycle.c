@@ -5,6 +5,7 @@
 #include "sodium/crypto_onetimeauth_poly1305.h"
 #include "sodium/utils.h"
 #include "sodium/crypto_stream_chacha20.h"
+#include "sodium/crypto_scalarmult_curve25519.h"
 
 #include <string.h>
 #include <assert.h>
@@ -79,7 +80,7 @@ void CryptoCycle_crypt(CryptoCycle_Header_t* restrict msg)
 
 void CryptoCycle_init(
     CryptoCycle_State_t* restrict state,
-    Buf32_t* restrict seed,
+    const Buf32_t* restrict seed,
     uint64_t nonce)
 {
     Hash_expand(state->bytes, sizeof(CryptoCycle_State_t), seed->bytes, 0);
@@ -116,6 +117,13 @@ bool CryptoCycle_update(
     return true;
 }
 
+void CryptoCycle_smul(CryptoCycle_State_t* restrict state) {
+    assert(!crypto_scalarmult_curve25519(
+        state->thirtytwos[2].bytes,
+        state->thirtytwos[0].bytes,
+        state->thirtytwos[1].bytes));
+}
+
 void CryptoCycle_final(CryptoCycle_State_t* restrict state) {
-    memcpy(state->bytes, state->sixteens[12].bytes, 16);
+    Hash_compress32(state->bytes, state->bytes, sizeof *state);
 }

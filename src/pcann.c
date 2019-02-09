@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
     long n = strtol(arg, NULL, 10);
     if (n < 1 || n > 0xffff) { return usage(); }
 
-    AnnMiner_t* annMiner = AnnMiner_create(n, STDOUT_FILENO);
+    AnnMiner_t* annMiner = AnnMiner_create(n, STDOUT_FILENO, 0);
 
     Request_t req;
     if (test) { setTestVal(&req); }

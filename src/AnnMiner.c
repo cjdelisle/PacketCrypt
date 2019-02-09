@@ -53,6 +53,7 @@ struct AnnMiner_s {
     int outFromIn;
     int inToOut;
     int outFile;
+    int sendPtr;
     pthread_t mainThread;
 
     // read by the main thread
@@ -128,7 +129,7 @@ static int annHash(Worker_t* restrict w, uint32_t nonce) {
     CryptoCycle_init(&w->state, &w->activeJob->annHash1.thirtytwos[0], nonce);
     int itemNo = -1;
     for (int i = 0; i < 3; i++) {
-        itemNo = PacketCrypt_getNum(&w->state) % Announce_TABLE_SZ;
+        itemNo = CryptoCycle_getItemNo(&w->state) % Announce_TABLE_SZ;
         CryptoCycle_Item_t* restrict it = &w->activeJob->table[itemNo];
         if (Util_unlikely(!CryptoCycle_update(&w->state, it, Conf_AnnHash_RANDHASH_CYCLES))) {
             return 0;
@@ -136,7 +137,6 @@ static int annHash(Worker_t* restrict w, uint32_t nonce) {
     }
     uint32_t target = w->activeJob->hah.annHdr.workBits;
 
-    if (Util_likely(!Work_check(w->state.bytes, target))) { return 0; }
     CryptoCycle_final(&w->state);
     if (!Work_check(w->state.bytes, target)) { return 0; }
     //if (w->ctx->test) { Hash_printHex(w->state.bytes, 32); }
@@ -160,7 +160,15 @@ static void search(Worker_t* restrict w)
         assert(!Validate_checkAnn(
             (PacketCrypt_Announce_t*)&w->ann,
             w->activeJob->parentBlockHash.bytes));
-        (void) write(w->ctx->outFile, &w->ann, sizeof w->ann);
+        if (w->ctx->sendPtr) {
+            PacketCrypt_Find_t f = {
+                .ptr = (uint64_t) &w->ann,
+                .size = sizeof w->ann
+            };
+            (void) write(w->ctx->outFile, &f, sizeof f);
+        } else {
+            (void) write(w->ctx->outFile, &w->ann, sizeof w->ann);
+        }
     }
     w->softNonce = nonce;
     return;
@@ -351,7 +359,7 @@ void AnnMiner_start(
     return;
 }
 
-AnnMiner_t* AnnMiner_create(int threads, int outFile)
+AnnMiner_t* AnnMiner_create(int threads, int outFile, int sendPtr)
 {
     AnnMiner_t* ctx = allocCtx(threads);
     int pipefd[2] = { -1, -1 };
@@ -363,6 +371,7 @@ AnnMiner_t* AnnMiner_create(int threads, int outFile)
     ctx->inToOut = pipefd[1];
     assert(fcntl(ctx->inFromOut, F_SETFL, O_NONBLOCK) != -1);
     ctx->outFile = outFile;
+    ctx->sendPtr = sendPtr;
     for (int i = 0; i < threads; i++) {
         assert(!pthread_create(&ctx->workers[i].thread, NULL, thread, &ctx->workers[i]));
     }
