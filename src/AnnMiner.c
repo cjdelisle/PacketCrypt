@@ -165,9 +165,9 @@ static void search(Worker_t* restrict w)
                 .ptr = (uint64_t) &w->ann,
                 .size = sizeof w->ann
             };
-            (void) write(w->ctx->outFile, &f, sizeof f);
+            assert(write(w->ctx->outFile, &f, sizeof f) == sizeof f);
         } else {
-            (void) write(w->ctx->outFile, &w->ann, sizeof w->ann);
+            assert(write(w->ctx->outFile, &w->ann, sizeof w->ann) == sizeof w->ann);
         }
     }
     w->softNonce = nonce;
@@ -353,7 +353,7 @@ void AnnMiner_start(
     memcpy(cmd.hah.hash.bytes, parentBlockHash, 32);
 
     cmd.command = Command_START;
-    write(ctx->outToIn, &cmd, sizeof cmd);
+    assert(write(ctx->outToIn, &cmd, sizeof cmd) == sizeof cmd);
 
     readOk(ctx);
     return;
@@ -384,7 +384,7 @@ void AnnMiner_stop(AnnMiner_t* ctx)
     Command_t cmd;
     Buf_OBJSET(&cmd, 0);
     cmd.command = Command_STOP;
-    write(ctx->outToIn, &cmd, sizeof cmd);
+    assert(write(ctx->outToIn, &cmd, sizeof cmd) == sizeof cmd);
     readOk(ctx);
 }
 
@@ -393,7 +393,7 @@ void AnnMiner_free(AnnMiner_t* ctx)
     Command_t cmd;
     Buf_OBJSET(&cmd, 0);
     cmd.command = Command_SHUTDOWN;
-    write(ctx->outToIn, &cmd, sizeof cmd);
+    assert(write(ctx->outToIn, &cmd, sizeof cmd) == sizeof cmd);
     readOk(ctx);
     for (int i = 0; i < ctx->numWorkers; i++) {
         assert(!pthread_join(ctx->workers[i].thread, NULL));

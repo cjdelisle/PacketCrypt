@@ -136,7 +136,7 @@ static void found(MineResult_t* res, PacketCrypt_BlockHeader_t* hdr, Worker_t* w
         .ptr = (uint64_t) output,
         .size = sizeof(PacketCrypt_HeaderAndProof_t) + proofSz
     };
-    (void) write(w->bm->fileNo, &x, sizeof x);
+    assert(write(w->bm->fileNo, &x, sizeof x) == sizeof x);
     free(proof);
 }
 
