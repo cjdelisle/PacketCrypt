@@ -146,4 +146,10 @@ typedef struct {
 } PacketCrypt_Coinbase_t;
 _Static_assert(sizeof(PacketCrypt_Coinbase_t) == 32+8+4+4, "");
 
+typedef struct {
+    uint64_t ptr;
+    uint64_t size;
+} PacketCrypt_Find_t;
+_Static_assert(sizeof(PacketCrypt_Find_t) == 16, "");
+
 #endif

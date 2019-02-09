@@ -132,7 +132,11 @@ static void found(MineResult_t* res, PacketCrypt_BlockHeader_t* hdr, Worker_t* w
     assert(!Buf_OBJCMP(&root2, &w->bm->tree->root));
 
     // we are writing the pointer, not the content
-    (void) write(w->bm->fileNo, &output, sizeof output);
+    PacketCrypt_Find_t x = {
+        .ptr = (uint64_t) &output,
+        .size = sizeof(PacketCrypt_HeaderAndProof_t) + proofSz
+    };
+    (void) write(w->bm->fileNo, &x, sizeof x);
     free(proof);
 }
 
@@ -161,7 +165,7 @@ static bool mine(Worker_t* w)
             CryptoCycle_init(&w->pcState, &hdrHash, ++lowNonce);
             MineResult_t res;
             for (int j = 0; j < 4; j++) {
-                uint64_t x = res.items[j] = PacketCrypt_getNum(&w->pcState) % w->bm->annCount;
+                uint64_t x = res.items[j] = CryptoCycle_getItemNo(&w->pcState) % w->bm->annCount;
                 CryptoCycle_Item_t* it = (CryptoCycle_Item_t*) &w->bm->anns[x].ann;
                 if (Util_unlikely(!CryptoCycle_update(&w->pcState, it, 0))) { continue; }
             }

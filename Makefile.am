@@ -7,7 +7,7 @@ CFLAGS = \
     -Wno-unused-parameter \
     -std=c11 \
     -g \
-    -O0 -march=native -Werror
+    -O3 -march=native -Werror
 
 #-fsanitize=address -lasan
 
