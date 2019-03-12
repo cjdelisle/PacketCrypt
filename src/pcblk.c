@@ -26,11 +26,10 @@ static void getAnns(BlockMiner_t* bm, bool testing) {
 
     #define ANN_BLK_SZ 8
 
-    PacketCrypt_Announce_t* anns = malloc(sizeof(PacketCrypt_Announce_t) * ANN_BLK_SZ);
-    assert(anns);
-
     int numRead = 0;
     for (;;) {
+        PacketCrypt_Announce_t* anns = malloc(sizeof(PacketCrypt_Announce_t) * ANN_BLK_SZ);
+        assert(anns);
         size_t len = read(f, anns, sizeof(PacketCrypt_Announce_t) * ANN_BLK_SZ);
         if (len == 0) {
             fprintf(stderr, "Read in %d announcements\n", numRead);
@@ -38,11 +37,11 @@ static void getAnns(BlockMiner_t* bm, bool testing) {
             if (testing) { close(f); }
             return;
         }
-        numRead += len / sizeof(PacketCrypt_Announce_t);
-        BlockMiner_addAnns(bm, anns, len / sizeof(PacketCrypt_Announce_t));
         if (len % sizeof(PacketCrypt_Announce_t)) {
-            fprintf(stderr, "partial read\n");
+            assert(!"partial read");
         }
+        numRead += len / sizeof(PacketCrypt_Announce_t);
+        BlockMiner_addAnns(bm, anns, len / sizeof(PacketCrypt_Announce_t), 1);
     }
 }
 
@@ -52,7 +51,7 @@ static void getAnns(BlockMiner_t* bm, bool testing) {
 static void lockForMining(BlockMiner_t* bm, PacketCrypt_Coinbase_t* coinbase, bool testing)
 {
     if (testing) {
-        assert(!BlockMiner_lockForMining(bm, coinbase, BLOCK_HEIGHT, WORK_TARGET));
+        assert(!BlockMiner_lockForMining(bm, coinbase, NULL, BLOCK_HEIGHT, WORK_TARGET));
         return;
     }
     assert(0 && "not implemented");
@@ -131,7 +130,8 @@ int main(int argc, char** argv) {
         Buf_OBJCPY(&blockHashes[i], "abcdefghijklmnopqrstuvwxyz01234");
     }
 
-    assert(!Validate_checkBlock(hap, BLOCK_HEIGHT, &coinbase, (uint8_t*)blockHashes));
+    PacketCrypt_ValidateCtx_t vctx;
+    assert(!Validate_checkBlock(hap, BLOCK_HEIGHT, &coinbase, (uint8_t*)blockHashes, &vctx));
     free(hap);
 
     BlockMiner_free(bm);

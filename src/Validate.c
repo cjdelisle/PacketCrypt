@@ -9,11 +9,13 @@
 #include "Work.h"
 #include "Util.h"
 
-int Validate_checkAnn(const PacketCrypt_Announce_t* pcAnn, const uint8_t* parentBlockHash)
+int Validate_checkAnn(
+    const PacketCrypt_Announce_t* pcAnn,
+    const uint8_t* parentBlockHash,
+    PacketCrypt_ValidateCtx_t* vctx)
 {
     Announce_t _ann;
     Announce_t* ann = (Announce_t*) pcAnn;
-
     Buf_OBJCPY(&_ann.hdr, &ann->hdr);
     memcpy(&_ann.merkleProof.thirtytwos[0], parentBlockHash, 32);
     Buf_OBJSET(&_ann.merkleProof.thirtytwos[1], 0);
@@ -35,10 +37,10 @@ int Validate_checkAnn(const PacketCrypt_Announce_t* pcAnn, const uint8_t* parent
     Buf_OBJCPY_LSRC(&softNonce, ann->hdr.softNonce);
     CryptoCycle_init(&state, &annHash1.thirtytwos[0], softNonce);
     int itemNo = -1;
-    for (int i = 0; i < 3; i++) {
-        itemNo = CryptoCycle_getItemNo(&state) % Announce_TABLE_SZ;
+    for (int i = 0; i < 4; i++) {
+        itemNo = (CryptoCycle_getItemNo(&state) % Announce_TABLE_SZ);
         Announce_mkitem(itemNo, &item, annHash0.bytes);
-        if (!CryptoCycle_update(&state, &item, Conf_AnnHash_RANDHASH_CYCLES)) {
+        if (!CryptoCycle_update(&state, &item, Conf_AnnHash_RANDHASH_CYCLES, vctx->progbuf)) {
             return Validate_checkAnn_INVAL;
         }
     }
@@ -73,9 +75,10 @@ static int checkPcHash(uint64_t indexesOut[PacketCrypt_NUM_ANNS],
     Hash_COMPRESS32_OBJ(&hdrHash, &hap->blockHeader);
     CryptoCycle_init(&pcState, &hdrHash, hap->nonce2);
     for (int j = 0; j < 4; j++) {
+        // This gets modded over the total anns in PacketCryptProof_hashProof()
         indexesOut[j] = CryptoCycle_getItemNo(&pcState);
         CryptoCycle_Item_t* it = (CryptoCycle_Item_t*) &hap->announcements[j];
-        if (Util_unlikely(!CryptoCycle_update(&pcState, it, 0))) { return -1; }
+        if (Util_unlikely(!CryptoCycle_update(&pcState, it, 0, NULL))) { return -1; }
     }
     CryptoCycle_smul(&pcState);
     CryptoCycle_final(&pcState);
@@ -89,8 +92,13 @@ static int checkPcHash(uint64_t indexesOut[PacketCrypt_NUM_ANNS],
 int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
                         uint32_t blockHeight,
                         const PacketCrypt_Coinbase_t* coinbaseCommitment,
-                        const uint8_t blockHashes[static PacketCrypt_NUM_ANNS * 32])
+                        const uint8_t blockHashes[static PacketCrypt_NUM_ANNS * 32],
+                        PacketCrypt_ValidateCtx_t* vctx)
 {
+    if (coinbaseCommitment->magic != PacketCrypt_Coinbase_MAGIC) {
+        return Validate_checkBlock_BAD_COINBASE;
+    }
+
     // Check that final work result meets difficulty requirement
     uint64_t annIndexes[PacketCrypt_NUM_ANNS] = {0};
     if (checkPcHash(annIndexes, hap, coinbaseCommitment)) {
@@ -102,13 +110,13 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
     // Validate announcements
     for (int i = 0; i < PacketCrypt_NUM_ANNS; i++) {
         const PacketCrypt_Announce_t* ann = &hap->announcements[i];
-        if (Validate_checkAnn(ann, &blockHashes[i * 32])) {
+        if (Validate_checkAnn(ann, &blockHashes[i * 32], vctx)) {
             return Validate_checkBlock_ANN_INVALID(i);
         }
         uint32_t effectiveAnnTarget =
             Difficulty_degradeAnnouncementTarget(ann->hdr.workBits,
                 (blockHeight - ann->hdr.parentBlockHeight));
-        if (effectiveAnnTarget < coinbaseCommitment->annLeastWorkTarget) {
+        if (effectiveAnnTarget > coinbaseCommitment->annLeastWorkTarget) {
             return Validate_checkBlock_ANN_INSUF_POW(i);
         }
         Hash_COMPRESS32_OBJ(&annHashes[i], ann);

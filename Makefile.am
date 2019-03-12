@@ -46,7 +46,8 @@ libpacketcrypt_a_SOURCES = Makefile\
     src/PcCompress.c            src/PcCompress.h \
     src/RandGen.c               src/RandGen.h \
     src/RandHash_interpreted.c \
-    src/RandHash.c              src/RandHash.h \
+    src/optest.c \
+                                src/RandHash.h \
     src/Time.c                  src/Time.h \
                                 src/Util.h \
                                 src/Vec.h \
@@ -68,16 +69,6 @@ pcann_SOURCES = src/pcann.c \
 pcann_CFLAGS = -Iinclude
 pcann_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_CFLAGS} ${CRYPTO_LIBS}
 
-bin_PROGRAMS += simplehash
-simplehash_SOURCES = src/simplehash.c \
-    src/RandGen.c   \
-    src/PrintProg.c \
-    src/RandHash.c  \
-    src/RandHash_interpreted.c \
-    src/Hash.c
-simplehash_CFLAGS = ${sodium_CFLAGS}
-simplehash_LDADD = ${sodium_LIBS}
-
 if ENABLE_DIFFTEST
 bin_PROGRAMS +=  difftest
 difftest_SOURCES = src/difftest/main.cpp \
@@ -87,3 +78,12 @@ difftest_SOURCES = src/difftest/main.cpp \
 difftest_CFLAGS = ${CRYPTO_CFLAGS}
 difftest_LDADD = ${CRYPTO_LIBS}
 endif
+
+bin_PROGRAMS += optest
+optest_SOURCES = Makefile \
+    src/optest.c \
+    src/Hash.c                  src/Hash.h \
+    src/RandGen.c               src/RandGen.h \
+    src/RandHash_interpreted.c
+optest_CFLAGS = -Iinclude -DOPTEST=1
+optest_LDADD = ${sodium_LIBS}

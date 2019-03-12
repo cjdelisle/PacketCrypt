@@ -23,6 +23,7 @@ configure
 /simplehash
 /pcann
 /pcblk
+/optest
 /announcements.bin
 /difftest
 /*.dSYM

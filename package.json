@@ -1,0 +1,18 @@
+{
+  "name": "packetcrypt",
+  "version": "1.0.0",
+  "description": "Bandwidth-hard proof of work. [![Build Status](https://travis-ci.org/cjdelisle/PacketCrypt.svg?branch=master)](https://travis-ci.org/cjdelisle/PacketCrypt)",
+  "main": "anngen.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cjdelisle/PacketCrypt.git"
+  },
+  "author": "Caleb James DeLisle",
+  "bugs": {
+    "url": "https://github.com/cjdelisle/PacketCrypt/issues"
+  },
+  "homepage": "https://github.com/cjdelisle/PacketCrypt#readme"
+}

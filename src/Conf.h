@@ -5,6 +5,10 @@
 //         0            1    2      3
 #define Conf_PacketCrypt_ANN_WAIT_PERIOD 3
 
+// This is a parent block height which will be used for the first 3 blocks
+// because there is not yet enough chain history to fulfill the waiting period.
+#define Conf_PacketCrypt_ANN_FAKE_PARENT_HEIGHT 0xfffffffc
+
 // How many times to run the random hash program per announcement hash cycle
 #define Conf_AnnHash_RANDHASH_CYCLES 4
 

@@ -8,6 +8,11 @@
 
 typedef struct BlockMiner_s BlockMiner_t;
 
+typedef struct {
+    uint64_t totalLength;
+    uint8_t hashes[][32];
+} BlockMiner_Hashes_t;
+
 /**
  * Create a new block miner, you must provide the maximum number of announcements which this
  * miner can hold. As announcements of higher value are added using addAnns, less valuable
@@ -30,7 +35,7 @@ void BlockMiner_free(BlockMiner_t* bm);
  * maxAnns, the least valuable announcements will be deleted. Announcements added will not
  * take effect until the next time the miner is locked for mining.
  */
-void BlockMiner_addAnns(BlockMiner_t* bm, PacketCrypt_Announce_t* anns, uint64_t count);
+void BlockMiner_addAnns(BlockMiner_t* bm, PacketCrypt_Announce_t* anns, uint64_t count, int noCopy);
 
 /**
  * Prepare the miner for mining a block, this call outputs a coinbase commitment to your location
@@ -54,12 +59,20 @@ void BlockMiner_addAnns(BlockMiner_t* bm, PacketCrypt_Announce_t* anns, uint64_t
  *     block = blockchain.getBlockTemplate();
  *     if ((err = BlockMiner_start(bm, block.header))) { return handleError(err); }
  * })
+ *
+ * commitOut is a PacketCrypt_Coinbase_t which will be filled in
+ * deletedAnnsOut if non-null, this will be assigned to a pointer to a list of announcement
+ *     content hashes of all announcement content which has been deleted when the miner was
+ *     locked. The caller is expected to free() the result.
+ * nextBlockHeight the height of the block to be mined
+ * nextBlockTarget the work nBits for the block to be mined
  */
 #define BlockMiner_lockForMining_OK      0
 #define BlockMiner_lockForMining_NO_ANNS 1
 int BlockMiner_lockForMining(
     BlockMiner_t* bm,
     PacketCrypt_Coinbase_t* commitOut,
+    BlockMiner_Hashes_t** deletedAnnsOut,
     uint32_t nextBlockHeight,
     uint32_t nextBlockTarget);
 

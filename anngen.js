@@ -1,18 +1,53 @@
+const Blake2b = require('blake2b');
+const Crypto = require('crypto');
 const Spawn = require('child_process').spawn;
 const THREADS = require('os').cpus().length;
 
 const start = (threads, target, parentBlockHeight, parentBlockHash) => {
-    const msg = Buffer.alloc(56 + 32 + 32);
-    msg.writeUInt32LE(target, 8);
-    msg.writeUInt32LE(parentBlockHeight, 12);
-    parentBlockHash.copy(msg, 56);
+    const contentByHash = {};
+    const msg = Buffer.alloc(56 + 32);
 
-    //console.error(msg.toString('hex'));
+    const again = () => {
+        let content = Crypto.randomBytes(Math.floor(Math.random()*512));
+        let realContent;
+        if (content.length - 2 <= 0xfc) {
+            content = content.slice(1)
+            content[0] = content.length - 1;
+            realContent = content.slice(1);
+        } else {
+            content[0] = 0xfd;
+            content.writeUInt16LE(content.length - 3, 1);
+            realContent = content.slice(3);
+        }
+
+        const hash = Blake2b(32).update(realContent).digest('hex');
+        contentByHash[hash] = content;
+
+        msg.writeUInt32LE(target, 8);
+        msg.writeUInt32LE(parentBlockHeight, 12);
+        msg.write(hash, 24, 32, 'hex');
+        parentBlockHash.copy(msg, 56);
+        pcann.stdin.write(msg, (err) => { if (err) { throw err; } });
+    };
 
     const pcann = Spawn('./pcann', [ String(threads) ]);
-    pcann.stdout.on('data', (d) => { process.stdout.write(d); });
     pcann.stderr.on('data', (d) => { process.stderr.write(d); });
-    pcann.stdin.write(msg, (err) => { if (err) { throw err; } });
+    pcann.on('error', (e) => { throw e; });
+    pcann.on('close', (_,f) => { if (f) { throw f; } });
+
+    pcann.stdout.on('data', (d) => {
+        const h = d.slice(24, 24+32).toString('hex');
+        const c = contentByHash[h];
+        if (!c) {
+            throw new Error("no content for hash [" + h + "]");
+        }
+        console.error(h);
+        console.error(c.toString('hex'));
+        process.stdout.write(d);
+        process.stdout.write(c);
+        again();
+    });
+    again();
 }
 
 const usage = () => {
@@ -25,7 +60,7 @@ const usage = () => {
 
 const main = (argv) => {
     let threads = THREADS;
-    let tar = 0x2000ffff;
+    let tar = 0x200fffff;
     let parentBlockHeight;
     let parentBlockHash;
     for (let i = 0; i < argv.length; i++) {

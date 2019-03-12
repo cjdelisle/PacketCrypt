@@ -115,6 +115,11 @@ static void setuint64(BIGNUM* out, uint64_t n)
     assert(BN_mpi2bn(pch, p - pch, out) == out);
 }
 
+static inline void assign(BIGNUM* out, const BIGNUM* val) {
+    assert(BN_zero(out));
+    assert(BN_add(out, out, val));
+}
+
 static inline void getEffectiveWork(
     BN_CTX* ctx,
     BIGNUM* workOut,
@@ -122,7 +127,12 @@ static inline void getEffectiveWork(
     const BIGNUM* annWork,
     uint64_t annCount)
 {
-    assert(BN_copy(workOut, blockWork) == workOut);
+    if (BN_is_zero(annWork) || !annCount) {
+        assert(BN_zero(workOut));
+        return;
+    }
+
+    assign(workOut, blockWork);
 
     // workOut = workOut**3
     assert(BN_sqr(workOut, workOut, ctx));

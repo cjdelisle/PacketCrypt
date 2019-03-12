@@ -2,6 +2,7 @@
 #define RANDGEN_H
 
 #include "Buf.h"
+#include "Conf.h"
 
 #include <stdint.h>
 
@@ -11,6 +12,6 @@
 //   * the length of the program if all is well,
 //   * RandHash_TOO_BIG / RandHash_TOO_SMALL if the progam is non-conformant
 //   * RandHash_ENOMEM if bufLen is too small for the program
-int RandGen_generate(uint32_t* buf, int bufLen4, Buf32_t* seed);
+int RandGen_generate(uint32_t buf[static Conf_RandGen_MAX_INSNS], Buf32_t* seed);
 
 #endif

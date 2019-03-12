@@ -74,6 +74,7 @@ struct Worker_s {
     Job_t* activeJob;
     Announce_t ann;
     CryptoCycle_State_t state;
+    PacketCrypt_ValidateCtx_t vctx;
 
     AnnMiner_t* ctx;
     pthread_t thread;
@@ -128,10 +129,12 @@ static void populateTable(CryptoCycle_Item_t* table, Buf64_t* annHash0) {
 static int annHash(Worker_t* restrict w, uint32_t nonce) {
     CryptoCycle_init(&w->state, &w->activeJob->annHash1.thirtytwos[0], nonce);
     int itemNo = -1;
-    for (int i = 0; i < 3; i++) {
-        itemNo = CryptoCycle_getItemNo(&w->state) % Announce_TABLE_SZ;
+    for (int i = 0; i < 4; i++) {
+        itemNo = (CryptoCycle_getItemNo(&w->state) % Announce_TABLE_SZ);
         CryptoCycle_Item_t* restrict it = &w->activeJob->table[itemNo];
-        if (Util_unlikely(!CryptoCycle_update(&w->state, it, Conf_AnnHash_RANDHASH_CYCLES))) {
+        if (Util_unlikely(!CryptoCycle_update(
+            &w->state, it, Conf_AnnHash_RANDHASH_CYCLES, w->vctx.progbuf)))
+        {
             return 0;
         }
     }
@@ -159,15 +162,21 @@ static void search(Worker_t* restrict w)
         if (Util_likely(!annHash(w, nonce++))) { continue; }
         assert(!Validate_checkAnn(
             (PacketCrypt_Announce_t*)&w->ann,
-            w->activeJob->parentBlockHash.bytes));
+            w->activeJob->parentBlockHash.bytes,
+            &w->vctx));
         if (w->ctx->sendPtr) {
+            uint8_t* ann = malloc(sizeof w->ann);
+            assert(ann);
+            memcpy(ann, &w->ann, sizeof w->ann);
             PacketCrypt_Find_t f = {
-                .ptr = (uint64_t) &w->ann,
+                .ptr = (uint64_t) ann,
                 .size = sizeof w->ann
             };
-            assert(write(w->ctx->outFile, &f, sizeof f) == sizeof f);
+            ssize_t ret = write(w->ctx->outFile, &f, sizeof f);
+            assert(ret == sizeof f || ret == -1);
         } else {
-            assert(write(w->ctx->outFile, &w->ann, sizeof w->ann) == sizeof w->ann);
+            ssize_t ret = write(w->ctx->outFile, &w->ann, sizeof w->ann);
+            assert(ret == sizeof w->ann || ret == -1);
         }
     }
     w->softNonce = nonce;
@@ -258,7 +267,7 @@ static void* mainLoop(void* vctx) {
     int cmd = 0;
     int firstCycle = 0;
     Time_END(ctx->time);
-    for (int hardNonce = 0; hardNonce < 0x7fffffff;) {
+    for (int hardNonce = 0;;) {
         if (firstCycle) {
             assert(4 == write(ctx->inToOut, "OK\r\n", 4));
             firstCycle = 0;
@@ -267,6 +276,7 @@ static void* mainLoop(void* vctx) {
             if (!tryRead(ctx->inFromOut, &nextCmd, &cmdOs)) {
                 cmd = nextCmd.command;
                 Buf_OBJCPY(&currentCmd, &nextCmd);
+                cmdOs = 0;
                 firstCycle = 1;
                 break;
             }
@@ -277,7 +287,7 @@ static void* mainLoop(void* vctx) {
             while (!threadsStopped(ctx)) { Time_nsleep(100000); }
             continue;
         }
-        if (cmd == Command_SHUTDOWN) {
+        if (cmd == Command_SHUTDOWN || hardNonce >= 0x7fffffff) {
             for (int i = 0; i < ctx->numWorkers; i++) {
                 setRequestedState(ctx, &ctx->workers[i], ThreadState_SHUTDOWN);
             }
@@ -285,7 +295,6 @@ static void* mainLoop(void* vctx) {
             assert(4 == write(ctx->inToOut, "OK\r\n", 4));
             return NULL;
         }
-
         //Time t; Time_BEGIN(t);
 
         Job_t* j = &ctx->jobs[hardNonce & 1];
@@ -327,7 +336,6 @@ static void* mainLoop(void* vctx) {
 
         pthread_cond_broadcast(&ctx->cond);
     }
-    return NULL;
 }
 
 static void readOk(AnnMiner_t* ctx) {

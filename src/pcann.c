@@ -28,7 +28,7 @@ typedef struct {
 static void setTestVal(Request_t* req) {
     memset(req, 0, sizeof *req);
     req->hdr.parentBlockHeight = 122;
-    req->hdr.workBits = 0x200fffff;
+    req->hdr.workBits = 0x20000fff;
     Buf_OBJCPY(&req->parentBlockHash, "abcdefghijklmnopqrstuvwxyz01234");
 }
 
@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     bool newData = true;
     for (;;) {
         if (!test) {
-            assert(1 == fread(&req, sizeof req, 1, STDIN_FILENO));
+            assert(1 == fread(&req, sizeof req, 1, stdin));
             newData = true;
         }
         if (newData) {

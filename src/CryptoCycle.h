@@ -13,12 +13,12 @@
  *     0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  *  0 |                                                               |
- *    +                            nonce                              +
- *  4 |                                                               |
+ *    +                                                               +
+ *  4 |                            nonce                              |
+ *    +                                                               +
+ *  8 |                                                               |
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- *  8 |     unused    | add |D| unusd |      len    |T|   version   |F|
- *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * 12 |                             pad                               |
+ * 12 |     unused    | add |D|  tzc  |      len    |T|   version   |F|
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  * 16 |                                                               |
  *    +                                                               +
@@ -44,14 +44,14 @@
  *     0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  *  0 |                                                               |
- *    +                            nonce                              +
- *  4 |                                                               |
+ *    +                                                               +
+ *  4 |                            nonce                              |
+ *    +                                                               +
+ *  8 |                                                               |
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- *  8 |     unused    | add |D| unusd |      len    |T|   version   |F|
+ * 12 |     unused    | add |D|  tzc  |      len    |T|   version   |F|
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * 12 |                             pad                               |
- *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * 26 |                                                               |
+ * 16 |                                                               |
  *    +                                                               +
  * 20 |                                                               |
  *    +                    poly1305_authenticator                     +
@@ -90,7 +90,9 @@
  *    * TAMPERED WITH, YOU MUST CHECK.                               *
  *    ****************************************************************
  *
- * unusd: Also unused, returned untouched.
+ * tzc:  Trailing Zero Count -- the number of zero bytes which are padding
+ *       the end of the message. The actual length of the message is
+ *       len*16 - tzc. When decrypting, this is ignored completely.
  *
  * len:  The length of the message to encrypt, excluding header and AEAD
  *       additional content. This is measured in 16 byte units. Because
@@ -129,20 +131,20 @@
  * key_half: In a reply message, this is the low 16 bytes of the encryption key.
  */
 typedef struct {
-    uint64_t nonce;
+    uint8_t nonce[12];
 
     /**
      * The value of data in little endian is:
      *     0               1               2               3
      *     0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
      *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     *  8 |   version   |F|      len    |T| add |D|         unused        |
+     *  8 |   version   |F|      len    |T| add |D|  tzc  |    unused     |
      *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     *
      * We byte-swap it to little and then use it that way.
      */
     uint32_t data;
 
-    uint32_t pad;
     uint8_t key_high_or_auth[16];
     uint8_t key_low[16];
 } CryptoCycle_Header_t;
@@ -167,6 +169,7 @@ typedef struct {
         );                                                                                      \
     }
 
+CryptoCycle_SETTER_GETTER( 8, 4, setTrailingZeros, getTrailingZeros)
 CryptoCycle_SETTER_GETTER(12, 1, setDecrypt, isDecrypt)
 CryptoCycle_SETTER_GETTER(13, 3, setAddLen, getAddLen)
 CryptoCycle_SETTER_GETTER(16, 1, setTruncated, isTruncated)
@@ -201,7 +204,11 @@ static inline uint64_t CryptoCycle_getItemNo(CryptoCycle_State_t* state) {
 
 void CryptoCycle_init(CryptoCycle_State_t* state, const Buf32_t* seed, uint64_t nonce);
 
-bool CryptoCycle_update(CryptoCycle_State_t* state, CryptoCycle_Item_t* item, int randHashCycles);
+bool CryptoCycle_update(
+    CryptoCycle_State_t* restrict state,
+    CryptoCycle_Item_t* restrict item,
+    int randHashCycles,
+    uint32_t progbuf[2048]);
 
 void CryptoCycle_smul(CryptoCycle_State_t* state);
 void CryptoCycle_final(CryptoCycle_State_t* state);

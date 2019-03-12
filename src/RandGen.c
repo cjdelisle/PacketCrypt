@@ -4,6 +4,7 @@
 #include "Conf.h"
 #include "Buf.h"
 #include "RandHash.h"
+#include "Hash.h"
 
 #include "sodium/crypto_stream_chacha20.h"
 
@@ -21,11 +22,12 @@ typedef struct {
 
     // output
     Vec insns;
-    uint32_t maxInsns;
 
     // variables / scopes
     Vec vars;
     uint32_t scope;
+
+    bool tooBig;
 } Context;
 
 enum OpCode {
@@ -80,7 +82,7 @@ static const enum OpCode CODES_4_4[] = {
 #ifdef DEBUG
 #include <stdio.h>
 static void debug(Context* ctx, uint32_t insn) {
-    for (int i = 0; i < ctx->scope; i++) { printf(" "); }
+    for (int i = 0; i < (int)ctx->scope; i++) { printf(" "); }
     switch (insn & 0xff) {
         #define OpCodes_ALL
         #define OpCodes_VISITOR(x) case OpCode_ ## x : printf("%s %08x\n", #x, insn); break;
@@ -94,9 +96,7 @@ static void debug(Context* ctx, uint32_t insn) {
 
 static uint32_t randu32(Context* ctx) {
     if (ctx->nextInt >= (sizeof(ctx->randbuf) / sizeof(uint32_t))) {
-        crypto_stream_chacha20_xor_ic(
-            ctx->randbuf.bytes, ctx->randbuf.bytes, sizeof(ctx->randbuf),
-            (uint8_t*)"RAND_U32", ctx->ctr++, ctx->randseed.bytes);
+        Hash_expand(ctx->randbuf.bytes, sizeof(ctx->randbuf), ctx->randseed.bytes, ctx->ctr++);
         ctx->nextInt = 0;
     }
     return ctx->randbuf.ints[ctx->nextInt++];
@@ -113,7 +113,10 @@ static void emit(Context* ctx, uint32_t insn) {
     debug(ctx, insn);
     assert((insn & 0xff) > OpCode_INVALID_ZERO);
     assert((insn & 0xff) < OpCode_INVALID_BIG);
-    if (ctx->insns.count >= ctx->maxInsns) { return; }
+    if (ctx->insns.count >= Conf_RandGen_MAX_INSNS) {
+        ctx->tooBig = true;
+        return;
+    }
     Vec_push(&ctx->insns, insn);
 }
 
@@ -295,15 +298,14 @@ out:
     return false;
 }
 
-int RandGen_generate(uint32_t* buf, int bufLen4, Buf32_t* seed)
+int RandGen_generate(uint32_t buf[static Conf_RandGen_MAX_INSNS], Buf32_t* seed)
 {
     uint32_t budget = Conf_RandGen_INITIAL_BUDGET;
     Context ctx; memset(&ctx, 0, sizeof ctx);
     _Static_assert(sizeof ctx.randseed == sizeof *seed, "");
     memcpy(ctx.randseed.bytes, seed->bytes, sizeof ctx.randseed);
     ctx.nextInt = -1;
-    ctx.maxInsns = bufLen4;
-    ctx.insns.max = bufLen4;
+    ctx.insns.max = Conf_RandGen_MAX_INSNS;
     ctx.insns.elems = buf;
 
     loop(&ctx, &budget);
@@ -311,8 +313,10 @@ int RandGen_generate(uint32_t* buf, int bufLen4, Buf32_t* seed)
     Vec_free(&ctx.vars);
 
     _Static_assert(!Conf_RandGen_MIN_INSNS, "");
-    if (/*ctx.insns.count < Conf_RandGen_MIN_INSNS || */ctx.insns.count > Conf_RandGen_MAX_INSNS) {
-        return (ctx.insns.count > Conf_RandGen_MAX_INSNS) ? RandHash_TOO_BIG : RandHash_TOO_SMALL;
+    if (ctx.tooBig) {
+        return RandHash_TOO_BIG;
+    } else if (Conf_RandGen_MIN_INSNS > 0 && ctx.insns.count < Conf_RandGen_MIN_INSNS) {
+        return RandHash_TOO_SMALL;
     }
 
     return ctx.insns.count;

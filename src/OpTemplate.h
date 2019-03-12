@@ -186,7 +186,7 @@ FOP(mul)    { return a * b; } MKOP(MUL, mul)
         uint64_t r01 = (uint64_t)a0 * (uint64_t)b1;
         uint64_t r10 = (uint64_t)a1 * (uint64_t)b0;
         uint64_t r11 = (uint64_t)a1 * (uint64_t)b1;
-        
+
         uint64_t c = (r00 >> 32) + (uint32_t)r01 + (uint32_t)r10;
         c = (c >> 32) + (r01 >> 32) + (r10 >> 32) + (uint32_t)r11;
         uint32_t r2 = c;
@@ -256,36 +256,36 @@ static inline uint32_t AND(uint32_t a, uint32_t b) { return a & b; }
 #define FOP(name) static inline uint8_t name ## 8(uint8_t a)
 #define MKOP(NAME, name) MKSOP_8(NAME ## 8, name ## 8)
 FOP(popcnt)    { return __builtin_popcount(a); } MKOP(POPCNT, popcnt)
-FOP(clz)       { return a ? __builtin_clz(a) : 0; } MKOP(CLZ, clz)
+FOP(clz)       { return a ? (__builtin_clz(a)-24) : 8; } MKOP(CLZ, clz)
 static inline uint32_t bswap8(uint32_t a) { return a; } MKOP(BSWAP, bswap)
-FOP(ctz)       { return a ? __builtin_ctz(a) : 0; } MKOP(CTZ, ctz)
+FOP(ctz)       { return a ? __builtin_ctz(a) : 8; } MKOP(CTZ, ctz)
 #undef FOP
 #undef MKOP
 
 #define FOP(name) static inline uint16_t name ## 16(uint16_t a)
 #define MKOP(NAME, name) MKSOP_16(NAME ## 16, name ## 16)
 FOP(popcnt)    { return __builtin_popcount(a); } MKOP(POPCNT, popcnt)
-FOP(clz)       { return a ? __builtin_clz(a) : 0; } MKOP(CLZ, clz)
+FOP(clz)       { return a ? (__builtin_clz(a)-16) : 16; } MKOP(CLZ, clz)
 FOP(bswap)     { return __builtin_bswap16(a); } MKOP(BSWAP, bswap)
-FOP(ctz)       { return a ? __builtin_ctz(a) : 0; } MKOP(CTZ, ctz)
+FOP(ctz)       { return a ? __builtin_ctz(a) : 16; } MKOP(CTZ, ctz)
 #undef FOP
 #undef MKOP
 
 #define FOP(name) static inline uint32_t name ## 32(uint32_t a)
 #define MKOP(NAME, name) MKSOP_32(NAME ## 32, name ## 32)
 FOP(popcnt)    { return __builtin_popcount(a); } MKOP(POPCNT, popcnt)
-FOP(clz)       { return a ? __builtin_clz(a) : 0; } MKOP(CLZ, clz)
+FOP(clz)       { return a ? __builtin_clz(a) : 32; } MKOP(CLZ, clz)
 FOP(bswap)     { return __builtin_bswap32(a); } MKOP(BSWAP, bswap)
-FOP(ctz)       { return a ? __builtin_ctz(a) : 0; } MKOP(CTZ, ctz)
+FOP(ctz)       { return a ? __builtin_ctz(a) : 32; } MKOP(CTZ, ctz)
 #undef FOP
 #undef MKOP
 
 #define FOP(name) static inline uint64_t name ## 64(uint64_t a)
 #define MKOP(NAME, name) MKSOP_64(NAME ## 64, name ## 64)
 FOP(popcnt)    { return __builtin_popcountll(a); } MKOP(POPCNT, popcnt)
-FOP(clz)       { return a ? __builtin_clzll(a) : 0; } MKOP(CLZ, clz)
+FOP(clz)       { return a ? __builtin_clzll(a) : 64; } MKOP(CLZ, clz)
 FOP(bswap)     { return __builtin_bswap64(a); } MKOP(BSWAP, bswap)
-FOP(ctz)       { return a ? __builtin_ctzll(a) : 0; } MKOP(CTZ, ctz)
+FOP(ctz)       { return a ? __builtin_ctzll(a) : 64; } MKOP(CTZ, ctz)
 #undef FOP
 #undef MKOP
 

@@ -8,6 +8,7 @@
 #include "Difficulty.h"
 #include "Work.h"
 #include "Util.h"
+#include "Conf.h"
 
 #include <stdlib.h>
 #include <assert.h>
@@ -94,20 +95,13 @@ static inline enum ThreadState getState(BlockMiner_t* ctx, Worker_t* w) {
     return w->workerState;
 }
 
-#define HASHES_PER_CYCLE 10000
+#define HASHES_PER_CYCLE 20000
 
 typedef struct {
     PacketCrypt_BlockHeader_t hdr;
     uint64_t items[4];
     uint32_t lowNonce;
 } MineResult_t;
-
-typedef struct {
-    PacketCrypt_Announce_t* anns;
-    uint64_t count;
-    uint32_t effectiveTarget;
-    PacketCrypt_BlockHeader_t hdr;
-} Job_t;
 
 static void found(MineResult_t* res, PacketCrypt_BlockHeader_t* hdr, Worker_t* w)
 {
@@ -167,7 +161,7 @@ static bool mine(Worker_t* w)
             for (int j = 0; j < 4; j++) {
                 uint64_t x = res.items[j] = CryptoCycle_getItemNo(&w->pcState) % w->bm->annCount;
                 CryptoCycle_Item_t* it = (CryptoCycle_Item_t*) &w->bm->anns[x].ann;
-                if (Util_unlikely(!CryptoCycle_update(&w->pcState, it, 0))) { continue; }
+                if (Util_unlikely(!CryptoCycle_update(&w->pcState, it, 0, NULL))) { continue; }
             }
             CryptoCycle_smul(&w->pcState);
             CryptoCycle_final(&w->pcState);
@@ -188,21 +182,25 @@ static bool mine(Worker_t* w)
 static void* thread(void* vWorker)
 {
     Worker_t* w = vWorker;
+    pthread_mutex_lock(&w->bm->lock);
     for (;;) {
         enum ThreadState rs = getRequestedState(w);
+        setState(w, rs);
         switch (rs) {
             case ThreadState_RUNNING: {
-                if (!mine(w)) { break; }
+                pthread_mutex_unlock(&w->bm->lock);
+                bool found = mine(w);
+                pthread_mutex_lock(&w->bm->lock);
+                if (!found) { break; }
+                setState(w, ThreadState_STOPPED);
                 Util_fallthrough();
             }
             case ThreadState_STOPPED: {
-                pthread_mutex_lock(&w->bm->lock);
-                setState(w, ThreadState_STOPPED);
                 pthread_cond_wait(&w->bm->cond, &w->bm->lock);
-                pthread_mutex_unlock(&w->bm->lock);
                 break;
             }
             case ThreadState_SHUTDOWN: {
+                pthread_mutex_unlock(&w->bm->lock);
                 return NULL;
             }
         }
@@ -252,26 +250,30 @@ static void freeQueue(BlockMiner_t* ctx)
     ctx->queue = NULL;
 }
 
-void waitState(BlockMiner_t* ctx, enum ThreadState desiredState) {
-    for (int i = 0; i < 10000; i++) {
+static void waitState(BlockMiner_t* ctx, enum ThreadState desiredState) {
+    for (int i = 0; i < 100000; i++) {
         enum ThreadState ts = desiredState;
+        pthread_mutex_lock(&ctx->lock);
         for (int i = 0; i < ctx->numWorkers; i++) {
-            enum ThreadState ts = getState(ctx, &ctx->workers[i]);
-            if (ts == ThreadState_RUNNING) { break; }
+            ts = getState(ctx, &ctx->workers[i]);
+            if (ts != desiredState) { break; }
         }
+        pthread_mutex_unlock(&ctx->lock);
         if (ts == desiredState) {
             return;
         }
         Time_nsleep(100000);
     }
-    assert(0 && "threads did not stop in 1 sec");
+    assert(0 && "threads did not stop in 10 secs");
 }
 
 void BlockMiner_free(BlockMiner_t* ctx)
 {
+    pthread_mutex_lock(&ctx->lock);
     for (int i = 0; i < ctx->numWorkers; i++) {
         setRequestedState(ctx, &ctx->workers[i], ThreadState_SHUTDOWN);
     }
+    pthread_mutex_unlock(&ctx->lock);
     pthread_cond_broadcast(&ctx->cond);
     waitState(ctx, ThreadState_SHUTDOWN);
 
@@ -284,12 +286,19 @@ void BlockMiner_free(BlockMiner_t* ctx)
     free(ctx);
 }
 
-void BlockMiner_addAnns(BlockMiner_t* bm, PacketCrypt_Announce_t* anns, uint64_t count)
+void BlockMiner_addAnns(BlockMiner_t* bm, PacketCrypt_Announce_t* anns, uint64_t count, int noCopy)
 {
     AnnounceList_t* l = malloc(sizeof(AnnounceList_t));
-    PacketCrypt_Announce_t* annsCpy = malloc(sizeof(PacketCrypt_Announce_t) * count);
     assert(l && anns);
-    memcpy(annsCpy, anns, sizeof(PacketCrypt_Announce_t) * count);
+    PacketCrypt_Announce_t* annsCpy = anns;
+    if (!noCopy) {
+        annsCpy = malloc(sizeof(PacketCrypt_Announce_t) * count);
+        assert(annsCpy);
+        memcpy(annsCpy, anns, sizeof(PacketCrypt_Announce_t) * count);
+    }
+    for (uint64_t i = 0; i < count; i++) {
+        assert(annsCpy[i].hdr.workBits);
+    }
     l->anns = annsCpy;
     l->count = count;
     l->next = bm->queue;
@@ -317,6 +326,7 @@ static int tpComp(const void* negIfFirst, const void* posIfFirst) {
 int BlockMiner_lockForMining(
     BlockMiner_t* bm,
     PacketCrypt_Coinbase_t* commitOut,
+    BlockMiner_Hashes_t** deletedAnnsOut,
     uint32_t nextBlockHeight,
     uint32_t nextBlockTarget)
 {
@@ -328,7 +338,10 @@ int BlockMiner_lockForMining(
         bm->anns[i].effectiveWork = Difficulty_degradeAnnouncementTarget(
             bm->anns[i].ann.hdr.workBits,
             nextBlockHeight - bm->anns[i].ann.hdr.parentBlockHeight);
-        if (bm->anns[i].effectiveWork == 0xffffffffu) {
+        if (bm->anns[i].effectiveWork == 0xffffffffu ||
+            (nextBlockHeight >= Conf_PacketCrypt_ANN_WAIT_PERIOD &&
+                bm->anns[i].ann.hdr.parentBlockHeight == Conf_PacketCrypt_ANN_FAKE_PARENT_HEIGHT))
+        {
             // This will make the hash "invalid" and then the announcement will be kicked from the tree
             bm->tree->entries[i].hash.longs[0] = UINT64_MAX;
         }
@@ -397,6 +410,18 @@ int BlockMiner_lockForMining(
     }
     qsort(bm->anns, bm->annCount, sizeof *bm->anns, tpComp);
 
+    if (deletedAnnsOut) {
+        assert(bm->annCount >= nextCount);
+        uint64_t totalSz = sizeof(BlockMiner_Hashes_t) + 32 * (bm->annCount - nextCount);
+        BlockMiner_Hashes_t* hashesOut = malloc(totalSz);
+        assert(hashesOut);
+        hashesOut->totalLength = totalSz;
+        for (uint64_t i = nextCount, j = 0; i < bm->annCount; i++, j++) {
+            Buf_OBJCPY(hashesOut->hashes[j], bm->anns[i].ann.hdr.contentHash);
+        }
+        *deletedAnnsOut = hashesOut;
+    }
+
     // the entries which were to be dropped should have been sorted to the end so we can
     // just decrease the length to remove them.
     bm->annCount = nextCount;
@@ -404,8 +429,11 @@ int BlockMiner_lockForMining(
     uint32_t minWork = 0;
     for (uint64_t i = 0; i < bm->annCount; i++) {
         minWork = minWork < bm->anns[i].effectiveWork ? bm->anns[i].effectiveWork : minWork;
+        assert(bm->anns[i].effectiveWork == Difficulty_degradeAnnouncementTarget(
+            bm->anns[i].ann.hdr.workBits, nextBlockHeight - bm->anns[i].ann.hdr.parentBlockHeight));
     }
 
+    commitOut->magic = PacketCrypt_Coinbase_MAGIC;
     commitOut->numAnns = bm->annCount;
     commitOut->annLeastWorkTarget = minWork;
     bm->effectiveTarget = Difficulty_getEffectiveTarget(nextBlockTarget, minWork, bm->annCount);

@@ -135,12 +135,15 @@ _Static_assert(sizeof(PacketCrypt_HeaderAndProof_t) ==
     4 +
     sizeof(PacketCrypt_Announce_t) * PacketCrypt_NUM_ANNS, "");
 
+#define PacketCrypt_Coinbase_MAGIC 0x0211f909
 typedef struct {
-    uint8_t merkleRoot[32];
-    uint64_t numAnns;
+    uint32_t magic;
 
     // The target representing the least work of any of the announcements in the set
     uint32_t annLeastWorkTarget;
+
+    uint8_t merkleRoot[32];
+    uint64_t numAnns;
 } PacketCrypt_Coinbase_t;
 _Static_assert(sizeof(PacketCrypt_Coinbase_t) == 32+8+4+4, "");
 
@@ -149,5 +152,10 @@ typedef struct {
     uint64_t size;
 } PacketCrypt_Find_t;
 _Static_assert(sizeof(PacketCrypt_Find_t) == 16, "");
+
+typedef struct {
+    uint32_t progbuf[2048];
+} PacketCrypt_ValidateCtx_t;
+_Static_assert(sizeof(PacketCrypt_ValidateCtx_t) == 2048*4, "");
 
 #endif
