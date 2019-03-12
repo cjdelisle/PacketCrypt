@@ -23,9 +23,6 @@ CXXFLAGS = \
 bin_PROGRAMS =
 lib_LIBRARIES =
 
-lib_LIBRARIES += libprogsupport.a
-libprogsupport_a_SOURCES = src/ProgSupport.c src/Hash.c
-
 lib_LIBRARIES += libpacketcrypt.a
 libpacketcrypt_a_SOURCES = Makefile\
                                 include/PacketCrypt.h \

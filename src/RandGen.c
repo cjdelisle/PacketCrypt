@@ -313,11 +313,10 @@ int RandGen_generate(uint32_t buf[static Conf_RandGen_MAX_INSNS], Buf32_t* seed)
     Vec_free(&ctx.vars);
 
     _Static_assert(!Conf_RandGen_MIN_INSNS, "");
-    if (ctx.tooBig) {
-        return RandHash_TOO_BIG;
-    } else if (Conf_RandGen_MIN_INSNS > 0 && ctx.insns.count < Conf_RandGen_MIN_INSNS) {
-        return RandHash_TOO_SMALL;
-    }
+    if (ctx.tooBig) { return RandHash_TOO_BIG; }
+    #if Conf_RandGen_MIN_INSNS > 0
+    if (ctx.insns.count < Conf_RandGen_MIN_INSNS) { return RandHash_TOO_SMALL; }
+    #endif
 
     return ctx.insns.count;
 }
