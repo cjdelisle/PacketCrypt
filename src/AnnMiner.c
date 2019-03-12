@@ -161,6 +161,7 @@ static void search(Worker_t* restrict w)
         if (nonce > 0x00ffffff) { return; }
         if (Util_likely(!annHash(w, nonce++))) { continue; }
         assert(!Validate_checkAnn(
+            NULL,
             (PacketCrypt_Announce_t*)&w->ann,
             w->activeJob->parentBlockHash.bytes,
             &w->vctx));

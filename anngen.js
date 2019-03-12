@@ -41,8 +41,8 @@ const start = (threads, target, parentBlockHeight, parentBlockHash) => {
         if (!c) {
             throw new Error("no content for hash [" + h + "]");
         }
-        console.error(h);
-        console.error(c.toString('hex'));
+        //console.error(h);
+        //console.error(c.toString('hex'));
         process.stdout.write(d);
         process.stdout.write(c);
         again();

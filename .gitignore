@@ -5,6 +5,7 @@ Makefile
 /install-sh
 /missing
 /.vscode
+/node_modules
 
 .deps/
 aclocal.m4

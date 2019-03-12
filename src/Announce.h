@@ -12,6 +12,7 @@
 #define AnnMerkle_NAME Announce_Merkle
 #include "AnnMerkle.h"
 _Static_assert(sizeof(Announce_Merkle_Branch) == (Announce_MERKLE_DEPTH+1)*64, "");
+_Static_assert(sizeof(Announce_Merkle_Branch) == 896, "");
 
 #define Announce_TABLE_SZ (1<<Announce_MERKLE_DEPTH)
 
@@ -31,6 +32,6 @@ union Announce_Union {
     Announce_t ann;
 };
 
-void Announce_mkitem(uint64_t num, CryptoCycle_Item_t* item, uint8_t seed[64]);
+void Announce_mkitem(uint64_t num, CryptoCycle_Item_t* item, uint8_t seed[static 32]);
 
 #endif

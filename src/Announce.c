@@ -18,7 +18,7 @@ static inline void memocycle(Buf64_t* buf, int bufcount, int cycles) {
         }
     }
 }
-void Announce_mkitem(uint64_t num, CryptoCycle_Item_t* item, uint8_t seed[64]) {
+void Announce_mkitem(uint64_t num, CryptoCycle_Item_t* item, uint8_t seed[static 32]) {
     Hash_expand(item->bytes, 64, seed, num);
     for (uint32_t i = 1; i < Announce_ITEM_HASHCOUNT; i++) {
         Hash_compress64(item->sixtyfours[i].bytes, item->sixtyfours[i-1].bytes, 64);

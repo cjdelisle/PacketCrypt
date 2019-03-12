@@ -10,6 +10,7 @@
 #include "Util.h"
 
 int Validate_checkAnn(
+    uint8_t annHashOut[static 32],
     const PacketCrypt_Announce_t* pcAnn,
     const uint8_t* parentBlockHash,
     PacketCrypt_ValidateCtx_t* vctx)
@@ -39,6 +40,7 @@ int Validate_checkAnn(
     int itemNo = -1;
     for (int i = 0; i < 4; i++) {
         itemNo = (CryptoCycle_getItemNo(&state) % Announce_TABLE_SZ);
+        // only 32 bytes of the seed is used
         Announce_mkitem(itemNo, &item, annHash0.bytes);
         if (!CryptoCycle_update(&state, &item, Conf_AnnHash_RANDHASH_CYCLES, vctx->progbuf)) {
             return Validate_checkAnn_INVAL;
@@ -57,6 +59,8 @@ int Validate_checkAnn(
 
     uint32_t target = ann->hdr.workBits;
     CryptoCycle_final(&state);
+
+    if (annHashOut) { memcpy(annHashOut, state.bytes, 32); }
 
     if (!Work_check(state.bytes, target)) { return Validate_checkAnn_INSUF_POW; }
 
@@ -110,7 +114,7 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
     // Validate announcements
     for (int i = 0; i < PacketCrypt_NUM_ANNS; i++) {
         const PacketCrypt_Announce_t* ann = &hap->announcements[i];
-        if (Validate_checkAnn(ann, &blockHashes[i * 32], vctx)) {
+        if (Validate_checkAnn(NULL, ann, &blockHashes[i * 32], vctx)) {
             return Validate_checkBlock_ANN_INVALID(i);
         }
         uint32_t effectiveAnnTarget =
