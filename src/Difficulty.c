@@ -128,7 +128,9 @@ static inline void getEffectiveWork(
     uint64_t annCount)
 {
     if (BN_is_zero(annWork) || !annCount) {
-        assert(BN_zero(workOut));
+        // This is work *required* so when there is no work and no announcements
+        // that work is "infinite".
+        bn256(workOut);
         return;
     }
 
@@ -180,9 +182,8 @@ uint32_t Difficulty_getEffectiveTarget(uint32_t blockTar, uint32_t annTar, uint6
 
 uint32_t Difficulty_degradeAnnouncementTarget(uint32_t annTar, uint32_t annAgeBlocks)
 {
-    if (annAgeBlocks < Conf_PacketCrypt_ANN_WAIT_PERIOD) { return -1; }
-    if (annAgeBlocks == Conf_PacketCrypt_ANN_WAIT_PERIOD) { return annTar; }
-    annAgeBlocks -= Conf_PacketCrypt_ANN_WAIT_PERIOD;
+    if (annAgeBlocks < Conf_PacketCrypt_ANN_WAIT_PERIOD) { return 0xffffffff; }
+    annAgeBlocks -= (Conf_PacketCrypt_ANN_WAIT_PERIOD - 1);
     BN_CTX* ctx = BN_CTX_new(); assert(ctx);
     BIGNUM* bnAnnTar = BN_new(); assert(bnAnnTar);
     BIGNUM* bnAnnWork = BN_new(); assert(bnAnnWork);
