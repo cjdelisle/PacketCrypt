@@ -204,3 +204,26 @@ uint32_t Difficulty_degradeAnnouncementTarget(uint32_t annTar, uint32_t annAgeBl
     // if out > 0x207fffff then it rounds to zero, meaning the announcement cannot be mined
     return out > 0x207fffff ? 0xffffffff : out;
 }
+
+// IsAnnMinDiffOk is kind of a sanity check to make sure that the miner doesn't provide
+// "silly" results which might trigger wrong behavior from the diff computation
+bool Difficulty_isMinAnnDiffOk(uint32_t target)
+{
+    if (target == 0 || target > 0x20ffffff) {
+        return false;
+    }
+    BN_CTX* ctx = BN_CTX_new(); assert(ctx);
+    BIGNUM* bnTar = BN_new(); assert(bnTar);
+    BIGNUM* bnWork = BN_new(); assert(bnWork);
+    BIGNUM* bnMax = BN_new(); assert(bnMax);
+    bnSetCompact(bnTar, target);
+    bnWorkForDiff(ctx, bnWork, bnTar);
+    if (BN_is_zero(bnWork)) { return false; }
+    bn256(bnMax);
+    if (BN_cmp(bnWork, bnMax) >= 0) { return false; }
+    BN_free(bnTar);
+    BN_free(bnWork);
+    BN_free(bnMax);
+    BN_CTX_free(ctx);
+    return true;
+}

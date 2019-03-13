@@ -102,6 +102,9 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
     if (coinbaseCommitment->magic != PacketCrypt_Coinbase_MAGIC) {
         return Validate_checkBlock_BAD_COINBASE;
     }
+    if (!Difficulty_isMinAnnDiffOk(coinbaseCommitment->annLeastWorkTarget)) {
+        return Validate_checkBlock_BAD_COINBASE;
+    }
 
     // Check that final work result meets difficulty requirement
     uint64_t annIndexes[PacketCrypt_NUM_ANNS] = {0};
