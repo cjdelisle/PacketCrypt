@@ -43,6 +43,7 @@ libpacketcrypt_a_SOURCES = Makefile\
     src/PcCompress.c            src/PcCompress.h \
     src/RandGen.c               src/RandGen.h \
     src/RandHash_interpreted.c \
+    src/RandHashOps.c \
     src/optest.c \
                                 src/RandHash.h \
     src/Time.c                  src/Time.h \
