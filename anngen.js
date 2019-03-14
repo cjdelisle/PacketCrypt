@@ -8,20 +8,26 @@ const start = (threads, target, parentBlockHeight, parentBlockHash) => {
     const msg = Buffer.alloc(56 + 32);
 
     const again = () => {
-        let content = Crypto.randomBytes(Math.floor(Math.random()*512));
-        let realContent;
-        if (content.length - 2 <= 0xfc) {
-            content = content.slice(1)
-            content[0] = content.length - 1;
-            realContent = content.slice(1);
+        let hash;
+        if (Math.random() < 0.10) {
+            content = Buffer.alloc(0);
+            hash = Array(33).join('00');
         } else {
-            content[0] = 0xfd;
-            content.writeUInt16LE(content.length - 3, 1);
-            realContent = content.slice(3);
+            let content = Crypto.randomBytes(2 + Math.floor(Math.random()*512));
+            let realContent;
+            if (content.length - 2 <= 0xfc) {
+                content = content.slice(1)
+                content[0] = content.length - 1;
+                realContent = content.slice(1);
+            } else {
+                content[0] = 0xfd;
+                content.writeUInt16LE(content.length - 3, 1);
+                realContent = content.slice(3);
+            }
+            hash = Blake2b(32).update(realContent).digest('hex');
+            contentByHash[hash] = content;
+            if (content.length === 1) { throw new Error(); }
         }
-
-        const hash = Blake2b(32).update(realContent).digest('hex');
-        contentByHash[hash] = content;
 
         msg.writeUInt32LE(target, 8);
         msg.writeUInt32LE(parentBlockHeight, 12);
@@ -37,6 +43,12 @@ const start = (threads, target, parentBlockHeight, parentBlockHash) => {
 
     pcann.stdout.on('data', (d) => {
         const h = d.slice(24, 24+32).toString('hex');
+        if (/^0+$/.test(h)) {
+            // no content
+            process.stdout.write(d);
+            again();
+            return;
+        }
         const c = contentByHash[h];
         if (!c) {
             throw new Error("no content for hash [" + h + "]");
