@@ -10,7 +10,7 @@
 #include "Util.h"
 
 int Validate_checkAnn(
-    uint8_t annHashOut[static 32],
+    uint8_t annHashOut[32],
     const PacketCrypt_Announce_t* pcAnn,
     const uint8_t* parentBlockHash,
     PacketCrypt_ValidateCtx_t* vctx)
