@@ -13,7 +13,7 @@ const start = (threads, target, parentBlockHeight, parentBlockHash) => {
             content = Buffer.alloc(0);
             hash = Array(33).join('00');
         } else {
-            let content = Crypto.randomBytes(2 + Math.floor(Math.random()*512));
+            let content = Crypto.randomBytes(3 + Math.floor(Math.random()*512));
             let realContent;
             if (content.length - 2 <= 0xfc) {
                 content = content.slice(1)
