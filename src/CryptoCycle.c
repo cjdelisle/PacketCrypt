@@ -54,6 +54,7 @@ void CryptoCycle_crypt(CryptoCycle_Header_t* restrict msg)
     uint64_t aeadLen = CryptoCycle_getAddLen(msg) * 16;
     uint64_t msgLen = getLengthAndTruncate(msg) * 16;
     int tzc = CryptoCycle_getTrailingZeros(msg);
+    int azc = CryptoCycle_getAdditionalZeros(msg);
     uint8_t* msgContent = &aead[aeadLen];
     crypto_onetimeauth_poly1305_update(&state, aead, aeadLen);
 
@@ -71,9 +72,9 @@ void CryptoCycle_crypt(CryptoCycle_Header_t* restrict msg)
     }
 
     {
-        uint32_t slen[4] = {0};
-        slen[0] = CryptoCycle_LE(aeadLen);
-        slen[2] = CryptoCycle_LE(msgLen) - tzc;
+        uint64_t slen[2] = {0};
+        slen[0] = ((uint64_t)aeadLen) - azc;
+        slen[1] = ((uint64_t)msgLen) - tzc;
         crypto_onetimeauth_poly1305_update(&state, (uint8_t*) slen, 16);
     }
     crypto_onetimeauth_poly1305_final(&state, msg->key_high_or_auth);

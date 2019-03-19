@@ -49,7 +49,7 @@
  *    +                                                               +
  *  8 |                                                               |
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * 12 |     unused    | add |D|  tzc  |      len    |T|   version   |F|
+ * 12 | unused|  azc  | add |D|  tzc  |      len    |T|   version   |F|
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  * 16 |                                                               |
  *    +                                                               +
@@ -138,7 +138,7 @@ typedef struct {
      *     0               1               2               3
      *     0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
      *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     *  8 |   version   |F|      len    |T| add |D|  tzc  |    unused     |
+     *  8 |   version   |F|      len    |T| add |D|  tzc  |unused |  azc  |
      *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      *
      * We byte-swap it to little and then use it that way.
@@ -169,6 +169,7 @@ typedef struct {
         );                                                                                      \
     }
 
+CryptoCycle_SETTER_GETTER( 0, 4, setAdditionalZeros, getAdditionalZeros)
 CryptoCycle_SETTER_GETTER( 8, 4, setTrailingZeros, getTrailingZeros)
 CryptoCycle_SETTER_GETTER(12, 1, setDecrypt, isDecrypt)
 CryptoCycle_SETTER_GETTER(13, 3, setAddLen, getAddLen)
