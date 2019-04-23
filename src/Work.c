@@ -26,36 +26,36 @@
 // Set the max target to the highest that work can represent
 #define CB_MAX_TARGET 0x207FFFFF
 
-int Work_check(unsigned char * hash, int target) {
-	
+int Work_check(const unsigned char * hash, int target) {
+
 	// Get trailing zero bytes
 	int zeroBytes = target >> 24;
-	
+
 	// Check target is less than or equal to maximum.
 	if (target > CB_MAX_TARGET)
 		return false;
-	
+
 	// Modify the target to the mantissa (significand).
 	target &= 0x00FFFFFF;
-	
+
 	// Check mantissa is below 0x800000.
 	if (target > 0x7FFFFF)
 		return false;
-	
+
 	// Fail if hash is above target. First check leading bytes to significant part.
 	// As the hash is seen as little-endian, do this backwards.
 	for (int x = 0; x < 32 - zeroBytes; x++)
 		if (hash[31 - x])
 			// A byte leading to the significant part is not zero
 			return false;
-	
+
 	// Check significant part
 	int significantPart = hash[zeroBytes - 1] << 16;
 	significantPart |= hash[zeroBytes - 2] << 8;
 	significantPart |= hash[zeroBytes - 3];
 	if (significantPart > target)
 		return false;
-	
+
 	return true;
-	
+
 }

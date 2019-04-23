@@ -67,10 +67,23 @@ int Validate_checkAnn(
     return Validate_checkAnn_OK;
 }
 
-// 0 == ok
+static bool isWorkOk(const CryptoCycle_State_t* ccState,
+                     const PacketCrypt_Coinbase_t* cb,
+                     uint32_t target)
+{
+    uint32_t effectiveTarget = Difficulty_getEffectiveTarget(
+        target, cb->annLeastWorkTarget, cb->numAnns);
+    return Work_check(ccState->bytes, effectiveTarget);
+}
+
+// returns:
+// Validate_checkBlock_OK
+// Validate_checkBlock_SHARE_OK or
+// Validate_checkBlock_INSUF_POW
 static int checkPcHash(uint64_t indexesOut[PacketCrypt_NUM_ANNS],
                        const PacketCrypt_HeaderAndProof_t* hap,
-                       const PacketCrypt_Coinbase_t* cb)
+                       const PacketCrypt_Coinbase_t* cb,
+                       uint32_t shareTarget)
 {
     CryptoCycle_State_t pcState;
     _Static_assert(sizeof(PacketCrypt_Announce_t) == sizeof(CryptoCycle_Item_t), "");
@@ -87,14 +100,20 @@ static int checkPcHash(uint64_t indexesOut[PacketCrypt_NUM_ANNS],
     CryptoCycle_smul(&pcState);
     CryptoCycle_final(&pcState);
 
-    uint32_t effectiveTarget = Difficulty_getEffectiveTarget(
-        hap->blockHeader.workBits, cb->annLeastWorkTarget, cb->numAnns);
-    return !Work_check(pcState.bytes, effectiveTarget);
-}
+    if (isWorkOk(&pcState, cb, hap->blockHeader.workBits)) {
+        return Validate_checkBlock_OK;
+    }
 
+    if (shareTarget && isWorkOk(&pcState, cb, shareTarget)) {
+        return Validate_checkBlock_SHARE_OK;
+    }
+
+    return Validate_checkBlock_INSUF_POW;
+}
 
 int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
                         uint32_t blockHeight,
+                        uint32_t shareTarget,
                         const PacketCrypt_Coinbase_t* coinbaseCommitment,
                         const uint8_t blockHashes[static PacketCrypt_NUM_ANNS * 32],
                         PacketCrypt_ValidateCtx_t* vctx)
@@ -108,9 +127,7 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
 
     // Check that final work result meets difficulty requirement
     uint64_t annIndexes[PacketCrypt_NUM_ANNS] = {0};
-    if (checkPcHash(annIndexes, hap, coinbaseCommitment)) {
-        return Validate_checkBlock_INSUF_POW;
-    }
+    int chk = checkPcHash(annIndexes, hap, coinbaseCommitment, shareTarget);
 
     Buf32_t annHashes[PacketCrypt_NUM_ANNS];
 
@@ -124,6 +141,8 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
             Difficulty_degradeAnnouncementTarget(ann->hdr.workBits,
                 (blockHeight - ann->hdr.parentBlockHeight));
         if (effectiveAnnTarget > coinbaseCommitment->annLeastWorkTarget) {
+            fprintf(stderr, "Not enough work, declared work %08x  min work %08x  degraded work %08x\n",
+                ann->hdr.workBits, coinbaseCommitment->annLeastWorkTarget, effectiveAnnTarget);
             return Validate_checkBlock_ANN_INSUF_POW(i);
         }
         Hash_COMPRESS32_OBJ(&annHashes[i], ann);
@@ -142,5 +161,5 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
         return Validate_checkBlock_PCP_MISMATCH;
     }
 
-    return Validate_checkBlock_OK;
+    return chk;
 }

@@ -4,7 +4,9 @@
   "description": "Bandwidth-hard proof of work. [![Build Status](https://travis-ci.org/cjdelisle/PacketCrypt.svg?branch=master)](https://travis-ci.org/cjdelisle/PacketCrypt)",
   "main": "anngen.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "jshint --config .jshintrc --exclude-path .jshintignore .",
+    "flow": "./node_modules/.bin/flow"
   },
   "repository": {
     "type": "git",
@@ -14,5 +16,15 @@
   "bugs": {
     "url": "https://github.com/cjdelisle/PacketCrypt/issues"
   },
-  "homepage": "https://github.com/cjdelisle/PacketCrypt#readme"
+  "homepage": "https://github.com/cjdelisle/PacketCrypt#readme",
+  "dependencies": {
+    "bitcoind-rpc": "^0.7.2",
+    "blake2b": "^2.1.3",
+    "nthen": "^0.1.8",
+    "write-file-atomic": "^2.4.2"
+  },
+  "devDependencies": {
+    "flow-bin": "^0.95.1",
+    "jshint": "^2.10.2"
+  }
 }

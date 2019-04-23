@@ -2,6 +2,6 @@
 #define WORK_H
 
 // 0 means failure
-int Work_check(unsigned char * hash, int target);
+int Work_check(const unsigned char * hash, int target);
 
 #endif

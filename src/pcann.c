@@ -12,18 +12,32 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <unistd.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 static int usage() {
-    fprintf(stderr, "Usage: ./pcann [-t] <threads>\n");
-    fprintf(stderr, "    -t           # testing, no input\n");
-    fprintf(stderr, "    <threads>    # number of threads to use for hashing\n");
+    fprintf(stderr, "Usage: ./pcann [--test] [--out <file> [--out <file>]...] "
+        "[--threads <threads>]\n");
+    fprintf(stderr, "    --test       # testing, no input\n");
+    fprintf(stderr, "    --out        # specify output file, will be reopened "
+        "when there is new work\n");
+    fprintf(stderr, "                 # NOTE: If --out is passed more than once, announcements "
+        "will be sent to each file\n");
+    fprintf(stderr, "                 # split up by the numeric value of the first 8 bytes of the "
+        "announcement hash");
+    fprintf(stderr, "    --threads    # specify number of threads to use (default: 1)\n");
     return 100;
 }
+
+#define DEBUGF(...) fprintf(stderr, "pcann: " __VA_ARGS__)
 
 typedef struct {
     PacketCrypt_AnnounceHdr_t hdr;
     Buf32_t parentBlockHash;
 } Request_t;
+
+_Static_assert(sizeof(Request_t) == 56+32, "");
 
 static void setTestVal(Request_t* req) {
     memset(req, 0, sizeof *req);
@@ -32,34 +46,108 @@ static void setTestVal(Request_t* req) {
     Buf_OBJCPY(&req->parentBlockHash, "abcdefghijklmnopqrstuvwxyz01234");
 }
 
-int main(int argc, char** argv) {
+struct Files {
+    int count;
+    const char** names;
+    int* fileNos;
+};
+static void addFile(struct Files* files, const char* filename) {
+    files->count++;
+    int count = files->count;
+    files->names = realloc(files->names, count * sizeof(const char*));
+    files->fileNos = realloc(files->fileNos, count * sizeof(int));
+    files->fileNos[count-1] = -1;
+    files->names[count-1] = filename;
+}
+
+int main(int argc, const char** argv) {
 
     if (argc < 2) { return usage(); }
 
-    char* arg = argv[1];
-
+    struct Files files = { .count = 0 };
     bool test = false;
-    if (!strcmp(arg, "-t")) {
-        if (argc < 3) { return usage(); }
-        arg = argv[2];
-        test = true;
+    long threads = 1;
+    {
+        bool out = false;
+        bool t = false;
+        for (int i = 1; i < argc; i++) {
+            const char* arg = argv[i];
+            if (out) {
+                addFile(&files, arg);
+                out = false;
+            } else if (t) {
+                threads = strtol(arg, NULL, 10);
+                if (threads < 1 || threads > 0xffff) {
+                    DEBUGF("--threads parameter [%s] could not be parsed\n", arg);
+                    DEBUGF("or was not an integer between 1 and 65535\n");
+                    return usage();
+                }
+                t = false;
+            } else if (!strcmp(arg, "--test")) {
+                test = true;
+            } else if (!strcmp(arg, "--out")) {
+                out = true;
+            } else if (!strcmp(arg, "--threads")) {
+                t = true;
+            } else {
+                DEBUGF("Invalid argument [%s]\n", arg);
+                return usage();
+            }
+        }
     }
 
-    long n = strtol(arg, NULL, 10);
-    if (n < 1 || n > 0xffff) { return usage(); }
-
-    AnnMiner_t* annMiner = AnnMiner_create(n, STDOUT_FILENO, 0);
+    for (int i = 0; i < files.count; i++) {
+        int outFileNo = open(files.names[i], O_WRONLY | O_CREAT | O_APPEND, 0666);
+        if (outFileNo < 0) {
+            DEBUGF("Error opening output file [%s] [%s]\n",
+                files.names[i], strerror(errno));
+            return 100;
+        }
+        files.fileNos[i] = outFileNo;
+    }
+    AnnMiner_t* annMiner = AnnMiner_create(threads, files.fileNos, files.count, 0);
 
     Request_t req;
     if (test) { setTestVal(&req); }
     bool newData = true;
     for (;;) {
         if (!test) {
-            assert(1 == fread(&req, sizeof req, 1, stdin));
+            for (;;) {
+                ssize_t ret = fread(&req, sizeof req, 1, stdin);
+                if (!ret) {
+                    if (errno == 0) {
+                        // EOF, parent died
+                        DEBUGF("Parent dead, shutting down\n");
+                        return 0;
+                    }
+                    DEBUGF("Failed read of stdin [%d] [%s]\n", errno, strerror(errno));
+                    sleep(1);
+                    continue;
+                }
+                assert(ret == 1);
+                break;
+            }
             newData = true;
         }
         if (newData) {
-            fprintf(stderr, "Starting job with work target %08x\n", req.hdr.workBits);
+            if (files.count) {
+                AnnMiner_stop(annMiner);
+                for (int i = 0; i < files.count; i++) {
+                    int newOutFileNo = open(files.names[i], O_WRONLY | O_CREAT | O_APPEND, 0666);
+                    if (newOutFileNo < 0) {
+                        DEBUGF("Error: unable to re-open outfile [%s] [%s]\n",
+                            files.names[i], strerror(errno));
+                        return 100;
+                    }
+                    if (dup2(newOutFileNo, files.fileNos[i]) < 0) {
+                        DEBUGF("Error: unable to dup2() outfile [%s]\n",
+                            strerror(errno));
+                        return 100;
+                    }
+                    close(newOutFileNo);
+                }
+            }
+            DEBUGF("Starting job with work target %08x\n", req.hdr.workBits);
             AnnMiner_start(annMiner,
                 req.hdr.contentHash,
                 req.hdr.contentType,
@@ -69,7 +157,7 @@ int main(int argc, char** argv) {
             newData = false;
         }
 
-        fprintf(stderr, "%lu hashes per second\n",
+        DEBUGF("%lu hashes per second\n",
             (unsigned long)AnnMiner_getHashesPerSecond(annMiner));
 
         if (test) { sleep(1); }

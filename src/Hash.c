@@ -1,17 +1,23 @@
 #include "Hash.h"
 #include "sodium/crypto_generichash_blake2b.h"
 #include "sodium/crypto_stream_chacha20.h"
+#include "sodium/crypto_hash_sha256.h"
 
 #include <string.h>
 #include <assert.h>
 #include <stdio.h>
 
 void Hash_compress64(uint8_t output[static 64], uint8_t* buff, uint32_t len) {
-    crypto_generichash_blake2b(output, 64, buff, len, NULL, 0);
+    assert(!crypto_generichash_blake2b(output, 64, buff, len, NULL, 0));
 }
 
 void Hash_compress32(uint8_t output[static 32], uint8_t* buff, uint32_t len) {
-    crypto_generichash_blake2b(output, 32, buff, len, NULL, 0);
+    assert(!crypto_generichash_blake2b(output, 32, buff, len, NULL, 0));
+}
+
+void Hash_compressDoubleSha256(uint8_t output[static 32], uint8_t* buff, uint32_t len) {
+    assert(!crypto_hash_sha256(output, buff, len));
+    assert(!crypto_hash_sha256(output, output, 32));
 }
 
 void Hash_expand(
@@ -22,7 +28,7 @@ void Hash_expand(
     uint32_t nonce[3] = { num };
     memcpy(&nonce[1], "PC_EXPND", 8);
     memset(buff, 0, len);
-    crypto_stream_chacha20_ietf_xor_ic(buff, buff, len, (uint8_t*)&nonce, 0, seed);
+    assert(!crypto_stream_chacha20_ietf_xor_ic(buff, buff, len, (uint8_t*)&nonce, 0, seed));
 }
 
 void Hash_eprintHex(uint8_t* hash, int len)

@@ -53,35 +53,64 @@ libpacketcrypt_a_SOURCES = Makefile\
 
 libpacketcrypt_a_CFLAGS = ${CRYPTO_CFLAGS} ${sodium_CFLAGS} ${PTHREAD_CFLAGS} -Iinclude
 
-bin_PROGRAMS += pcblk
-pcblk_SOURCES = src/pcblk.c \
+bin_PROGRAMS += bin/pcblk
+bin_pcblk_SOURCES = src/pcblk.c \
                                 include/BlockMiner.h \
                                 include/PacketCrypt.h
-pcblk_CFLAGS = -Iinclude
-pcblk_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_CFLAGS} ${CRYPTO_LIBS}
+bin_pcblk_CFLAGS = -Iinclude
+bin_pcblk_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_CFLAGS} ${CRYPTO_LIBS}
 
-bin_PROGRAMS += pcann
-pcann_SOURCES = src/pcann.c \
+bin_PROGRAMS += bin/pcann
+bin_pcann_SOURCES = src/pcann.c \
                                 include/AnnMiner.h \
                                 include/PacketCrypt.h
-pcann_CFLAGS = -Iinclude
-pcann_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_CFLAGS} ${CRYPTO_LIBS}
+bin_pcann_CFLAGS = -Iinclude
+bin_pcann_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_CFLAGS} ${CRYPTO_LIBS}
 
 if ENABLE_DIFFTEST
-bin_PROGRAMS +=  difftest
-difftest_SOURCES = src/difftest/main.cpp \
+bin_PROGRAMS +=  bin/difftest
+bin_difftest_SOURCES = src/difftest/main.cpp \
     src/difftest/bignum.h \
     src/Difficulty.c \
     src/Difficulty.h
-difftest_CFLAGS = ${CRYPTO_CFLAGS}
-difftest_LDADD = ${CRYPTO_LIBS}
+bin_difftest_CFLAGS = ${CRYPTO_CFLAGS}
+bin_difftest_LDADD = ${CRYPTO_LIBS}
 endif
 
-bin_PROGRAMS += optest
-optest_SOURCES = Makefile \
+bin_PROGRAMS += bin/optest
+bin_optest_SOURCES = Makefile \
     src/optest.c \
     src/Hash.c                  src/Hash.h \
     src/RandGen.c               src/RandGen.h \
     src/RandHash_interpreted.c
-optest_CFLAGS = -Iinclude -DOPTEST=1
-optest_LDADD = ${sodium_LIBS}
+bin_optest_CFLAGS = -Iinclude -DOPTEST=1
+bin_optest_LDADD = ${sodium_LIBS}
+
+bin_PROGRAMS += bin/checkanns
+bin_checkanns_SOURCES = Makefile \
+    src/checkanns.c \
+    include/packetcrypt/PacketCrypt.h \
+    include/packetcrypt/Validate.h \
+    src/Buf.h \
+    src/Hash.h \
+    src/Time.h \
+    src/FilePath.h \
+    src/WorkQueue.c src/WorkQueue.h \
+    src/FileUtil.c src/FileUtil.h
+bin_checkanns_CFLAGS = -Iinclude
+bin_checkanns_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_CFLAGS} ${CRYPTO_LIBS}
+
+bin_PROGRAMS += bin/checkshares
+bin_checkshares_SOURCES = Makefile \
+    src/checkshares.c \
+    include/packetcrypt/PacketCrypt.h \
+    include/packetcrypt/BlockMiner.h \
+    include/packetcrypt/Validate.h \
+    src/Buf.h \
+    src/FilePath.h \
+    src/PoolProto.h \
+    src/Hash.h \
+    src/WorkQueue.c src/WorkQueue.h \
+    src/FileUtil.c src/FileUtil.h
+bin_checkshares_CFLAGS = -Iinclude
+bin_checkshares_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_CFLAGS} ${CRYPTO_LIBS}

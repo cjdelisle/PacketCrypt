@@ -8,22 +8,52 @@
 
 typedef struct BlockMiner_s BlockMiner_t;
 
-typedef struct {
-    uint64_t totalLength;
-    uint8_t hashes[][32];
-} BlockMiner_Hashes_t;
+typedef struct BlockMiner_Stats_s {
+    // Announcements which were in the miner from the previous cycle and seem to still be valid.
+    uint64_t oldGood;
+
+    // Announcements which were dropped because they are nolonger valid.
+    uint64_t oldExpired;
+
+    // Announcements which were replaced because there are new ones with more effective work.
+    uint64_t oldReplaced;
+
+    // New announcements which seem to be good.
+    uint64_t newGood;
+
+    // New announcements which are not valid (either expired or not yet mature)
+    uint64_t newExpired;
+
+    // New announcements which were not added because they are not better than existing ones.
+    uint64_t newNotEnough;
+
+    // Number of announcements finally computed after deduplication.
+    uint64_t finalCount;
+} BlockMiner_Stats_t;
+
+// This is the result which is written out to the file descriptor.
+typedef struct BlockMiner_Share_s {
+    PacketCrypt_Coinbase_t coinbase;
+    PacketCrypt_HeaderAndProof_t hap;
+} BlockMiner_Share_t;
+#define BlockMiner_Share_SIZEOF(proofLen) \
+    (sizeof(PacketCrypt_Coinbase_t) + PacketCrypt_HeaderAndProof_SIZEOF(proofLen))
+_Static_assert(BlockMiner_Share_SIZEOF(8) == sizeof(BlockMiner_Share_t), "");
 
 /**
  * Create a new block miner, you must provide the maximum number of announcements which this
  * miner can hold. As announcements of higher value are added using addAnns, less valuable
  * announcements will be discarded.
  *
- * When a block is discovered, the POINTER to the PacketCrypt_HeaderAndProof_t will be written
- * to the provided fileNo, the caller is expected to free() that pointer when they are done
- * with it.
+ * If beDeterministic is true, the block miner will not try to update the time on the block
+ * header.
+ *
+ * If sendPtr is true, the POINTER to the BlockMiner_Share_t will be written
+ * to the provided fileNo rather than the data and the caller is expected to free() that
+ * pointer when they are done with it.
  */
 BlockMiner_t* BlockMiner_create(
-    uint64_t maxAnns, int threads, int fileNo, bool beDeterministic);
+    uint64_t maxAnns, int threads, int fileNo, bool beDeterministic, bool sendPtr);
 
 /**
  * Stops and the block miner and then frees the relevant resources.
@@ -32,10 +62,11 @@ void BlockMiner_free(BlockMiner_t* bm);
 
 /**
  * Add one or more announcements to a block miner, if the number of announcements goes over
- * maxAnns, the least valuable announcements will be deleted. Announcements added will not
- * take effect until the next time the miner is locked for mining.
+ * maxAnns, the least valuable announcements will be deleted.
+ * You cannot add announcements while the miner is locked but you can once it begins mining.
  */
-void BlockMiner_addAnns(BlockMiner_t* bm, PacketCrypt_Announce_t* anns, uint64_t count, int noCopy);
+#define BlockMiner_addAnns_LOCKED 1
+int BlockMiner_addAnns(BlockMiner_t* bm, PacketCrypt_Announce_t* anns, uint64_t count, int noCopy);
 
 /**
  * Prepare the miner for mining a block, this call outputs a coinbase commitment to your location
@@ -61,9 +92,6 @@ void BlockMiner_addAnns(BlockMiner_t* bm, PacketCrypt_Announce_t* anns, uint64_t
  * })
  *
  * commitOut is a PacketCrypt_Coinbase_t which will be filled in
- * deletedAnnsOut if non-null, this will be assigned to a pointer to a list of announcement
- *     content hashes of all announcement content which has been deleted when the miner was
- *     locked. The caller is expected to free() the result.
  * nextBlockHeight the height of the block to be mined
  * nextBlockTarget the work nBits for the block to be mined
  */
@@ -71,8 +99,8 @@ void BlockMiner_addAnns(BlockMiner_t* bm, PacketCrypt_Announce_t* anns, uint64_t
 #define BlockMiner_lockForMining_NO_ANNS 1
 int BlockMiner_lockForMining(
     BlockMiner_t* bm,
+    BlockMiner_Stats_t* statsOut,
     PacketCrypt_Coinbase_t* commitOut,
-    BlockMiner_Hashes_t** deletedAnnsOut,
     uint32_t nextBlockHeight,
     uint32_t nextBlockTarget);
 

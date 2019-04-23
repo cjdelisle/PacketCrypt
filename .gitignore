@@ -21,12 +21,8 @@ configure
 
 /libpacketcrypt.a
 /libprogsupport.a
-/simplehash
-/pcann
-/pcblk
-/optest
-/announcements.bin
-/difftest
+/bin
 /*.dSYM
 
+/datastore
 

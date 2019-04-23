@@ -50,5 +50,4 @@ static inline uint64_t Util_reverse64(uint64_t x)
 } while (0)
 #endif
 
-
 #endif

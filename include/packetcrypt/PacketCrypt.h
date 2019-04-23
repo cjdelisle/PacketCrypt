@@ -127,13 +127,15 @@ typedef struct {
     uint32_t nonce2;
     uint32_t proofLen;
     PacketCrypt_Announce_t announcements[PacketCrypt_NUM_ANNS];
-    uint8_t proof[];
+    uint8_t proof[8]; // this is a flexible length buffer
 } PacketCrypt_HeaderAndProof_t;
 _Static_assert(sizeof(PacketCrypt_HeaderAndProof_t) ==
     sizeof(PacketCrypt_BlockHeader_t) +
     4 +
     4 +
-    sizeof(PacketCrypt_Announce_t) * PacketCrypt_NUM_ANNS, "");
+    sizeof(PacketCrypt_Announce_t) * PacketCrypt_NUM_ANNS +
+    8, "");
+#define PacketCrypt_HeaderAndProof_SIZEOF(proofLen) ( sizeof(PacketCrypt_HeaderAndProof_t) - 8 + (proofLen) )
 
 #define PacketCrypt_Coinbase_MAGIC 0x0211f909
 typedef struct {

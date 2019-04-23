@@ -8,10 +8,11 @@ typedef struct AnnMiner_s AnnMiner_t;
 /**
  * Create a new announcement miner and allocate threads.
  * threads is the number of threads to use
- * outfile is the file descriptor for the file to output to
+ * outfiles is a list of output file descriptors
+ * numOutfiles is the number of output file descriptors in outFiles
  * if sendPtr is non-zero, then write a PacketCrypt_Find_t, otherwise write the content
  */
-AnnMiner_t* AnnMiner_create(int threads, int outFile, int sendPtr);
+AnnMiner_t* AnnMiner_create(int threads, int* outFiles, int numOutFiles, int sendPtr);
 
 /**
  * Begin mining announcements with a particular hash and content type.

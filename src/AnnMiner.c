@@ -52,8 +52,11 @@ struct AnnMiner_s {
     int outToIn;
     int outFromIn;
     int inToOut;
-    int outFile;
     int sendPtr;
+
+    int numOutFiles;
+    int* outFiles;
+
     pthread_t mainThread;
 
     // read by the main thread
@@ -160,11 +163,20 @@ static void search(Worker_t* restrict w)
     for (int i = 1; i < CYCLES_PER_SEARCH; i++) {
         if (nonce > 0x00ffffff) { return; }
         if (Util_likely(!annHash(w, nonce++))) { continue; }
+        // Found an ann!
         assert(!Validate_checkAnn(
             NULL,
             (PacketCrypt_Announce_t*)&w->ann,
             w->activeJob->parentBlockHash.bytes,
             &w->vctx));
+
+        // Send the ann to an outfile segmented by it's hash so that if we are
+        // submitting to a pool, the pool servers may insist that announcements
+        // are only sent to different pool servers based on ann hash.
+        Buf32_t hash;
+        Hash_COMPRESS32_OBJ(&hash, &w->ann);
+        int outFile = w->ctx->outFiles[hash.longs[0] % w->ctx->numOutFiles];
+
         if (w->ctx->sendPtr) {
             uint8_t* ann = malloc(sizeof w->ann);
             assert(ann);
@@ -173,10 +185,10 @@ static void search(Worker_t* restrict w)
                 .ptr = (uint64_t) ann,
                 .size = sizeof w->ann
             };
-            ssize_t ret = write(w->ctx->outFile, &f, sizeof f);
+            ssize_t ret = write(outFile, &f, sizeof f);
             assert(ret == sizeof f || ret == -1);
         } else {
-            ssize_t ret = write(w->ctx->outFile, &w->ann, sizeof w->ann);
+            ssize_t ret = write(outFile, &w->ann, sizeof w->ann);
             assert(ret == sizeof w->ann || ret == -1);
         }
     }
@@ -368,9 +380,13 @@ void AnnMiner_start(
     return;
 }
 
-AnnMiner_t* AnnMiner_create(int threads, int outFile, int sendPtr)
+AnnMiner_t* AnnMiner_create(int threads, int* outFiles, int numOutFiles, int sendPtr)
 {
     AnnMiner_t* ctx = allocCtx(threads);
+    ctx->outFiles = calloc(sizeof(int), numOutFiles);
+    assert(ctx->outFiles);
+    ctx->numOutFiles = numOutFiles;
+    memcpy(ctx->outFiles, outFiles, sizeof(int) * numOutFiles);
     int pipefd[2] = { -1, -1 };
     assert(!pipe(pipefd));
     ctx->inFromOut = pipefd[0];
@@ -379,7 +395,6 @@ AnnMiner_t* AnnMiner_create(int threads, int outFile, int sendPtr)
     ctx->outFromIn = pipefd[0];
     ctx->inToOut = pipefd[1];
     assert(fcntl(ctx->inFromOut, F_SETFL, O_NONBLOCK) != -1);
-    ctx->outFile = outFile;
     ctx->sendPtr = sendPtr;
     for (int i = 0; i < threads; i++) {
         assert(!pthread_create(&ctx->workers[i].thread, NULL, thread, &ctx->workers[i]));
