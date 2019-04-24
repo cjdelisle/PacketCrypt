@@ -390,7 +390,7 @@ static void processWork(Worker_t* w) {
 
     //place the coinbase commit into the coinbase from the work
     //and hash up the chain, verify it matches merkle root
-    uint8_t* ptr = memmem(share.work->coinbaseAndMerkles, share.work->coinbaseLen,
+    uint8_t* ptr = FileUtil_memmem(share.work->coinbaseAndMerkles, share.work->coinbaseLen,
         COMMIT_PATTERN, COMMIT_PATTERN_SZ);
     if (!ptr) {
         DEBUGF("Coinbase doesn't contain commit pattern\n");

@@ -1,3 +1,5 @@
+#define _GNU_SOURCE // for memmem
+
 #include "FileUtil.h"
 
 #include <dirent.h>
@@ -25,4 +27,10 @@ void FileUtil_mkNonblock(int fileno) {
     int flags = fcntl(fileno, F_GETFL, 0);
     flags |= O_NONBLOCK;
     fcntl(fileno, F_SETFL, flags);
+}
+
+void* FileUtil_memmem(const void *haystack, size_t haystacklen,
+                      const void *needle, size_t needlelen)
+{
+    return memmem(haystack, haystacklen, needle, needlelen);
 }

@@ -56,7 +56,8 @@ libpacketcrypt_a_CFLAGS = ${CRYPTO_CFLAGS} ${sodium_CFLAGS} ${PTHREAD_CFLAGS} -I
 bin_PROGRAMS += bin/pcblk
 bin_pcblk_SOURCES = src/pcblk.c \
                                 include/BlockMiner.h \
-                                include/PacketCrypt.h
+                                include/PacketCrypt.h \
+    src/FileUtil.c src/FileUtil.h
 bin_pcblk_CFLAGS = -Iinclude
 bin_pcblk_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_CFLAGS} ${CRYPTO_LIBS}
 

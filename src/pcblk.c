@@ -3,6 +3,7 @@
 #include "FilePath.h"
 #include "Buf.h"
 #include "PoolProto.h"
+#include "FileUtil.h"
 
 #include "sodium/crypto_hash_sha256.h"
 
@@ -16,6 +17,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <math.h>
+#include <signal.h>
 
 #define DEBUGF(...) fprintf(stderr, "pcblk: " __VA_ARGS__)
 
@@ -169,7 +171,7 @@ static void loadWork(Context_t* ctx) {
         return;
     }
 
-    uint8_t* ptr = memmem(work->coinbaseAndMerkles, work->coinbaseLen,
+    uint8_t* ptr = FileUtil_memmem(work->coinbaseAndMerkles, work->coinbaseLen,
         COMMIT_PATTERN, COMMIT_PATTERN_SZ);
     if (!ptr) {
         DEBUGF("Coinbase doesn't contain commit pattern\n");
