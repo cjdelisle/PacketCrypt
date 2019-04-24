@@ -20,23 +20,34 @@ order to encourage CPU mining as well as next generation CPU design research. Pe
 significantly, PacketCrypt encourages cooperation between many mining devices, allowing
 *bandwidth* to be expended in lieu of processor effort.
 
-## LEMME TEST IT
+## Install
 
-First, build it:
+PacketCrypt is meant to be used in-tree. To set it up, you need to build the C code, then
+install the nodejs dependencies.
 
+### Ubuntu
+
+    sudo apt install pkg-config libsodium-dev autoconf-archive
     ./autogen.sh
     ./configure
     make
+    npm install
 
-Try out a simple hash function based on random programs:
+## Mining
 
-    ./simplehash 'seed to generate random program'  'input to the hash program'
+Once you've built the relevant code, you can begin mining *announcements* with:
 
-Generate some announcements:
-* -t will generate fake test announcements
-* replace 8 with the number of processor cores on your machine
+    node ./annmine.js http://pool.cjdns.fr/master
 
-    ./pcann -t 8
+To mine blocks, use:
+
+    node ./blkmine.js http://pool.cjdns.fr/master
+
+For more information about these utilities, see
+[annmine](https://github.com/cjdelisle/PacketCrypt/blob/master/docs/annmine.md) and
+[blkmine](https://github.com/cjdelisle/PacketCrypt/blob/master/docs/blkmine.md) and for
+learning about running a pool, see
+[pool](https://github.com/cjdelisle/PacketCrypt/blob/master/docs/pool.md)
 
 ## How it works
 
