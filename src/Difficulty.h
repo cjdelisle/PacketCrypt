@@ -10,4 +10,6 @@ uint32_t Difficulty_degradeAnnouncementTarget(uint32_t annTar, uint32_t annAgeBl
 
 bool Difficulty_isMinAnnDiffOk(uint32_t target);
 
+uint64_t Difficulty_getHashRateMultiplier(uint32_t annTar, uint64_t annCount);
+
 #endif

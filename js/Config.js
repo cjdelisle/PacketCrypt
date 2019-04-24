@@ -13,4 +13,13 @@ export type Config_t = {
     blkHandlers: Array<BlkHandler_Config_t>,
     master: Master_Config_t,
 };
+export type Config_Miner_t = {
+    paymentAddr: string,
+    corePath: string,
+    dir: string,
+    poolUrl: string,
+    threads: number,
+    maxAnns: ?number,
+    minerId: number
+};
 */

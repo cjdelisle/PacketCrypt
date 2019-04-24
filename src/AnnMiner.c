@@ -40,6 +40,8 @@ typedef struct {
 
     Buf32_t parentBlockHash;
     HeaderAndHash_t hah;
+
+    pthread_rwlock_t jobLock;
 } Job_t;
 
 typedef struct Worker_s Worker_t;
@@ -47,20 +49,13 @@ struct AnnMiner_s {
     int numWorkers;
     Worker_t* workers;
     Job_t jobs[2];
-    Time time;
-    int inFromOut;
-    int outToIn;
-    int outFromIn;
-    int inToOut;
+
+    HeaderAndHash_t hah;
+
     int sendPtr;
 
     int numOutFiles;
     int* outFiles;
-
-    pthread_t mainThread;
-
-    // read by the main thread
-    sig_atomic_t hashesPerSecond;
 
     pthread_mutex_t lock;
     pthread_cond_t cond;
@@ -69,8 +64,7 @@ struct AnnMiner_s {
 enum ThreadState {
     ThreadState_STOPPED,
     ThreadState_RUNNING,
-    ThreadState_SHUTDOWN,
-    ThreadState_STALLED
+    ThreadState_SHUTDOWN
 };
 
 struct Worker_s {
@@ -81,6 +75,11 @@ struct Worker_s {
 
     AnnMiner_t* ctx;
     pthread_t thread;
+
+    // read by the main thread
+    sig_atomic_t hashesPerSecond;
+
+    int softNonceMin;
     int softNonce;
     int softNonceMax;
 
@@ -103,10 +102,14 @@ static inline enum ThreadState getState(AnnMiner_t* ctx, Worker_t* w) {
 
 static AnnMiner_t* allocCtx(int numWorkers)
 {
-    AnnMiner_t* ctx = malloc(sizeof(AnnMiner_t));
+    AnnMiner_t* ctx = calloc(sizeof(AnnMiner_t), 1);
     assert(ctx);
     assert(!pthread_mutex_init(&ctx->lock, NULL));
     assert(!pthread_cond_init(&ctx->cond, NULL));
+
+    for (uint32_t i = 0; i < (sizeof(ctx->jobs) / sizeof(ctx->jobs[0])); i++) {
+        pthread_rwlock_init(&ctx->jobs[i].jobLock, NULL);
+    }
 
     ctx->numWorkers = numWorkers;
     ctx->workers = calloc(sizeof(Worker_t), numWorkers);
@@ -118,6 +121,9 @@ static AnnMiner_t* allocCtx(int numWorkers)
 }
 static void freeCtx(AnnMiner_t* ctx)
 {
+    for (uint32_t i = 0; i < (sizeof(ctx->jobs) / sizeof(ctx->jobs[0])); i++) {
+        pthread_rwlock_destroy(&ctx->jobs[i].jobLock);
+    }
     assert(!pthread_cond_destroy(&ctx->cond));
     assert(!pthread_mutex_destroy(&ctx->lock));
     free(ctx->workers);
@@ -155,12 +161,15 @@ static int annHash(Worker_t* restrict w, uint32_t nonce) {
     return 1;
 }
 
-#define CYCLES_PER_SEARCH 100
+#define HASHES_PER_CYCLE 500
 
 static void search(Worker_t* restrict w)
 {
+    Time t;
+    Time_BEGIN(t);
+
     int nonce = w->softNonce;
-    for (int i = 1; i < CYCLES_PER_SEARCH; i++) {
+    for (int i = 1; i < HASHES_PER_CYCLE; i++) {
         if (nonce > 0x00ffffff) { return; }
         if (Util_likely(!annHash(w, nonce++))) { continue; }
         // Found an ann!
@@ -193,35 +202,76 @@ static void search(Worker_t* restrict w)
         }
     }
     w->softNonce = nonce;
+
+    Time_END(t);
+    w->hashesPerSecond = ((HASHES_PER_CYCLE * 1024) / (Time_MICROS(t) / 1024));
+    Time_NEXT(t);
+
+    //fprintf(stderr, "Cycle complete\n");
+
     return;
 }
 
-static bool stop(Worker_t* worker, bool stalled) {
+static void makeNextJob(HeaderAndHash_t* hah, Job_t* j, uint32_t nextHardNonce) {
+    Buf_OBJCPY(&j->hah, hah);
+    j->hah.annHdr.hardNonce = nextHardNonce;
+    Hash_COMPRESS64_OBJ(&j->annHash0, &j->hah);
+
+    populateTable(j->table, &j->annHash0);
+
+    Announce_Merkle_build(&j->merkle, (uint8_t*)j->table, sizeof *j->table);
+
+    Buf64_t* root = Announce_Merkle_root(&j->merkle);
+    Buf_OBJCPY(&j->parentBlockHash, &j->hah.hash.thirtytwos[0]);
+    Buf_OBJCPY(&j->hah.hash, root);
+    Hash_COMPRESS64_OBJ(&j->annHash1, &j->hah);
+}
+
+static void getNextJob(Worker_t* w) {
+    Job_t* next = &w->ctx->jobs[(w->activeJob == &w->ctx->jobs[1])];
+    pthread_rwlock_rdlock(&next->jobLock);
+
+    if (next->hah.annHdr.hardNonce <= w->activeJob->hah.annHdr.hardNonce) {
+        pthread_rwlock_unlock(&next->jobLock);
+        pthread_rwlock_wrlock(&next->jobLock);
+        if (next->hah.annHdr.hardNonce <= w->activeJob->hah.annHdr.hardNonce) {
+            fprintf(stderr, "AnnMiner: Updating hard_nonce\n");
+            makeNextJob(&w->activeJob->hah, next, w->activeJob->hah.annHdr.hardNonce + 1);
+        }
+        pthread_rwlock_unlock(&next->jobLock);
+        pthread_rwlock_rdlock(&next->jobLock);
+    }
+
+    pthread_rwlock_unlock(&w->activeJob->jobLock);
+    w->activeJob = next;
+    w->softNonce = w->softNonceMin;
+}
+
+static bool checkStop(Worker_t* worker) {
     pthread_mutex_lock(&worker->ctx->lock);
     for (;;) {
         enum ThreadState rts = getRequestedState(worker);
         setState(worker, rts);
         if (rts != ThreadState_STOPPED) {
-            if (rts != ThreadState_SHUTDOWN && stalled) {
-                setState(worker, ThreadState_STALLED);
-            } else {
-                pthread_mutex_unlock(&worker->ctx->lock);
-                return rts == ThreadState_SHUTDOWN;
-            }
+            pthread_mutex_unlock(&worker->ctx->lock);
+            return rts == ThreadState_SHUTDOWN;
         }
+        pthread_rwlock_unlock(&worker->activeJob->jobLock);
         pthread_cond_wait(&worker->ctx->cond, &worker->ctx->lock);
     }
 }
 
 static void* thread(void* vworker) {
     Worker_t* worker = vworker;
+    pthread_rwlock_rdlock(&worker->activeJob->jobLock);
     for (;;) {
         if (getRequestedState(worker) != ThreadState_RUNNING) {
-            if (stop(worker, false)) { return NULL; }
+            if (checkStop(worker)) { return NULL; }
         }
         search(worker);
-        if (worker->softNonce + CYCLES_PER_SEARCH > worker->softNonceMax) {
-            if (stop(worker, true)) { return NULL; }
+        if (worker->softNonce + HASHES_PER_CYCLE > worker->softNonceMax) {
+            if (checkStop(worker)) { return NULL; }
+            getNextJob(worker);
         }
     }
 }
@@ -230,14 +280,6 @@ static bool threadsStopped(AnnMiner_t* ctx) {
     for (int i = 0; i < ctx->numWorkers; i++) {
         enum ThreadState ts = getState(ctx, &ctx->workers[i]);
         if (ts == ThreadState_RUNNING) { return false; }
-        if (ts == ThreadState_STALLED) { fprintf(stderr, "Stalled thread"); }
-    }
-    return true;
-}
-
-static bool threadsFinished(AnnMiner_t* ctx) {
-    for (int i = 0; i < ctx->numWorkers; i++) {
-        if (getState(ctx, &ctx->workers[i]) != ThreadState_SHUTDOWN) { return false; }
     }
     return true;
 }
@@ -248,189 +290,85 @@ static void stopThreads(AnnMiner_t* ctx) {
     }
 }
 
-#define Command_STOP     0
-#define Command_START    1
-#define Command_SHUTDOWN 2
-typedef struct {
-    uint32_t command;
-    HeaderAndHash_t hah;
-} Command_t;
-
-static int tryRead(int fileNo, Command_t* cmd, int* osP)
-{
-    int os = *osP;
-    ssize_t r = read(fileNo, &cmd[os], (sizeof *cmd) - os);
-    if (r > 0) {
-        os += r;
-        assert(((int)sizeof *cmd) - os >= 0);
-        *osP = os;
-        if (sizeof *cmd - os == 0) {
-            os = 0;
-            return 0;
-        }
-    }
-    return -1;
-}
-
-static void* mainLoop(void* vctx) {
-    AnnMiner_t* ctx = vctx;
-    Command_t currentCmd;
-    Command_t nextCmd;
-    int cmdOs = 0;
-    int cmd = 0;
-    int firstCycle = 0;
-    Time_END(ctx->time);
-    for (int hardNonce = 0;;) {
-        if (firstCycle) {
-            assert(4 == write(ctx->inToOut, "OK\r\n", 4));
-            firstCycle = 0;
-        }
-        for (int i = 0; i < 1000; i++) {
-            if (!tryRead(ctx->inFromOut, &nextCmd, &cmdOs)) {
-                cmd = nextCmd.command;
-                Buf_OBJCPY(&currentCmd, &nextCmd);
-                cmdOs = 0;
-                firstCycle = 1;
-                break;
-            }
-            Time_nsleep(1000000);
-        }
-        if (cmd == Command_STOP) {
-            stopThreads(ctx);
-            while (!threadsStopped(ctx)) { Time_nsleep(100000); }
-            continue;
-        }
-        if (cmd == Command_SHUTDOWN || hardNonce >= 0x7fffffff) {
-            for (int i = 0; i < ctx->numWorkers; i++) {
-                setRequestedState(ctx, &ctx->workers[i], ThreadState_SHUTDOWN);
-            }
-            while (!threadsStopped(ctx)) { Time_nsleep(100000); }
-            assert(4 == write(ctx->inToOut, "OK\r\n", 4));
-            return NULL;
-        }
-        //Time t; Time_BEGIN(t);
-
-        Job_t* j = &ctx->jobs[hardNonce & 1];
-
-        currentCmd.hah.annHdr.hardNonce = hardNonce;
-        hardNonce++;
-
-        Buf_OBJCPY(&j->hah, &currentCmd.hah);
-        Hash_COMPRESS64_OBJ(&j->annHash0, &j->hah);
-
-        populateTable(j->table, &j->annHash0);
-
-        Announce_Merkle_build(&j->merkle, (uint8_t*)j->table, sizeof *j->table);
-
-        Buf64_t* root = Announce_Merkle_root(&j->merkle);
-        Buf_OBJCPY(&j->parentBlockHash, &j->hah.hash.thirtytwos[0]);
-        Buf_OBJCPY(&j->hah.hash, root);
-        Hash_COMPRESS64_OBJ(&j->annHash1, &j->hah);
-
-        stopThreads(ctx);
-        while (!threadsStopped(ctx)) { Time_nsleep(100000); }
-        if (threadsFinished(ctx)) { return NULL; }
-        int softNonceStep = 0x00ffffff / ctx->numWorkers;
-        int totalHashes = 0;
-        for (int i = 0; i < ctx->numWorkers; i++) {
-            ctx->workers[i].activeJob = j;
-            if (ctx->workers[i].softNonce) {
-                totalHashes += (ctx->workers[i].softNonce - (softNonceStep * i));
-            }
-            ctx->workers[i].softNonce = softNonceStep * i;
-            ctx->workers[i].softNonceMax = softNonceStep * (i + 1);
-            setRequestedState(ctx, &ctx->workers[i], ThreadState_RUNNING);
-        }
-
-        Time_END(ctx->time);
-        ctx->hashesPerSecond =
-            (sig_atomic_t)((totalHashes * 1024) / (Time_MICROS(ctx->time) / 1024));
-        Time_NEXT(ctx->time);
-
-        pthread_cond_broadcast(&ctx->cond);
-    }
-}
-
-static void readOk(AnnMiner_t* ctx) {
-    uint8_t ok[4];
-    assert(4 == read(ctx->outFromIn, ok, 4));
-    assert(!memcmp(ok, "OK\r\n", 4));
-}
-
 void AnnMiner_start(
     AnnMiner_t* ctx,
-    uint8_t contentHash[32],
-    uint64_t contentType,
-    uint32_t workTarget,
-    uint32_t parentBlockHeight,
-    uint8_t parentBlockHash[32])
-{
-    Command_t cmd;
-    Buf_OBJSET(&cmd, 0);
-    memcpy(cmd.hah.annHdr.contentHash, contentHash, 32);
-    cmd.hah.annHdr.contentType = contentType;
-    cmd.hah.annHdr.parentBlockHeight = parentBlockHeight;
-    cmd.hah.annHdr.workBits = workTarget;
-    memcpy(cmd.hah.hash.bytes, parentBlockHash, 32);
+    PacketCrypt_AnnounceHdr_t* headerTemplate,
+    uint8_t parentBlockHash[32]
+) {
+    stopThreads(ctx);
+    while (!threadsStopped(ctx)) { Time_nsleep(100000); }
 
-    cmd.command = Command_START;
-    assert(write(ctx->outToIn, &cmd, sizeof cmd) == sizeof cmd);
+    HeaderAndHash_t hah;
+    Buf_OBJSET(&hah, 0);
+    Buf_OBJCPY(&hah.annHdr, headerTemplate);
+    Buf_OBJCPY(&hah.hash.thirtytwos[0], (Buf32_t*)parentBlockHash);
 
-    readOk(ctx);
+    // if we're called with identical data, we should not reset the workers
+    // because that will cause multiple searches of the same nonce space.
+    if (Buf_OBJCMP(&ctx->hah, &hah) || !ctx->workers[0].activeJob) {
+        Buf_OBJCPY(&ctx->hah, &hah);
+        makeNextJob(&hah, &ctx->jobs[0], headerTemplate->hardNonce);
+        for (int i = 0; i < ctx->numWorkers; i++) {
+            ctx->workers[i].activeJob = &ctx->jobs[0];
+        }
+    }
+
+    for (int i = 0; i < ctx->numWorkers; i++) {
+        setRequestedState(ctx, &ctx->workers[i], ThreadState_RUNNING);
+    }
+    pthread_cond_broadcast(&ctx->cond);
+
     return;
 }
 
 AnnMiner_t* AnnMiner_create(int threads, int* outFiles, int numOutFiles, int sendPtr)
 {
+    assert(threads);
     AnnMiner_t* ctx = allocCtx(threads);
     ctx->outFiles = calloc(sizeof(int), numOutFiles);
     assert(ctx->outFiles);
     ctx->numOutFiles = numOutFiles;
     memcpy(ctx->outFiles, outFiles, sizeof(int) * numOutFiles);
-    int pipefd[2] = { -1, -1 };
-    assert(!pipe(pipefd));
-    ctx->inFromOut = pipefd[0];
-    ctx->outToIn = pipefd[1];
-    assert(!pipe(pipefd));
-    ctx->outFromIn = pipefd[0];
-    ctx->inToOut = pipefd[1];
-    assert(fcntl(ctx->inFromOut, F_SETFL, O_NONBLOCK) != -1);
     ctx->sendPtr = sendPtr;
+
+    int softNonceStep = 0x00ffffff / threads;
     for (int i = 0; i < threads; i++) {
+        ctx->workers[i].softNonceMin = softNonceStep * i;
+        ctx->workers[i].softNonce = softNonceStep * i;
+        ctx->workers[i].softNonceMax = softNonceStep * (i + 1);
+        // this job is not active yet but we need to feed the threads a lock to start them up
+        ctx->workers[i].activeJob = &ctx->jobs[0];
         assert(!pthread_create(&ctx->workers[i].thread, NULL, thread, &ctx->workers[i]));
     }
-    pthread_create(&ctx->mainThread, NULL, mainLoop, ctx);
     return ctx;
 }
 
 void AnnMiner_stop(AnnMiner_t* ctx)
 {
-    Command_t cmd;
-    Buf_OBJSET(&cmd, 0);
-    cmd.command = Command_STOP;
-    assert(write(ctx->outToIn, &cmd, sizeof cmd) == sizeof cmd);
-    readOk(ctx);
+    stopThreads(ctx);
+    while (!threadsStopped(ctx)) { Time_nsleep(100000); }
 }
 
 void AnnMiner_free(AnnMiner_t* ctx)
 {
-    Command_t cmd;
-    Buf_OBJSET(&cmd, 0);
-    cmd.command = Command_SHUTDOWN;
-    assert(write(ctx->outToIn, &cmd, sizeof cmd) == sizeof cmd);
-    readOk(ctx);
+    for (int i = 0; i < ctx->numWorkers; i++) {
+        setRequestedState(ctx, &ctx->workers[i], ThreadState_SHUTDOWN);
+    }
+    pthread_cond_broadcast(&ctx->cond);
+    while (!threadsStopped(ctx)) { Time_nsleep(100000); }
+
     for (int i = 0; i < ctx->numWorkers; i++) {
         assert(!pthread_join(ctx->workers[i].thread, NULL));
     }
-    assert(!pthread_join(ctx->mainThread, NULL));
-    close(ctx->outToIn);
-    close(ctx->inToOut);
-    close(ctx->outFromIn);
-    close(ctx->inFromOut);
+
     freeCtx(ctx);
 }
 
 int64_t AnnMiner_getHashesPerSecond(AnnMiner_t* ctx)
 {
-    return ctx->hashesPerSecond;
+    int64_t out = 0;
+    for (int i = 0; i < ctx->numWorkers; i++) {
+        out += ctx->workers[i].hashesPerSecond;
+    }
+    return out;
 }

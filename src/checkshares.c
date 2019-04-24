@@ -29,7 +29,14 @@
 #define DEBUGF(...) fprintf(stderr, "checkshares: " __VA_ARGS__)
 
 static int usage() {
-    fprintf(stderr, "Usage: ./checkshares [-t] <indir> <outdir> <blkdir> <statedir>\n"
+    fprintf(stderr, "Usage: ./checkshares OPTIONS <indir> <outdir> <blkdir> <statedir>\n"
+        "    OPTIONS:\n"
+        "        --threads     # specify number of threads to use (default: 1)\n"
+        "    <indir>           # a dir which will be scanned for incoming ann files\n"
+        "    <outdir>          # a dir where result files will be placed\n"
+        "    <blkdir>          # a dir where share content will be copied if it's a block\n"
+        "    <statedir>        # a dir which will be used for keeping track of duplicates\n"
+        "\n"
         "    See https://github.com/cjdelisle/PacketCrypt/blob/master/docs/checkshares.md\n"
         "    for more information\n");
     return 100;
@@ -199,7 +206,7 @@ static void writeStateFile(MainThread_t* ctx) {
 //   - 8. delete file
 // }
 // on error, write an output file explaining the error and goto 1 {
-//   - 9. chacha20 and compare hashNum/hashMod to make sure it wasn't sent to wrong handler
+//   - 9. blake2b and compare hashNum/hashMod to make sure it wasn't sent to wrong handler
 //   - 10. compare the work block header and the block header to verify that they are the same except for: nonce, roothash
 //   - 11. place the coinbase commit into the coinbase from the work and hash up the chain, verify it matches merkle root
 //   - 12. call Validate_checkBlock(hap from share, height from work, coinbaseCommit from share, blockhashes from share)

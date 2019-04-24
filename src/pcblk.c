@@ -15,16 +15,22 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <math.h>
 
 #define DEBUGF(...) fprintf(stderr, "pcblk: " __VA_ARGS__)
 
 static int usage() {
-    DEBUGF("Usage: ./pcblk OPTIONS <wrkdir>\n");
-    DEBUGF("    OPTIONS:\n");
-    DEBUGF("        --maxanns <X> # Maximum number of announcements to use when mining\n");
-    DEBUGF("        --threads <X> # number of threads to use, default is 1\n");
-    DEBUGF("    <wrkdir>          # a directory containing announcements grouped by parent block\n");
-    DEBUGF("    see: https://github.com/cjdelisle/PacketCrypt/blob/master/docs/pcblk.md\n");
+    fprintf(stderr, "Usage: ./pcblk OPTIONS <wrkdir>\n"
+        "    OPTIONS:\n"
+        "        --maxanns <n> # Maximum number of announcements to use when mining\n"
+        "        --threads <n> # number of threads to use, default is 1\n"
+        "        --minerId <n> # Numeric ID of the miner, if you have multiple miners with the\n"
+        "                      # exact same set of announcements, this ID will prevent them\n"
+        "                      # from mining duplicate shares, default is 0\n"
+        "    <wrkdir>          # a dir containing announcements grouped by parent block\n"
+        "\n"
+        "    See: https://github.com/cjdelisle/PacketCrypt/blob/master/docs/pcblk.md\n"
+        "    for more information\n");
     return 100;
 }
 
@@ -185,10 +191,11 @@ static void beginMining(Context_t* ctx)
     int res = BlockMiner_lockForMining(ctx->bm, &stats, ctx->coinbaseCommit,
         ctx->currentWork->height+1, ctx->currentWork->shareTarget);
     DEBUGF("BlockMiner_lockForMining(): ng: %ld ne: %ld nne: %ld "
-        "og: %ld, oe: %ld or: %ld, finalCount: %ld\n",
+        "og: %ld oe: %ld or: %ld finalCount: %ld minTarget: %08x\n",
         (long)stats.newGood, (long)stats.newExpired, (long)stats.newNotEnough,
         (long)stats.oldGood, (long)stats.oldExpired, (long)stats.oldReplaced,
-        (long)stats.finalCount);
+        (long)stats.finalCount, ctx->coinbaseCommit->annLeastWorkTarget);
+
 
     // Even if it failed, we can safely begin allocating announcements again
     // because all of the to-be-added announcements were freed, or will be when
@@ -243,6 +250,7 @@ static void sighup(int signal) {
 int main(int argc, char** argv) {
     long long maxAnns = 1024*1024;
     int threads = 1;
+    int64_t minerId = 0;
     const char* wrkdirName = NULL;
     for (int i = 1; i < argc; i++) {
         if (maxAnns < 0) {
@@ -257,10 +265,18 @@ int main(int argc, char** argv) {
                 DEBUGF("Could not parse --threads value [%s]\n", argv[i]);
                 return usage();
             }
+        } else if (minerId < 0) {
+            minerId = strtol(argv[i], NULL, 10);
+            if (minerId < 0) {
+                DEBUGF("Could not parse --minerId value [%s]\n", argv[i]);
+                return usage();
+            }
         } else if (!strcmp(argv[i], "--maxanns")) {
             maxAnns = -1;
         } else if (!strcmp(argv[i], "--threads")) {
             threads = -1;
+        } else if (!strcmp(argv[i], "--minerId")) {
+            minerId = -1;
         } else if (!wrkdirName) {
             wrkdirName = argv[i];
         } else {
@@ -306,10 +322,10 @@ int main(int argc, char** argv) {
         return 100;
     }
 
-    ctx->bm = BlockMiner_create(maxAnns, threads, outfile, true, false);
+    ctx->bm = BlockMiner_create(maxAnns, minerId, threads, outfile, false);
 
     int32_t outFileNo = 1;
-    for (;;) {
+    for (uint32_t i = 0;; i++) {
         uint8_t discard[8];
         if (1 > read(STDIN_FILENO, discard, 8) && (EAGAIN != errno)) {
             DEBUGF("Stdin is nolonger connected, exiting\n");
@@ -378,5 +394,18 @@ int main(int argc, char** argv) {
 
         // sleep 1 second before re-scanning the work dir in order to reduce load
         sleep(1);
+
+        if (!(i % 4)) {
+            uint64_t hps = BlockMiner_getHashesPerSecond(ctx->bm);
+            if (hps) {
+                double ehps = BlockMiner_getEffectiveHashRate(ctx->bm);
+                int i = 0;
+                for (; ehps > 10000; i++) { ehps = floor(ehps / 1000); }
+                const char* xx[] = { "h", "Kh", "Mh", "Gh", "Th", "Ph", "Zh", "??" };
+                if (i > 7) { i = 7; }
+                DEBUGF("%luh real hashrate - %.f%s effective hashrate\n",
+                    (unsigned long)hps, ehps, xx[i]);
+            }
+        }
     }
 }

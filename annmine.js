@@ -1,8 +1,9 @@
 /*@flow*/
 const Spawn = require('child_process').spawn;
 const Fs = require('fs');
-const Http = require('http');
+const Crypto = require('crypto');
 const nThen = require('nthen');
+const Minimist = require('minimist');
 
 const Pool = require('./js/PoolClient.js');
 const Util = require('./js/Util.js');
@@ -11,6 +12,7 @@ const Protocol = require('./js/Protocol.js');
 /*::
 import type { PoolClient_t } from './js/PoolClient.js'
 import type { Protocol_Work_t } from './js/Protocol.js'
+import type { Config_Miner_t } from './js/Config.js'
 import type { Util_Mutex_t } from './js/Util.js'
 import type { ChildProcess } from 'child_process'
 import type { ClientRequest, IncomingMessage } from 'http'
@@ -18,13 +20,6 @@ type Work_t = {
     request: Buffer,
     protocolWork: Protocol_Work_t
 }
-type Config_t = {
-    paymentAddr: string,
-    pcannPath: string,
-    tmpdir: string,
-    poolUrl: string,
-    threads: number
-};
 type Context_t = {
     miner: void|ChildProcess,
     pool: PoolClient_t,
@@ -32,7 +27,7 @@ type Context_t = {
     inMutex: Util_Mutex_t,
     uploads: Array<{ url: string, req: ClientRequest }>,
     submitAnnUrls: Array<string>,
-    config: Config_t,
+    config: Config_Miner_t,
     resultQueue: Array<string>,
     timeOfLastRotate: number
 };
@@ -77,7 +72,7 @@ const httpRes = (ctx, res /*:IncomingMessage*/) => {
     });
 };
 
-const getFileName = (config, i) => (config.tmpdir + '/anns_' + i + '.bin');
+const getFileName = (config, i) => (config.dir + '/anns_' + i + '.bin');
 
 const rotateAndUpload = (ctx /*:Context_t*/, lastWork /*:Work_t*/, done) => {
     ctx.timeOfLastRotate = +new Date();
@@ -162,6 +157,10 @@ const poolOnWork = (ctx /*:Context_t*/, w) => {
         request.writeUInt32LE(w.height, 12);
         w.contentHash.copy(request, 24);
         w.lastHash.copy(request, 56);
+
+        // set a random hard_nonce so that we won't collide with other miners
+        request.writeInt32LE(ctx.config.minerId, 4);
+
         const newWork = {
             request: request,
             protocolWork: w
@@ -186,8 +185,8 @@ const mkMiner = (config, submitAnnUrls) => {
     submitAnnUrls.forEach((url, i) => {
         args.push('--out', getFileName(config, i));
     });
-    console.log(config.pcannPath + ' ' + args.join(' '));
-    return Spawn(config.pcannPath, args, {
+    console.log(config.corePath + ' ' + args.join(' '));
+    return Spawn(config.corePath, args, {
         stdio: [ 'pipe', 1, 2 ]
     });
 };
@@ -218,13 +217,13 @@ const checkResultLoop = (ctx /*:Context_t*/) => {
     again();
 };
 
-const main = (config /*:Config_t*/) => {
+const launch = (config /*:Config_Miner_t*/) => {
     if (config.paymentAddr.length > 64) {
         throw new Error("Illegal payment address (over 64 bytes long)");
     }
     const pool = Pool.create(config.poolUrl);
     nThen((w) => {
-        Util.checkMkdir(config.tmpdir, w());
+        Util.checkMkdir(config.dir, w());
         pool.getMasterConf(Util.once(w()));
     }).nThen((_w) => {
         const submitAnnUrls = pool.config.submitAnnUrls;
@@ -264,10 +263,49 @@ const main = (config /*:Config_t*/) => {
     });
 };
 
-main(Object.freeze({
-    pcannPath: './bin/pcann',
-    tmpdir: './datastore/annmine',
-    paymentAddr: 'bc1q6hqsqhqdgqfd8t3xwgceulu7k9d9w5t2amath0qxyfjlvl3s3u4st4nj3u',
-    poolUrl: 'http://localhost:8080',
-    threads: 1
-}));
+const usage = () => {
+    console.log("Usage: node annmine.js OPTIONS <poolurl>\n" +
+        "    OPTIONS:\n" +
+        "        --paymentAddr # the bitcoin address to request payment from the pool\n" +
+        "                      # when submitting announcements\n" +
+        "        --threads     # number of threads to use for mining\n" +
+        "        --corePath    # if specified, this will be the path to the core engine\n" +
+        "                      # default is ./bin/pcann\n" +
+        "        --dir         # the directory to use for storing temporary state\n" +
+        "                      # default is ./datastore/annmine\n" +
+        "    <poolurl>         # the URL of the mining pool to connect to\n" +
+        "\n" +
+        "    See https://github.com/cjdelisle/PacketCrypt/blob/master/docs/annmine.md\n" +
+        "    for more information");
+    return 100;
+};
+
+const DEFAULT_PAYMENT_ADDR = "bc1q6hqsqhqdgqfd8t3xwgceulu7k9d9w5t2amath0qxyfjlvl3s3u4st4nj3u";
+
+const main = (argv) => {
+    const defaultConf = {
+        corePath: './bin/pcann',
+        dir: './datastore/annmine',
+        paymentAddr: DEFAULT_PAYMENT_ADDR,
+        threads: 1,
+        minerId: Math.floor(Math.random()*(1<<30)*2)
+    };
+    const a = Minimist(argv.slice(2));
+    if (!/http(s)?:\/\/.*/.test(a._[0])) { process.exit(usage()); }
+    const conf = {
+        corePath: a.corePath || defaultConf.corePath,
+        dir: a.dir || defaultConf.dir,
+        paymentAddr: a.paymentAddr || defaultConf.paymentAddr,
+        poolUrl: a._[0],
+        threads: a.threads || defaultConf.threads,
+        minerId: a.minerId || defaultConf.minerId,
+        maxAnns: undefined // only used in blkmine
+    };
+    if (!a.paymentAddr) {
+        console.log("WARNING: You have not specified a paymentAddr\n" +
+            "    as a default, " + DEFAULT_PAYMENT_ADDR + " will be used,\n" +
+            "    cjd appreciates your generosity");
+    }
+    launch(Object.freeze(conf));
+};
+main(process.argv);

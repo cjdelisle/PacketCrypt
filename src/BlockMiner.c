@@ -275,7 +275,11 @@ static void* thread(void* vWorker)
 }
 
 BlockMiner_t* BlockMiner_create(
-    uint64_t maxAnns, int threads, int fileNo, bool beDeterministic, bool sendPtr)
+    uint64_t maxAnns,
+    uint32_t minerId,
+    int threads,
+    int fileNo,
+    bool sendPtr)
 {
     Ann_t* annBuf = malloc(sizeof(Ann_t) * maxAnns);
     AnnounceEffectiveWork_t* aew = malloc(sizeof(AnnounceEffectiveWork_t) * maxAnns);
@@ -297,10 +301,11 @@ BlockMiner_t* BlockMiner_create(
     ctx->fileNo = fileNo;
     ctx->numWorkers = threads;
     ctx->workers = workers;
-    ctx->beDeterministic = beDeterministic;
+    ctx->beDeterministic = true;
+
     for (int i = 0; i < threads; i++) {
         ctx->workers[i].bm = ctx;
-        ctx->workers[i].nonceId = i;
+        ctx->workers[i].nonceId = minerId + i;
         assert(!pthread_create(&ctx->workers[i].thread, NULL, thread, &ctx->workers[i]));
     }
     return ctx;
@@ -728,4 +733,19 @@ int BlockMiner_stop(BlockMiner_t* ctx)
     ctx->currentlyMining = 0;
 
     return BlockMiner_stop_OK;
+}
+
+int64_t BlockMiner_getHashesPerSecond(BlockMiner_t* ctx) {
+    int64_t out = 0;
+    for (int i = 0; i < ctx->numWorkers; i++) {
+        out += ctx->workers[i].hashesPerSecond;
+    }
+    return out;
+}
+
+double BlockMiner_getEffectiveHashRate(BlockMiner_t* bm) {
+    double realRate = (double) BlockMiner_getHashesPerSecond(bm);
+    double hrm = (double) Difficulty_getHashRateMultiplier(
+        bm->coinbase.annLeastWorkTarget, bm->coinbase.numAnns);
+    return realRate * hrm;
 }

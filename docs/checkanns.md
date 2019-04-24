@@ -1,4 +1,8 @@
-# checkanns
+# checkanns - PacketCrypt pool announcement verifier core
+
+**NOTE**: You probably don't want to use this directly, the
+[pool](https://github.com/cjdelisle/PacketCrypt/blob/master/docs/pool.md) server is much easier
+to use and runs this in the background.
 
 checkanns is a tool which streamlines validation of announcements for usage in a pool context.
 
@@ -6,7 +10,8 @@ Usage: `checkanns [--threads <n>] <indir> <outdir> <anndir> <statedir> <tempdir>
 
 * `--threads <n>` (optional): Allocate *n* threads for processing, default is 1
 * **indir** is the directory which will be periodically scanned for new files containing
-announcements. The format of these files is documented below.
+announcements. The format of these files is documented below. Files which do not have a filename
+prefix `annshare_` will be ignored.
 * **outdir** is the directory where results from announcement verification will be placed, result
 files will have the same names as the input files in **indir** so they can be easily identified,
 the format of results is documented below.
@@ -39,7 +44,7 @@ announcements, the header format is as follows:
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  0 |                           version                             |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- 4 |    hashNum    |    hashMod    |            unused             |
+ 4 |    hash_num   |   hash_mod    |            unused             |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  8 |                                                               |
    +                                                               +
@@ -84,11 +89,11 @@ announcements, the header format is as follows:
 
 * **version**: 4 bytes which indicates the version of the file, this exists for future versions
 which contain announcements that need different verification. Right now this must always be zero.
-* **hashNum**: Used to allow multiple validator/deduplicators to validate announcements in
+* **hash_num**: Used to allow multiple validator/deduplicators to validate announcements in
 parallel by segmenting them by hash (so that there can be no duplicates across segments). When
-validating, the first 8 bytes of the hash is taken modulo **hashMod** and compared to **hashNum**.
+validating, the first byte of the hash is taken modulo **hash_mod** and compared to **hash_num**.
 If it is not a match then the announcement is invalid.
-* **hashMod**: Used with **hashNum** to allow multiple workers to validate announcements. If this
+* **hash_mod**: Used with **hash_num** to allow multiple workers to validate announcements. If this
 is zero then it is set internally to 1 and so everything will match a hashNum of 0.
 * **ignored**: This is ignored.
 * **content_hash**: 32 byte blake2b hash of the content. The content for all announcements in one
@@ -152,7 +157,7 @@ other can lead to announcements being thrown away or accepted by the deduplicato
 cause it to abort.
 
 
-## Tips and Tricks
+## Notes
 
 To shut down `checkanns` cleanly, send it a single SIGINT signal, this will cause it to shutdown
 after processing the next batch of announcements and to write out (short) announcement/state

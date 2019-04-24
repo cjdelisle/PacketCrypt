@@ -42,6 +42,12 @@ _Static_assert(sizeof(AnnEntry_t) == 16, "");
 
 static int usage() {
     fprintf(stderr, "Usage: ./checkanns <indir> <outdir> <anndir> <statedir> <tmpdir>\n"
+        "    <indir>           # a dir which will be scanned for incoming ann files\n"
+        "    <outdir>          # a dir where result files will be placed\n"
+        "    <anndir>          # a dir where verified announcements will be placed\n"
+        "    <statedir>        # a dir which will be used for keeping track of duplicates\n"
+        "    <tempdir>         # a dir which will be used for creating result files\n"
+        "\n"
         "    See https://github.com/cjdelisle/PacketCrypt/blob/master/docs/checkanns.md\n"
         "    for more information\n");
     return 100;
@@ -627,6 +633,8 @@ void sigHandler(int sig) {
 int main(int argc, const char** argv) {
     int threads = 1;
     int arg = 1;
+
+    if ((argc - arg) < 5) { return usage(); }
 
     if (!strcmp(argv[arg], "--threads")) {
         arg++;

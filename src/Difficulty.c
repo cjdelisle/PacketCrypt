@@ -180,6 +180,24 @@ uint32_t Difficulty_getEffectiveTarget(uint32_t blockTar, uint32_t annTar, uint6
     return res > 0x207fffff ? 0x207fffff : res;
 }
 
+uint64_t Difficulty_getHashRateMultiplier(uint32_t annTar, uint64_t annCount)
+{
+    BN_CTX* ctx = BN_CTX_new();
+    assert(ctx);
+
+    BIGNUM* x = BN_new(); assert(x);
+    BIGNUM* bnAnnWork = BN_new(); assert(bnAnnWork);
+    BIGNUM* bnAnnCount = BN_new(); assert(bnAnnCount);
+
+    bnSetCompact(x, annTar);
+    bnWorkForDiff(ctx, bnAnnWork, x);
+
+    setuint64(bnAnnCount, annCount);
+    assert(BN_mul(x, bnAnnWork, bnAnnCount, ctx));
+
+    return BN_get_word(x);
+}
+
 uint32_t Difficulty_degradeAnnouncementTarget(uint32_t annTar, uint32_t annAgeBlocks)
 {
     if (annAgeBlocks < Conf_PacketCrypt_ANN_WAIT_PERIOD) { return 0xffffffff; }

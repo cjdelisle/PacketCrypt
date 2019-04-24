@@ -1,13 +1,14 @@
 /*@flow*/
 const Spawn = require('child_process').spawn;
 const Fs = require('fs');
-const Crypto = require('crypto');
 const nThen = require('nthen');
 const Blake2b = require('blake2b');
+const Minimist = require('minimist');
 
 const Pool = require('./js/PoolClient.js');
 const Util = require('./js/Util.js');
-const Protocol = require('./js/Protocol.js');
+
+const DEFAULT_MAX_ANNS = 1024*1024;
 
 /*::
 import type { FSWatcher } from 'fs';
@@ -16,16 +17,10 @@ import type { ClientRequest, IncomingMessage } from 'http';
 import type { PoolClient_t } from './js/PoolClient.js';
 import type { Protocol_PcConfigJson_t } from './js/Protocol.js';
 import type { Util_Mutex_t } from './js/Util.js';
-type Config_t = {
-    paymentAddr: string,
-    pcblkPath: string,
-    dir: string,
-    poolUrl: string,
-    threads: number,
-    maxAnns: number
-};
+import type { Config_Miner_t } from './js/Config.js'
+
 type Context_t = {
-    config: Config_t,
+    config: Config_Miner_t,
     miner: void|ChildProcess,
     pool: PoolClient_t,
     masterConf: Protocol_PcConfigJson_t,
@@ -148,7 +143,7 @@ const getAnnFileNum = (
     });
 };
 
-const deleteWorkAndShares = (config /*:Config_t*/, _cb) => {
+const deleteWorkAndShares = (config /*:Config_Miner_t*/, _cb) => {
     const cb = Util.once(_cb);
     let files;
     nThen((w) => {
@@ -456,10 +451,11 @@ const mkMiner = (ctx) => {
     const args = [
         '--threads', String(ctx.config.threads || 1),
         '--maxanns', String(ctx.config.maxAnns || 1024*1024),
+        '--minerId', String(ctx.config.minerId),
         ctx.config.dir + '/wrkdir'
     ];
-    console.log(ctx.config.pcblkPath + ' ' + args.join(' '));
-    const miner = Spawn(ctx.config.pcblkPath, args, {
+    console.log(ctx.config.corePath + ' ' + args.join(' '));
+    const miner = Spawn(ctx.config.corePath, args, {
         stdio: [ 'pipe', 1, 2 ]
     });
     miner.on('close', (num, sig) => {
@@ -497,7 +493,7 @@ const downloadOldAnns = (config, masterConf, done) => {
 
     // When these are equal, we quit because we have enough announcements
     let totalLen = 0;
-    const maxLen = config.maxAnns * 1024;
+    const maxLen = (config.maxAnns || DEFAULT_MAX_ANNS) * 1024;
 
     // This is deincremented as each server nolonger has any more announcements for us
     let activeServers;
@@ -566,7 +562,7 @@ const pollAnnHandlers = (ctx) => {
     });
 };
 
-const main = (config /*:Config_t*/) => {
+const launch = (config /*:Config_Miner_t*/) => {
     if (config.paymentAddr.length > 64) {
         throw new Error("Illegal payment address (over 64 bytes long)");
     }
@@ -592,7 +588,6 @@ const main = (config /*:Config_t*/) => {
             masterConf: masterConf,
             shareFileMutex: Util.createMutex(),
             work: undefined,
-
             uploadReqs: [],
             resultQueue: [],
             handledShares: {}
@@ -609,11 +604,58 @@ const main = (config /*:Config_t*/) => {
         checkResultLoop(ctx);
     });
 };
-main(Object.freeze({
-    pcblkPath: './bin/pcblk',
-    dir: './datastore/blkmine',
-    paymentAddr: 'bc1q6hqsqhqdgqfd8t3xwgceulu7k9d9w5t2amath0qxyfjlvl3s3u4st4nj3u',
-    poolUrl: 'http://localhost:8080',
-    maxAnns: 1024*1024,
-    threads: 1
-}));
+
+const usage = () => {
+    console.log("Usage: node blkmine.js OPTIONS <poolurl>\n" +
+        "    OPTIONS:\n" +
+        "        --paymentAddr # the bitcoin address to request payment from the pool\n" +
+        "                      # when submitting shares\n" +
+        "        --threads     # number of threads to use for mining\n" +
+        "        --maxAnns     # maximum number of announcements to use\n" +
+        "                      # more announcements gives you better chance of a share\n" +
+        "                      # but it increases your memory consumption\n" +
+        "                      # default is 1 million (roughly 1GB of memory needed)\n" +
+        "        --minerId     # the number of the miner in order to avoid duplicates\n" +
+        "                      # when multiple miners are mining the exact same set of\n" +
+        "                      # announcements.\n" +
+        "        --corePath    # if specified, this will be the path to the core engine\n" +
+        "                      # default is ./bin/pcblk\n" +
+        "        --dir         # the directory to use for storing announcements and state\n" +
+        "                      # default is ./datastore/blkmine\n" +
+        "    <poolurl>         # the URL of the mining pool to connect to\n" +
+        "\n" +
+        "    See https://github.com/cjdelisle/PacketCrypt/blob/master/docs/blkmine.md\n" +
+        "    for more information");
+    return 100;
+};
+
+const DEFAULT_PAYMENT_ADDR = "bc1q6hqsqhqdgqfd8t3xwgceulu7k9d9w5t2amath0qxyfjlvl3s3u4st4nj3u";
+
+const main = (argv) => {
+    const defaultConf = {
+        corePath: './bin/pcblk',
+        dir: './datastore/blkmine',
+        paymentAddr: DEFAULT_PAYMENT_ADDR,
+        maxAnns: DEFAULT_MAX_ANNS,
+        threads: 1,
+        minerId: Math.floor(Math.random()*(1<<30)*2)
+    };
+    const a = Minimist(argv.slice(2));
+    if (!/http(s)?:\/\/.*/.test(a._[0])) { process.exit(usage()); }
+    const conf = {
+        corePath: a.corePath || defaultConf.corePath,
+        dir: a.dir || defaultConf.dir,
+        paymentAddr: a.paymentAddr || defaultConf.paymentAddr,
+        poolUrl: a._[0],
+        maxAnns: a.maxAnns || defaultConf.maxAnns,
+        threads: a.threads || defaultConf.threads,
+        minerId: a.minerId || defaultConf.minerId
+    };
+    if (!a.paymentAddr) {
+        console.log("WARNING: You have not specified a paymentAddr\n" +
+            "    as a default, " + DEFAULT_PAYMENT_ADDR + " will be used,\n" +
+            "    cjd appreciates your generosity");
+    }
+    launch(Object.freeze(conf));
+};
+main(process.argv);

@@ -17,16 +17,17 @@
 #include <fcntl.h>
 
 static int usage() {
-    fprintf(stderr, "Usage: ./pcann [--test] [--out <file> [--out <file>]...] "
-        "[--threads <threads>]\n");
-    fprintf(stderr, "    --test       # testing, no input\n");
-    fprintf(stderr, "    --out        # specify output file, will be reopened "
-        "when there is new work\n");
-    fprintf(stderr, "                 # NOTE: If --out is passed more than once, announcements "
-        "will be sent to each file\n");
-    fprintf(stderr, "                 # split up by the numeric value of the first 8 bytes of the "
-        "announcement hash");
-    fprintf(stderr, "    --threads    # specify number of threads to use (default: 1)\n");
+    fprintf(stderr, "Usage: ./pcann OPTIONS\n"
+        "    OPTIONS:\n"
+        "        --test        # testing, no input is needed, bogus anns will be made\n"
+        "        --out <f>     # output file, will be reopened when there's new work\n"
+        "                      # NOTE: If --out is passed more than once,\n"
+        "                      # announcements will be sent to each file split up by the\n"
+        "                      # numeric value of the first byte of the announcement hash\n"
+        "        --threads <n> # specify number of threads to use (default: 1)\n"
+        "\n"
+        "    See: https://github.com/cjdelisle/PacketCrypt/blob/master/docs/pcann.md\n"
+        "    for more information\n");
     return 100;
 }
 
@@ -148,17 +149,12 @@ int main(int argc, const char** argv) {
                 }
             }
             DEBUGF("Starting job with work target %08x\n", req.hdr.workBits);
-            AnnMiner_start(annMiner,
-                req.hdr.contentHash,
-                req.hdr.contentType,
-                req.hdr.workBits,
-                req.hdr.parentBlockHeight,
-                req.parentBlockHash.bytes);
+            AnnMiner_start(annMiner, &req.hdr, req.parentBlockHash.bytes);
             newData = false;
         }
 
-        DEBUGF("%lu hashes per second\n",
-            (unsigned long)AnnMiner_getHashesPerSecond(annMiner));
+        int64_t hps = AnnMiner_getHashesPerSecond(annMiner);
+        if (hps) { DEBUGF("%lu hashes per second\n", (unsigned long)hps); }
 
         if (test) { sleep(1); }
     }

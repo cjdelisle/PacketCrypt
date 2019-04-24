@@ -19,13 +19,15 @@ AnnMiner_t* AnnMiner_create(int threads, int* outFiles, int numOutFiles, int sen
  * If the miner is currently mining, it will stop and begin mining the new parameters.
  * Every time an announcement is found, every time an announcement is found, it will
  * be written to fileNo
+ *
+ * @param ctx the annMiner,
+ * @param headerTemplate a template for the announcement header, no part of this will
+ *      be altered except for the softNonce (which will be completely overwritten) and
+ *      the hardNonce which will be incremented
  */
 void AnnMiner_start(
     AnnMiner_t* ctx,
-    uint8_t contentHash[32],
-    uint64_t contentType,
-    uint32_t workTarget,
-    uint32_t parentBlockHeight,
+    PacketCrypt_AnnounceHdr_t* headerTemplate,
     uint8_t parentBlockHash[32]);
 
 /**

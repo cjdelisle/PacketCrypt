@@ -45,15 +45,23 @@ _Static_assert(BlockMiner_Share_SIZEOF(8) == sizeof(BlockMiner_Share_t), "");
  * miner can hold. As announcements of higher value are added using addAnns, less valuable
  * announcements will be discarded.
  *
- * If beDeterministic is true, the block miner will not try to update the time on the block
- * header.
- *
- * If sendPtr is true, the POINTER to the BlockMiner_Share_t will be written
- * to the provided fileNo rather than the data and the caller is expected to free() that
- * pointer when they are done with it.
+ * @param maxAnns allocate enough memory for this number of announcements
+ * @param minerId this will be used for constructing the nonce, if there are multiple miners
+ *      with the exact same set of announcements, using minerId will prevent them from
+ *      finding duplicate shares. If you are issuing minerId to your miners sequencially,
+ *      note that you will need to skip <threads> numbers for issuing the next.
+ * @param threads number of threads to run
+ * @param fileNo threads should write results to this file
+ * @param sendPtr if true then a PacketCrypt_Find_t will be written to the file rather than
+ *      the entire share.
+ * @return a new blockminer
  */
 BlockMiner_t* BlockMiner_create(
-    uint64_t maxAnns, int threads, int fileNo, bool beDeterministic, bool sendPtr);
+    uint64_t maxAnns,
+    uint32_t minerId,
+    int threads,
+    int fileNo,
+    bool sendPtr);
 
 /**
  * Stops and the block miner and then frees the relevant resources.
@@ -122,5 +130,16 @@ int BlockMiner_start(BlockMiner_t* ctx, PacketCrypt_BlockHeader_t* blockHeader);
 #define BlockMiner_stop_OK          0
 #define BlockMiner_stop_NOT_LOCKED  1
 int BlockMiner_stop(BlockMiner_t* bm);
+
+/**
+ * Get the number of hashes per second.
+ */
+int64_t BlockMiner_getHashesPerSecond(BlockMiner_t* ctx);
+
+/**
+ * Get the "effective hashrate": The number of hashes per second times the number of
+ * announcements times the minimum difficulty of the announcements.
+ */
+double BlockMiner_getEffectiveHashRate(BlockMiner_t* bm);
 
 #endif

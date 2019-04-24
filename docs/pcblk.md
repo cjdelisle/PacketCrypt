@@ -1,11 +1,17 @@
-# pcblk - the PacketCrypt block miner
+# pcblk - the PacketCrypt block miner core
+
+**NOTE**: You probably don't want to use this directly, there is a more friendly wrapper called
+[blkmine](https://github.com/cjdelisle/PacketCrypt/blob/master/docs/blkmine.md) which uses this.
 
 pcblk arguments:
 
-* `--maxanns <n>` (optional): Limit the number of announcements which will be processed, some memory is allocated
+* **maxanns** (optional): Limit the number of announcements which will be processed, some memory is allocated
 spontaniously so it's difficult to make strong statements about total memory consumption but memory usage should
 target nearly this many kilobytes.
-* `--threads <n>` (optional): Allocate *n* threads for processing, default is 1
+* **threads** (optional): Allocate *n* threads for processing, default is 1
+* **minerId**: This is a 32 bit unsigned number which is used in the block header nonce. If there
+are multiple miners mining the exact same set of announcements, this will prevent them from finding
+duplicate shares. Default is 0.
 * `<wrkdir>` (required): Directory to scan for work inputs and to place results
 
 Most of the interaction with pcblk is done by writing and reading files.
