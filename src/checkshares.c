@@ -514,7 +514,8 @@ static void* workerLoop(void* vWorker) {
         }
         w->shareLen = byteCount;
 
-        uint32_t version = ((uint32_t*) w->fileBuf)[0];
+        uint32_t version = 0;
+        memcpy(&version, w->fileBuf, 4);
         if (version) {
             DEBUGF("File [%s] has an unexpected version [%u], leaving it alone\n",
                 w->inFile->path, version);
