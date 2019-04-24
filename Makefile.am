@@ -59,7 +59,7 @@ bin_pcblk_SOURCES = src/pcblk.c \
                                 include/PacketCrypt.h \
     src/FileUtil.c src/FileUtil.h
 bin_pcblk_CFLAGS = -Iinclude
-bin_pcblk_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_CFLAGS} ${CRYPTO_LIBS}
+bin_pcblk_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_CFLAGS} ${CRYPTO_LIBS} -lm
 
 bin_PROGRAMS += bin/pcann
 bin_pcann_SOURCES = src/pcann.c \

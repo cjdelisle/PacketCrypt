@@ -37,8 +37,29 @@ AX_PTHREAD([], [
     ])
 ])
 
-# Checks for header files.
-AC_CHECK_HEADERS([stdint.h stdlib.h string.h sys/time.h])
+AC_SEARCH_LIBS([floor], [m])
+
+AC_CHECK_HEADERS([ \
+    assert.h \
+    dirent.h \
+    errno.h \
+    fcntl.h \
+    math.h \
+    pthread.h \
+    openssl/bn.h \
+    pthread.h \
+    signal.h \
+    stdarg.h \
+    stdbool.h \
+    stdint.h \
+    stdio.h \
+    stdlib.h \
+    string.h \
+    sys/stat.h \
+    sys/types.h \
+    time.h \
+    unistd.h \
+])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_CHECK_HEADER_STDBOOL
