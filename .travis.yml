@@ -1,5 +1,7 @@
 dist: xenial
 lang: c
+before_install:
+  - eval "${MATRIX_EVAL}"
 script:
   - ./autogen.sh && ./configure && make
 matrix:
