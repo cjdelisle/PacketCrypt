@@ -54,7 +54,7 @@ typedef struct Context_s {
 
 static void loadFile(Context_t* ctx, const char* fileName) {
     if (ctx->availableAnns < 0) { return; }
-    snprintf(ctx->filepath.name, FilePath_NAME_SZ, "%s", fileName);
+    strncpy(ctx->filepath.name, fileName, FilePath_NAME_SZ);
 
     int fileno = open(ctx->filepath.path, O_RDONLY);
     if (fileno < 0) {

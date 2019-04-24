@@ -308,8 +308,8 @@ static char* strOutput(enum Output out) {
 }
 
 static void writeOutput(Worker_t* w, enum Output out, Share_t* s) {
-    uint8_t buf[128];
-    snprintf(buf, 128, "{\"result\":\"%s\",\"payTo\":\"%s\"}",
+    uint8_t buf[256];
+    snprintf(buf, 256, "{\"result\":\"%s\",\"payTo\":\"%s\"}",
         strOutput(out), s->hdr->payTo.bytes);
     DEBUGF("Writing result [%s]\n", buf);
     strncpy(w->outFile.name, w->inFile->name, FilePath_NAME_SZ);
@@ -362,7 +362,7 @@ static void processWork(Worker_t* w) {
 
     int shareLen = BlockMiner_Share_SIZEOF(share.share->hap.proofLen);
     int workLen = share.hdr->workLen;
-    if (sizeof(ShareHeader_t) + shareLen + workLen != w->shareLen) {
+    if ((int)sizeof(ShareHeader_t) + shareLen + workLen != w->shareLen) {
         writeOutput(w, Output_INVALID_LEN, &share);
         return;
     }

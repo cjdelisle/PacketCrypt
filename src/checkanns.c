@@ -564,7 +564,7 @@ static void loadState(MasterThread_t* mt, DIR* stateDir) {
         // Workers are not yet started so we can just use the context from one of them.
         FilePath_t* stateFile = &mt->workers[0].lw.stateFile;
 
-        snprintf(stateFile->name, FilePath_NAME_SZ, "%s", file->d_name);
+        strncpy(stateFile->name, file->d_name, FilePath_NAME_SZ);
         stateFileDesc = open(stateFile->path, O_RDONLY);
         if (stateFileDesc < 0) {
             DEBUGF("Error opening state file [%s]. errno=[%s]\n",
