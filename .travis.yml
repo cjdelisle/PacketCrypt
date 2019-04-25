@@ -2,11 +2,8 @@ dist: xenial
 lang: c
 script:
   - eval "${MATRIX_EVAL}";
-  - if test "x$LINT" = "x1"; then
-  -   npm install && npm run lint && npm run flow
-  - else
-  -   ./autogen.sh && ./configure CC=$CC CXX=$CXX && make
-  - fi
+  - if test "x$LINT" = "x1"; then npm install && npm run lint && npm run flow; fi
+  - if test "x$LINT" != "x1"; then ./autogen.sh && ./configure CC=$CC CXX=$CXX && make; fi
 matrix:
   include:
     - os: linux
