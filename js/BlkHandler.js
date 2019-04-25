@@ -126,7 +126,6 @@ const launchCheckshares = (ctx /*:Context_t*/) => {
 };
 
 const postBlock = (ctx, blockContent) => {
-    return;
     Util.httpPost(ctx.mut.cfg.root.masterUrl + '/privileged/block', {}, (res) => {
         const data = [];
         res.on('data', (d) => { data.push(d); });
@@ -151,7 +150,6 @@ const postBlock = (ctx, blockContent) => {
 };
 
 const uploadBlock = (ctx, file, done) => {
-    return;
     let content;
     nThen((w) => {
         Fs.readFile(file, w((err, ret) => {

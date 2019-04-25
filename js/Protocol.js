@@ -249,6 +249,6 @@ module.exports.shareFileEncode = (share /*:Protocol_ShareFile_t*/) => {
     shareBuf.copy(msg, i); i += shareBuf.length;
     if (i !== msg.length) { throw new Error(i + ' !== ' + msg.length); }
     return msg;
-}
+};
 
 Object.freeze(module.exports);

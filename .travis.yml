@@ -1,7 +1,9 @@
 dist: xenial
 lang: c
 script:
-  - eval "${MATRIX_EVAL}" && ./autogen.sh && ./configure CC=$CC CXX=$CXX && make
+  - eval "${MATRIX_EVAL}"
+  - [ "x$LINT" = "x1" ] && npm install && npm run lint && npm run flow && exit 0;
+  - ./autogen.sh && ./configure CC=$CC CXX=$CXX && make
 matrix:
   include:
     - os: linux
@@ -15,7 +17,7 @@ matrix:
             - pkg-config
             - autoconf-archive
       env:
-        - MATRIX_EVAL="CC=gcc-5 && CXX=g++-5"
+        - MATRIX_EVAL="export CC=gcc-5 && export CXX=g++-5"
     - os: linux
       addons:
         apt:
@@ -27,7 +29,7 @@ matrix:
             - pkg-config
             - autoconf-archive
       env:
-        - MATRIX_EVAL="CC=gcc-6 && CXX=g++-6"
+        - MATRIX_EVAL="export CC=gcc-6 && export CXX=g++-6"
     - os: linux
       addons:
         apt:
@@ -39,7 +41,7 @@ matrix:
             - pkg-config
             - autoconf-archive
       env:
-        - MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
+        - MATRIX_EVAL="export CC=gcc-7 && export CXX=g++-7"
     - os: linux
       addons:
         apt:
@@ -51,7 +53,7 @@ matrix:
             - pkg-config
             - autoconf-archive
       env:
-        - MATRIX_EVAL="CC=gcc-8 && CXX=g++-8"
+        - MATRIX_EVAL="export CC=gcc-8 && export CXX=g++-8"
     - os: linux
       addons:
         apt:
@@ -63,7 +65,7 @@ matrix:
             - pkg-config
             - autoconf-archive
       env:
-        - MATRIX_EVAL="CC=clang-6.0 && CXX=clang++-6.0"
+        - MATRIX_EVAL="export CC=clang-6.0 && export CXX=clang++-6.0"
     - os: linux
       addons:
         apt:
@@ -75,7 +77,7 @@ matrix:
             - pkg-config
             - autoconf-archive
       env:
-        - MATRIX_EVAL="CC=clang-7 && CXX=clang++-7"
+        - MATRIX_EVAL="export CC=clang-7 && export CXX=clang++-7"
     - os: linux
       addons:
         apt:
@@ -87,4 +89,11 @@ matrix:
             - pkg-config
             - autoconf-archive
       env:
-        - MATRIX_EVAL="CC=clang-8 && CXX=clang++-8"
+        - MATRIX_EVAL="export CC=clang-8 && export CXX=clang++-8"
+    - os: linux
+      addons:
+        apt:
+          packages:
+            - nodejs
+      env:
+        - MATRIX_EVAL="export LINT=1"

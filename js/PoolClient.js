@@ -47,7 +47,7 @@ const startLongPoll2 = (pool /*:PoolClient_t*/) => {
                 // We lost the block, wait and we'll get a new config
                 return void setTimeout(() => { startLongPoll2(pool); }, 5000);
             }
-            debug("Failed to get [" + url + "] [" + JSON.stringify(err) + "]");
+            debug("Failed to get [" + url + "] [" + JSON.stringify(err || null) + "]");
             return true;
         }
         const work = Protocol.workDecode(res);
@@ -76,7 +76,7 @@ const connectionChecker = (pool, first) => {
 
     Util.httpGetStr(pool.url + '/config.json', (err, data) => {
         if (!data) {
-            debug("Failed to get config.json [" + JSON.stringify(err) + "] retrying");
+            debug("Failed to get config.json [" + JSON.stringify(err || null) + "] retrying");
             return true;
         }
         const config /*:Protocol_PcConfigJson_t*/ = JSON.parse(data);
@@ -139,7 +139,7 @@ module.exports.create = (poolUrl /*:string*/) /*:PoolClient_t*/ => {
         const url = workUrl2(pool, num);
         Util.httpGetBin(url, (err, res) => {
             if (!res) {
-                debug("Error getting [" + url + "] [" + JSON.stringify(err) + "], retrying");
+                debug("Error getting [" + url + "] [" + JSON.stringify(err || null) + "], retrying");
                 return true;
             }
             const work = pool.workByNum[num] = Protocol.workDecode(res);

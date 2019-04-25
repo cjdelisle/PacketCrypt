@@ -251,7 +251,7 @@ const checkResultLoop = (ctx /*:Context_t*/) => {
                 const e /*:any*/ = err;
                 // 404s are normal because we're polling waiting for the file to exist
                 if (typeof(e.statusCode) !== 'number' || e.statusCode !== 404) {
-                    console.error("Got error from pool [" + JSON.stringify(err) + "]");
+                    console.error("Got error from pool [" + JSON.stringify(e) + "]");
                 }
                 return true;
             }
@@ -530,7 +530,7 @@ const downloadOldAnns = (config, masterConf, done) => {
                 return void again(i + 1);
             }
             console.log("Requesting ann file [" + as.currentAnnNum + "] from [" + as.server + "]" +
-                "got [" + JSON.stringify(err) + "] retrying...");
+                "got [" + JSON.stringify(err || null) + "] retrying...");
             return true;
         });
     };
@@ -553,7 +553,7 @@ const pollAnnHandlers = (ctx) => {
                     "] file already exists, please delete it and restart");
             }
             console.log("Requesting ann file [" + num + "] from [" + server + "]" +
-                "got [" + JSON.stringify(err) + "] retrying...");
+                "got [" + JSON.stringify(err || null) + "] retrying...");
             return true;
         });
     };
