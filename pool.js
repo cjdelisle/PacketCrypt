@@ -11,16 +11,16 @@ import type { Config_t } from './js/Config.js'
 */
 
 const config = {};
-config.masterUrl = 'http://localhost:8080';
+config.masterUrl = 'http://pool.cjdns.fr/ng_master';
 config.rootWorkdir = './datastore/pool';
 config.checkannsPath = './bin/checkanns';
 config.checksharesPath = './bin/checkshares';
 config.annHandlers = [
-    { url: 'http://localhost:8081', port: 8081, threads: 4, root: config },
+    { url: 'http://pool.cjdns.fr/ng_ann0', port: 8081, threads: 4, root: config },
     //{ url: 'http://localhost:8082', port: 8082, threads: 4, root: config },
 ];
 config.blkHandlers = [
-    { url: 'http://localhost:8083', port: 8083, threads: 4, root: config },
+    { url: 'http://pool.cjdns.fr/ng_blk0', port: 8083, threads: 4, root: config },
     //{ url: 'http://localhost:8084', port: 8084, threads: 4, root: config },
 ];
 config.master = {
@@ -33,12 +33,8 @@ config.master = {
         port: 18334,
         rejectUnauthorized: false
     },
-    headers: {
-        "cache-control": "max-age=1000",
-        "content-type": "application/octet-stream",
-    },
     annMinWork:   0x20000fff,
-    shareMinWork: 0x200000ff,
+    shareMinWork: 0x20001fff,
     root: config,
 };
 

@@ -166,6 +166,8 @@ const getAnns = (ctx, req, res) => {
     if (Util.badMethod('GET', req, res)) { return; }
     const fileName = req.url.split('/').pop();
     if (fileName === 'index.json') {
+        res.setHeader('content-type', 'application/json');
+        res.setHeader('cache-control', 'max-age=8 stale-while-revalidate=2');
         res.end(JSON.stringify({ highestAnnFile: ctx.mut.highestAnnFile }));
         return;
     }

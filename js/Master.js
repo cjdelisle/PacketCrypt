@@ -22,7 +22,6 @@ export type Master_Config_t = {
     root: Config_t,
     port: number,
     rpc: Rpc_Config_t,
-    headers: {[string]:string},
     annMinWork: number,
     shareMinWork: number
 };
@@ -47,10 +46,9 @@ type Context_t = {
 }
 */
 
-const headers = (res, cfg) => {
-    Object.keys(cfg.headers).forEach((h) => {
-        res.setHeader(h, cfg.headers[h]);
-    });
+const headers = (res) => {
+    res.setHeader("cache-control", "max-age=1000");
+    res.setHeader("content-type", "application/octet-stream");
 };
 
 const getHash = (content) => {
@@ -212,6 +210,7 @@ const submitBlock = (ctx, req, res) => {
         ]).toString('hex');
         console.log("(apparently) found a block");
         console.log(blockStr);
+        // $FlowFixMe // need to add a type for this function
         ctx.rpcClient.submitBlock(blockStr, (err, ret) => {
             console.log("error:");
             console.log(err);
@@ -240,7 +239,7 @@ const onReq = (ctx /*:Context_t*/, req, res) => {
     req.url.replace(/.*\/work_([0-9]+)\.bin$/, (_, num) => ((worknum = Number(num)) + ''));
     if (worknum < 0) {
     } else if (worknum === (state.work.height+1)) {
-        headers(res, ctx.mut.cfg);
+        headers(res);
         ctx.longPollServer.onReq(req, res);
         return;
     } else {
@@ -250,7 +249,7 @@ const onReq = (ctx /*:Context_t*/, req, res) => {
                 res.statusCode = 404;
                 res.end('');
             } else {
-                headers(res, ctx.mut.cfg);
+                headers(res);
                 Fs.createReadStream(fileName).pipe(res);
             }
         });
