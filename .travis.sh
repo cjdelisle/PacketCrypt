@@ -9,7 +9,9 @@ else
     if test "`uname`" = "Darwin"; then
         brew install libsodium pkg-config autoconf-archive openssl || die
         ./autogen.sh || die
-        PKG_CONFIG_PATH=`echo /usr/local/Cellar/libsodium/*/lib/pkgconfig` ./configure || die
+        export PKG_CONFIG_PATH="$PKG_CONFIG_PATH:`echo /usr/local/Cellar/libsodium/*/lib/pkgconfig`"
+        export PKG_CONFIG_PATH="$PKG_CONFIG_PATH:`echo /usr/local/Cellar/openssl/*/lib/pkgconfig/`"
+        ./configure || die
         make || die
     else
         ./autogen.sh || die

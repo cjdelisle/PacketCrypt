@@ -39,7 +39,9 @@ Make sure you have [homebrew](https://brew.sh/) installed first, then:
 
     brew install libsodium pkg-config autoconf-archive openssl
     ./autogen.sh
-    PKG_CONFIG_PATH=`echo /usr/local/Cellar/libsodium/*/lib/pkgconfig` ./configure
+    export PKG_CONFIG_PATH="$PKG_CONFIG_PATH:`echo /usr/local/Cellar/libsodium/*/lib/pkgconfig`"
+    export PKG_CONFIG_PATH="$PKG_CONFIG_PATH:`echo /usr/local/Cellar/openssl/*/lib/pkgconfig/`"
+    ./configure
     make
     npm install
 
