@@ -4,6 +4,7 @@ Makefile
 /depcomp
 /install-sh
 /missing
+/configure
 /.vscode
 /node_modules
 
@@ -16,7 +17,6 @@ install-sh
 depcomp
 /config.*
 compile
-configure
 .dirstamp
 
 /libpacketcrypt.a

@@ -58,7 +58,7 @@ bin_pcblk_SOURCES = src/pcblk.c \
                                 include/BlockMiner.h \
                                 include/PacketCrypt.h \
     src/FileUtil.c src/FileUtil.h
-bin_pcblk_CFLAGS = -Iinclude
+bin_pcblk_CFLAGS = -Iinclude ${sodium_CFLAGS}
 bin_pcblk_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_CFLAGS} ${CRYPTO_LIBS} -lm
 
 bin_PROGRAMS += bin/pcann
@@ -84,7 +84,7 @@ bin_optest_SOURCES = Makefile \
     src/Hash.c                  src/Hash.h \
     src/RandGen.c               src/RandGen.h \
     src/RandHash_interpreted.c
-bin_optest_CFLAGS = -Iinclude -DOPTEST=1
+bin_optest_CFLAGS = -Iinclude ${sodium_CFLAGS} -DOPTEST=1
 bin_optest_LDADD = ${sodium_LIBS}
 
 bin_PROGRAMS += bin/checkanns

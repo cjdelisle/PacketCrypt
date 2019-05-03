@@ -33,6 +33,16 @@ install the nodejs dependencies.
     make
     npm install
 
+### Apple OSX
+
+Make sure you have [homebrew](https://brew.sh/) installed first, then:
+
+    brew install libsodium pkg-config
+    ./autogen.sh
+    PKG_CONFIG_PATH=`echo /usr/local/Cellar/libsodium/*/lib/pkgconfig` ./configure
+    make
+    npm install
+
 ## Mining
 
 Once you've built the relevant code, you can begin mining *announcements* with:
