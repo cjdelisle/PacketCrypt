@@ -1,9 +1,7 @@
 dist: xenial
 lang: c
 script:
-  - eval "${MATRIX_EVAL}";
-  - if test "x$LINT" = "x1"; then npm install && npm run lint && npm run flow; fi
-  - if test "x$LINT" != "x1"; then ./autogen.sh && ./configure CC=$CC CXX=$CXX && make; fi
+  - bash -x ./.travis.sh
 matrix:
   include:
     - os: linux
@@ -97,3 +95,6 @@ matrix:
             - nodejs
       env:
         - MATRIX_EVAL="export LINT=1"
+    - os: osx
+      env:
+        - MATRIX_EVAL="export CC=clang && export CXX=clang++"
