@@ -14,6 +14,6 @@ else
     else
         ./autogen.sh || die
         ./configure CC=$CC CXX=$CXX || die
-        make; || die
+        make || die
     fi
 fi
