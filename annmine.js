@@ -154,7 +154,7 @@ const poolOnWork = (ctx /*:Context_t*/, w) => {
         // just fire-and-forget
         const request = Buffer.alloc(56+32);
         request.writeUInt32LE(ctx.pool.config.annMinWork, 8);
-        request.writeUInt32LE(w.height, 12);
+        request.writeUInt32LE(w.height - 1, 12);
         w.contentHash.copy(request, 24);
         w.lastHash.copy(request, 56);
 

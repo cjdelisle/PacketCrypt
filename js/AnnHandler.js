@@ -116,7 +116,7 @@ const onSubmit = (ctx, req, res) => {
             contentHash: work.contentHash,
             parentBlockHash: work.lastHash,
             minWork: currentWork.annTarget,
-            mostRecentBlock: worknum,
+            mostRecentBlock: worknum - 1,
             payTo: payTo
         };
         //console.log("Writing: ", post);

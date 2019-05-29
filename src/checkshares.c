@@ -355,7 +355,7 @@ static const char* COMMIT_PATTERN =
     "\xfc\xfc";
 
 static const int COMMIT_PATTERN_SZ = 50;
-static const int COMMIT_PATTERN_OS = 6;
+static const int COMMIT_PATTERN_OS = 2;
 
 static void processWork(Worker_t* w) {
     Share_t share = parseShare(w->fileBuf);
@@ -432,6 +432,7 @@ static void processWork(Worker_t* w) {
     if (w->dedup->table->currentlyMiningBlock < share.work->height) {
         isNewHeight = true;
         w->dedup->len = 0;
+        w->dedup->table->currentlyMiningBlock = share.work->height;
     }
     for (int i = 0; i < w->dedup->len; i++) {
         if (Buf_OBJCMP(&workHash, &w->dedup->table->entries[i])) { continue; }
@@ -456,8 +457,7 @@ static void processWork(Worker_t* w) {
     }
 
     // New block, write out the block before doing anything else...
-    // TODO: this is wrong
-    if (validateRet == Validate_checkBlock_OK || validateRet == Validate_checkBlock_SHARE_OK) { writeBlock(w); }
+    if (validateRet == Validate_checkBlock_OK) { writeBlock(w); }
 
     if (isNewHeight) { clearStateDir(w); }
 

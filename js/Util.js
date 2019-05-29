@@ -376,4 +376,21 @@ module.exports.deleteUselessAnns = (
     });
 };
 
+const mkVarInt = module.exports.mkVarInt = (num) => {
+    if (num <= 0xfc) { return Buffer.from([num]); }
+    if (num <= 0xffff) {
+        const b = Buffer.alloc(3);
+        b[0] = 0xfd;
+        b.writeInt16LE(num, 1);
+        return b;
+    }
+    if (num <= 0xffffffff) {
+        const b = Buffer.alloc(5);
+        b[0] = 0xfe;
+        b.writeInt32LE(num, 1);
+        return b;
+    }
+    throw new Error("64 bit varint unimplemented");
+}
+
 Object.freeze(module.exports);

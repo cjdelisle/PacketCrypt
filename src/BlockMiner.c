@@ -122,6 +122,7 @@ struct Worker_s {
     pthread_t thread;
 
     uint32_t nonceId;
+    uint32_t lowNonce;
 
     sig_atomic_t hashesPerSecond;
 
@@ -212,7 +213,7 @@ static bool mine(Worker_t* w)
     Buf_OBJCPY(&hdr, &w->bm->hdr);
     hdr.nonce = w->nonceId;
 
-    uint32_t lowNonce = 0;
+    uint32_t lowNonce = w->lowNonce;
 
     for (;;) {
         if (hdr.timeSeconds != t.tv0.tv_sec && !w->bm->beDeterministic) {
@@ -237,12 +238,16 @@ static bool mine(Worker_t* w)
             Buf_OBJCPY(&res.hdr, &hdr);
             found(&res, &hdr, w);
             fflush(stderr);
+            w->lowNonce = lowNonce;
             return true;
         }
         Time_END(t);
         w->hashesPerSecond = ((HASHES_PER_CYCLE * 1024) / (Time_MICROS(t) / 1024));
         Time_NEXT(t);
-        if (getRequestedState(w) != ThreadState_RUNNING) { return false; }
+        if (getRequestedState(w) != ThreadState_RUNNING) {
+            w->lowNonce = lowNonce;
+            return false;
+        }
     }
 }
 
@@ -378,16 +383,15 @@ static void updateAew(
 ) {
     for (uint64_t i = 0; i < length; i++) {
         NextAnnounceEffectiveWork_t* aew = &list[i];
-        aew->effectiveWork = Difficulty_degradeAnnouncementTarget(
-            aew->initialWork,
-            nextBlockHeight - aew->parentBlock
-        );
-        if (nextBlockHeight <= Conf_PacketCrypt_ANN_WAIT_PERIOD) {
+        if (nextBlockHeight < Conf_PacketCrypt_ANN_WAIT_PERIOD) {
             // in the first 3 blocks, all announcements are valid in order to allow
             // bootstrapping the network.
-            if (aew->effectiveWork == 0xffffffffu) {
-                aew->effectiveWork = 0x207fffffu;
-            }
+            aew->effectiveWork = aew->initialWork;
+        } else {
+            aew->effectiveWork = Difficulty_degradeAnnouncementTarget(
+                aew->initialWork,
+                (nextBlockHeight - aew->parentBlock)
+            );
         }
     }
 }

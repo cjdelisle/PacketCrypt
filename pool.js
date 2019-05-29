@@ -34,7 +34,7 @@ config.master = {
         rejectUnauthorized: false
     },
     annMinWork:   0x20000fff,
-    shareMinWork: 0x20001fff,
+    shareMinWork: 0x20000fff,
     root: config,
 };
 

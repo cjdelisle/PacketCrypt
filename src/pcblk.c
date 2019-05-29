@@ -4,6 +4,7 @@
 #include "Buf.h"
 #include "PoolProto.h"
 #include "FileUtil.h"
+#include "Conf.h"
 
 #include "sodium/crypto_hash_sha256.h"
 
@@ -126,7 +127,7 @@ static const char* COMMIT_PATTERN =
     "\xfc\xfc";
 
 static const int COMMIT_PATTERN_SZ = 50;
-static const int COMMIT_PATTERN_OS = 6;
+static const int COMMIT_PATTERN_OS = 2;
 
 static void loadWork(Context_t* ctx) {
     snprintf(ctx->filepath.name, FilePath_NAME_SZ, "work.bin");
@@ -190,8 +191,9 @@ static void beginMining(Context_t* ctx)
 {
     assert(ctx->currentWork);
     BlockMiner_Stats_t stats;
+    ctx->coinbaseCommit->annLeastWorkTarget = 0xffffffff;
     int res = BlockMiner_lockForMining(ctx->bm, &stats, ctx->coinbaseCommit,
-        ctx->currentWork->height+1, ctx->currentWork->shareTarget);
+        ctx->currentWork->height, ctx->currentWork->shareTarget);
     DEBUGF("BlockMiner_lockForMining(): ng: %ld ne: %ld nne: %ld "
         "og: %ld oe: %ld or: %ld finalCount: %ld minTarget: %08x\n",
         (long)stats.newGood, (long)stats.newExpired, (long)stats.newNotEnough,
@@ -384,9 +386,12 @@ int main(int argc, char** argv) {
             // height (next block) 5
             // any announcement with parent < 3 is valid for 5
             // but if we're already mining 5, anything with parent < 4 is valid for next block
-            if (fileNum < (ctx->currentWork->height - 2 - (!ctx->mining))) {
-                loadFile(ctx, file->d_name);
+            if (ctx->currentWork->height <= Conf_PacketCrypt_ANN_WAIT_PERIOD) {
+                // first 3 blocks are special
+            } else if (fileNum >= (ctx->currentWork->height - 2 - (!ctx->mining))) {
+                continue;
             }
+            loadFile(ctx, file->d_name);
         }
 
         if (!ctx->mining) { beginMining(ctx); }

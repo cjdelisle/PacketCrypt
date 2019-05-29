@@ -140,9 +140,8 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
         uint32_t effectiveAnnTarget =
             Difficulty_degradeAnnouncementTarget(ann->hdr.workBits,
                 (blockHeight - ann->hdr.parentBlockHeight));
+        if (blockHeight < 3) { effectiveAnnTarget = ann->hdr.workBits; }
         if (effectiveAnnTarget > coinbaseCommitment->annLeastWorkTarget) {
-            fprintf(stderr, "Not enough work, declared work %08x  min work %08x  degraded work %08x\n",
-                ann->hdr.workBits, coinbaseCommitment->annLeastWorkTarget, effectiveAnnTarget);
             return Validate_checkBlock_ANN_INSUF_POW(i);
         }
         Hash_COMPRESS32_OBJ(&annHashes[i], ann);

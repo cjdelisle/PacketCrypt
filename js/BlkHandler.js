@@ -130,7 +130,8 @@ const postBlock = (ctx, blockContent) => {
         const data = [];
         res.on('data', (d) => { data.push(d); });
         res.on('end', () => {
-            const result = typeof(data[0]) === 'string' ? data.join('') : '<binary>';
+            const result = typeof(data[0]) === 'string' ?
+                data.join('') : Buffer.concat(data).toString('utf8');
             if (res.statusCode >= 400 && res.statusCode < 500) {
                 console.log("Master replied [" + res.statusCode + "] [" + result +
                     "] giving up");
@@ -183,7 +184,7 @@ const uploadBlocks = (ctx) => {
                     console.log("WARNING: failed readdir [" + ctx.workdir + '/blkdir' + "] [" +
                         err.message + "]");
                 } else {
-                    files = ff.map((f) => (ctx.workdir + '/blkdir' + f));
+                    files = ff.map((f) => (ctx.workdir + '/blkdir/' + f));
                 }
             }));
         }).nThen((w) => {
@@ -226,7 +227,10 @@ const getAnnContentHash = (share /*:Buffer*/, num) => {
 // Must be greater than or equal to zero and less than current work - 3
 const parentNumInRange = (ctx, num) => {
     if (!ctx.poolClient.work) { return false; }
-    return num >= 0 && num < (ctx.poolClient.work.height - 3);
+    if (ctx.poolClient.work.height > 3 && num > (ctx.poolClient.work.height - 3)) {
+        return false;
+    }
+    return num >= 0;
 };
 
 const onSubmit = (ctx, req, res) => {
@@ -271,10 +275,10 @@ const onSubmit = (ctx, req, res) => {
         [0,1,2,3].forEach((num) => {
             const parentNum = getAnnParentNum(bytes, num);
             if (!parentNumInRange(ctx, parentNum)) {
-                errorEnd(400, 'announcement parent block [' + num + '] out of range');
+                errorEnd(400, 'announcement parent block [' + parentNum + '] out of range');
                 return;
             }
-            ctx.poolClient.getWorkByNum(parentNum, w((work) => {
+            ctx.poolClient.getWorkByNum(parentNum + 1, w((work) => {
                 hashes[num] = work.lastHash;
                 const chash = getAnnContentHash(bytes, num);
                 if (Buffer.compare(work.contentHash, chash)) {

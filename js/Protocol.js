@@ -108,6 +108,7 @@ const workDecode = module.exports.workDecode = (work /*:Buffer*/) /*:Protocol_Wo
 
 module.exports.blockTemplateEncode = (rbt /*:Protocol_RawBlockTemplate_t*/) => {
     const out = rbt.transactions.map(Util.bufFromHex);
+    out.unshift(Util.mkVarInt(rbt.transactions.length));
     out.unshift(Util.bufFromHex(rbt.header));
     return Buffer.concat(out);
 };

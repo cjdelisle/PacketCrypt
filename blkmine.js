@@ -339,7 +339,7 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
         if (ctx.miner) { ctx.miner.kill('SIGHUP'); }
         ctx.handledShares[filePath] = true;
         splitShares(fileBuf).forEach((share, i) => {
-            const hash = Blake2b(32).update(share).digest(Buffer.alloc(32));
+            const hash = Blake2b(64).update(share).digest(Buffer.alloc(64));
             const handlerNum = hash.readUInt16LE(0) % ctx.masterConf.submitBlockUrls.length;
             const url = ctx.masterConf.submitBlockUrls[handlerNum];
             //console.log(share.toString('hex'));

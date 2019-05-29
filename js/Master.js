@@ -52,7 +52,7 @@ const headers = (res) => {
 };
 
 const getHash = (content) => {
-    return (Blake2b(32).update(content).digest(Buffer.alloc(32))/*:Buffer*/);
+    return (Blake2b(32).update(content.slice(1)).digest(Buffer.alloc(32))/*:Buffer*/);
 };
 
 const reverseBuffer = (buf) => {
@@ -67,7 +67,7 @@ const onBlock = (ctx /*:Context_t*/) => {
     nThen((w) => {
         // Create some content to go with the new work
         const content = Crypto.randomBytes(16);
-        content[0] = 16;
+        content[0] = 15;
 
         // Make work entry
         ctx.rpcClient.getRawBlockTemplate(w((err, ret) => {
@@ -190,32 +190,63 @@ const submitBlock = (ctx, req, res) => {
             res.end("Server not ready (no block template to use)");
             return;
         }
-        const shareFile = Protocol.shareFileDecode(Buffer.concat(data));
-        let blockTemplate = Buffer.from(state.blockTemplate);
+        const dataBuf = Buffer.concat(data);
+        //console.log(dataBuf.toString('hex'));
+        const shareFile = Protocol.shareFileDecode(dataBuf);
+        let blockTemplate = Buffer.from(state.blockTemplate).slice(80);
         // the block template is just the block except invalid.
         // We need to replace the header, find the pattern and insert the
         // coinbase commitment and then we can push the header and PCP
-        blockTemplate = blockTemplate.slice(80);
         const offset = blockTemplate.indexOf(COMMIT_PATTERN);
         if (offset === -1) {
             res.statusCode = 400;
             res.end("Could not find coinbase commitment");
             return;
         }
-        shareFile.share.coinbaseCommit.copy(blockTemplate, offset);
+        shareFile.share.coinbaseCommit.copy(blockTemplate, offset+2);
+
+        // We need to split apart the pcp in order to re-add the content
+        // to the announcements.
+        const anns = [];
+        for (let i = 8; i < 4096; i += 1024) {
+            const ann = shareFile.share.packetCryptProof.slice(i, i+1024);
+            const num = ann.readInt32LE(12) + 1;
+            const content = ctx.contentByHeight[num];
+            if (!content) {
+                console.log("Content at height [" + num + "] is unknown");
+                res.statusCode = 400;
+                res.end("Could not find ann content at height [" + num + "]");
+                return;
+            }
+            anns.push(ann);
+            anns.push(content);
+        }
+
         const blockStr = Buffer.concat([
             shareFile.share.blockHeader,
-            shareFile.share.packetCryptProof,
+            shareFile.share.packetCryptProof.slice(0,8),
+            Buffer.concat(anns),
+            shareFile.share.packetCryptProof.slice(4096+8),
             blockTemplate
         ]).toString('hex');
-        console.log("(apparently) found a block");
-        console.log(blockStr);
+        //console.log("(apparently) found a block");
+        //console.log(blockStr);
         // $FlowFixMe // need to add a type for this function
         ctx.rpcClient.submitBlock(blockStr, (err, ret) => {
-            console.log("error:");
-            console.log(err);
-            console.log("ret:");
-            console.log(ret);
+            if (!err) { err = ret.result; }
+            if (err) {
+                const serr = String(err);
+                if (serr.indexOf("rejected: already have block") === 0) {
+                    res.statusCode = 409;
+                } else {
+                    res.statusCode = 400;
+                }
+                res.end("Error submitting block [" + String(err) + "]");
+                console.log("error:");
+                console.log(err);
+            } else {
+                res.end("OK");
+            }
         });
     });
 };
