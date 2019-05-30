@@ -34,6 +34,7 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
                         uint32_t shareTarget,
                         const PacketCrypt_Coinbase_t* coinbaseCommitment,
                         const uint8_t blockHashes[static PacketCrypt_NUM_ANNS * 32],
+                        uint8_t workHashOut[static 32],
                         PacketCrypt_ValidateCtx_t* vctx);
 
 #endif

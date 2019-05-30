@@ -319,6 +319,7 @@ static void writeOutput(Worker_t* w, enum Output out, Share_t* s) {
 }
 
 static void writeBlock(Worker_t* w) {
+    DEBUGF("BLOCK!\n");
     strncpy(w->blkFile.name, w->inFile->name, FilePath_NAME_SZ);
     if (writeFile(w->blkFile.path, w->fileBuf, w->shareLen)) {
         assert(0 && "Failed to write block file");
@@ -415,9 +416,10 @@ static void processWork(Worker_t* w) {
         return;
     }
 
+    Buf32_t pcHash;
     int validateRet = Validate_checkBlock(&share.share->hap, share.work->height,
         share.work->shareTarget, &share.share->coinbase,
-        (uint8_t*)share.hdr->parentHashes[0].bytes, &w->vctx);
+        (uint8_t*)share.hdr->parentHashes[0].bytes, pcHash.bytes, &w->vctx);
 
     if (validateRet != Validate_checkBlock_OK && validateRet != Validate_checkBlock_SHARE_OK) {
         writeOutput(w, Output_CHECK_FAIL | (validateRet << 8), &share);
@@ -462,6 +464,8 @@ static void processWork(Worker_t* w) {
     if (isNewHeight) { clearStateDir(w); }
 
     if (validateRet == Validate_checkBlock_OK || validateRet == Validate_checkBlock_SHARE_OK) {
+        DEBUGF("Accepted share: ");
+        Hash_eprintHex(pcHash.bytes, 32);
         writeOutput(w, Output_ACCEPT, &share);
     }
 }

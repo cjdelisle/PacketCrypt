@@ -83,7 +83,8 @@ static bool isWorkOk(const CryptoCycle_State_t* ccState,
 static int checkPcHash(uint64_t indexesOut[PacketCrypt_NUM_ANNS],
                        const PacketCrypt_HeaderAndProof_t* hap,
                        const PacketCrypt_Coinbase_t* cb,
-                       uint32_t shareTarget)
+                       uint32_t shareTarget,
+                       uint8_t workHashOut[static 32])
 {
     CryptoCycle_State_t pcState;
     _Static_assert(sizeof(PacketCrypt_Announce_t) == sizeof(CryptoCycle_Item_t), "");
@@ -99,6 +100,8 @@ static int checkPcHash(uint64_t indexesOut[PacketCrypt_NUM_ANNS],
     }
     CryptoCycle_smul(&pcState);
     CryptoCycle_final(&pcState);
+
+    memcpy(workHashOut, pcState.bytes, 32);
 
     if (isWorkOk(&pcState, cb, hap->blockHeader.workBits)) {
         return Validate_checkBlock_OK;
@@ -116,6 +119,7 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
                         uint32_t shareTarget,
                         const PacketCrypt_Coinbase_t* coinbaseCommitment,
                         const uint8_t blockHashes[static PacketCrypt_NUM_ANNS * 32],
+                        uint8_t workHashOut[static 32],
                         PacketCrypt_ValidateCtx_t* vctx)
 {
     if (coinbaseCommitment->magic != PacketCrypt_Coinbase_MAGIC) {
@@ -127,7 +131,7 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
 
     // Check that final work result meets difficulty requirement
     uint64_t annIndexes[PacketCrypt_NUM_ANNS] = {0};
-    int chk = checkPcHash(annIndexes, hap, coinbaseCommitment, shareTarget);
+    int chk = checkPcHash(annIndexes, hap, coinbaseCommitment, shareTarget, workHashOut);
 
     Buf32_t annHashes[PacketCrypt_NUM_ANNS];
 
