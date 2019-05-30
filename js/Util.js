@@ -376,7 +376,7 @@ module.exports.deleteUselessAnns = (
     });
 };
 
-const mkVarInt = module.exports.mkVarInt = (num) => {
+const mkVarInt = module.exports.mkVarInt = (num /*:number*/) => {
     if (num <= 0xfc) { return Buffer.from([num]); }
     if (num <= 0xffff) {
         const b = Buffer.alloc(3);
@@ -391,6 +391,6 @@ const mkVarInt = module.exports.mkVarInt = (num) => {
         return b;
     }
     throw new Error("64 bit varint unimplemented");
-}
+};
 
 Object.freeze(module.exports);
