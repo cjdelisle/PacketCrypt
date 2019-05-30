@@ -158,7 +158,9 @@ const uploadBlock = (ctx, file, done) => {
     nThen((w) => {
         Fs.readFile(file, w((err, ret) => {
             if (!err) {
-                content = ret;
+                if (content.length > 0) {
+                    content = ret;
+                }
                 return;
             }
             console.log("WARNING: failed readfile [" + file + "] [" + err.message + "]");
