@@ -158,7 +158,7 @@ const uploadBlock = (ctx, file, done) => {
     nThen((w) => {
         Fs.readFile(file, w((err, ret) => {
             if (!err) {
-                if (content.length > 0) {
+                if (ret.length > 0) {
                     content = ret;
                 }
                 return;
