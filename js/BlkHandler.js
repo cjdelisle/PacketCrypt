@@ -176,8 +176,7 @@ const uploadBlock = (ctx, file, done) => {
         if (!content) { return; }
         console.log("Posting block [" + file + "] to master");
         postBlock(ctx, content);
-        done();
-    });
+    }).nThen(done);
 };
 
 const uploadBlocks = (ctx) => {
