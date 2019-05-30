@@ -125,8 +125,11 @@ const launchCheckshares = (ctx /*:Context_t*/) => {
     }));
 };
 
-const postBlock = (ctx, blockContent) => {
-    Util.httpPost(ctx.mut.cfg.root.masterUrl + '/privileged/block', {}, (res) => {
+const postBlock = (ctx, blockContent /*:Buffer*/) => {
+    Util.httpPost(ctx.mut.cfg.root.masterUrl + '/privileged/block', {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(blockContent.length)
+    }, (res) => {
         const data = [];
         res.on('data', (d) => { data.push(d); });
         res.on('end', () => {
