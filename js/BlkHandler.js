@@ -138,6 +138,10 @@ const postBlock = (ctx, blockContent /*:Buffer*/) => {
             if (res.statusCode >= 400 && res.statusCode < 500) {
                 console.log("Master replied [" + res.statusCode + "] [" + result +
                     "] giving up");
+                if (result.indexOf('Validate_checkBlock_PCP_INVAL') > -1) {
+                    console.log("Block content:");
+                    console.log(blockContent.toString('hex'));
+                }
                 return;
             }
             if (res.statusCode !== 200) {
