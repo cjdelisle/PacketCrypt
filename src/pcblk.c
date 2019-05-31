@@ -73,9 +73,14 @@ static void loadFile(Context_t* ctx, const char* fileName) {
         DEBUGF("Size of ann file [%s] is [%lld], not a multiple of ann size. "
             "I don't trust this file\n", ctx->filepath.path, (long long)st.st_size);
         close(fileno);
+        if (unlink(ctx->filepath.path)) {
+            // Delete the file so that we don't continuously cycle around trying to access it.
+            DEBUGF("Failed to delete [%s] errno=[%s]\n", ctx->filepath.path, strerror(errno));
+            return;
+        }
         return;
     }
-    PacketCrypt_Announce_t* anns = malloc(numAnns * sizeof(PacketCrypt_Announce_t));
+    PacketCrypt_Announce_t* anns = malloc(st.st_size);
     if (!anns) {
         DEBUGF("Unable to allocate memory for [%s], will be skipped\n", ctx->filepath.path);
         close(fileno);
