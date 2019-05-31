@@ -248,6 +248,10 @@ const checkResultLoop = (ctx /*:Context_t*/) => {
         const url = ctx.resultQueue.shift();
         Util.httpGetStr(url, (err, res) => {
             if (!res) {
+                if (!err) {
+                    console.error("Empty result from pool, retrying");
+                    return true;
+                }
                 const e /*:any*/ = err;
                 // 404s are normal because we're polling waiting for the file to exist
                 if (typeof(e.statusCode) !== 'number' || e.statusCode !== 404) {
