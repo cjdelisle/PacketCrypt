@@ -38,10 +38,10 @@ const httpRes = (ctx, res /*:IncomingMessage*/) => {
     res.on('data', (d) => { data.push(d.toString('utf8')); });
     res.on('end', () => {
         if (res.statusCode !== 200) {
-            if (res.statusCode === 400) {
-                console.error("Pool replied with error 400 [" + data.join('') + "] stopping");
-                process.exit(100);
-            }
+            // if (res.statusCode === 400) {
+            //     console.error("Pool replied with error 400 [" + data.join('') + "] stopping");
+            //     process.exit(100);
+            // }
             console.error("WARNING: Pool replied with [" + res.statusMessage +
                 "] [" + data.join('') + "]");
             return;
