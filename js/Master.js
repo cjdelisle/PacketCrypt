@@ -63,54 +63,96 @@ const reverseBuffer = (buf) => {
 
 const onBlock = (ctx /*:Context_t*/) => {
     let state;
+    let newState;
     let done;
     nThen((w) => {
         // Create some content to go with the new work
         const content = Crypto.randomBytes(16);
         content[0] = 15;
-
         // Make work entry
         ctx.rpcClient.getRawBlockTemplate(w((err, ret) => {
-            if (err || !ret) { throw err; }
+            if (err || !ret) { throw new Error(JSON.stringify(err)); }
             let work = Protocol.workFromRawBlockTemplate(ret.result, getHash(content),
                 ctx.mut.cfg.shareMinWork, ctx.mut.cfg.annMinWork);
-            if (ctx.contentByHeight[work.height]) {
-                // Oops, we already have content for this, do over...
-                const content = ctx.contentByHeight[work.height];
-                work = Protocol.workFromRawBlockTemplate(ret.result, getHash(content),
-                    ctx.mut.cfg.shareMinWork, ctx.mut.cfg.annMinWork);
-            }
-            state = Object.freeze({
+            newState = Object.freeze({
                 work: work,
                 content: content,
                 blockTemplate: Protocol.blockTemplateEncode(ret.result)
             });
         }));
     }).nThen((w) => {
-        // Store the work to disk and also write out the content mapping
-        const fileName = ctx.workdir + '/work_' + state.work.height + '.bin';
-        const again = () => {
-            WriteFileAtomic(fileName, state.work.binary, w((err) => {
-                if (!err) {
-                    if (!ctx.contentByHeight[state.work.height]) {
-                        ctx.mut.contentFile.write(JSON.stringify({
-                            height: state.work.height,
-                            content: state.content.toString('hex')
-                        }) + '\n');
-                        ctx.contentByHeight[state.work.height] = state.content;
-                    }
-                    ctx.mut.state = state;
+        // Check if the work file exists already, if it does then we're going
+        // to load it and override our new state.
+        const fileName = ctx.workdir + '/work_' + newState.work.height + '.bin';
+        const fileNameBT = ctx.workdir + '/bt_' + newState.work.height + '.bin';
+        let work;
+        let blockTemplate;
+        nThen((w) => {
+            Fs.readFile(fileName, w((err, ret) => {
+                if (err) {
+                    if (err.code !== 'ENOENT') { throw err; }
                     return;
                 }
-                console.error("Failed to write work to disk, trying again in 1 second");
-                setTimeout(w(again), 1000);
-                return;
+                work = Protocol.workDecode(ret);
             }));
-        };
-        again();
+            Fs.readFile(fileNameBT, w((err, ret) => {
+                if (err) {
+                    if (err.code !== 'ENOENT') { throw err; }
+                    return;
+                }
+                blockTemplate = ret;
+            }));
+        }).nThen((w) => {
+            if (work && blockTemplate && ctx.contentByHeight[work.height]) {
+                console.log("Using an existing block template for block [" +
+                    newState.work.height + "]");
+                state = Object.freeze({
+                    work: work,
+                    content: ctx.contentByHeight[work.height],
+                    blockTemplate: blockTemplate
+                });
+            } else {
+                state = newState;
+            }
+        }).nThen(w());
     }).nThen((w) => {
-        if (!ctx.mut.state) { throw new Error(); }
-        const work = ctx.mut.state.work;
+        if (state !== newState) { return; }
+        nThen((w) => {
+            // Store the work to disk and also write out the content mapping
+            const fileName = ctx.workdir + '/work_' + state.work.height + '.bin';
+            const again = () => {
+                WriteFileAtomic(fileName, state.work.binary, w((err) => {
+                    if (!err) { return; }
+                    console.error("Failed to write work to disk [" + err +
+                        "], trying again in 1 second");
+                    setTimeout(w(again), 1000);
+                    return;
+                }));
+            };
+            again();
+
+            const fileNameBT = ctx.workdir + '/bt_' + state.work.height + '.bin';
+            const againBT = () => {
+                WriteFileAtomic(fileNameBT, state.blockTemplate, w((err) => {
+                    if (!err) { return; }
+                    console.error("Failed to write block template to disk [" + err +
+                        "], trying again in 1 second");
+                    setTimeout(w(againBT), 1000);
+                    return;
+                }));
+            };
+            againBT();
+        }).nThen((w) => {
+            if (ctx.contentByHeight[state.work.height]) { return; }
+            ctx.mut.contentFile.write(JSON.stringify({
+                height: state.work.height,
+                content: state.content.toString('hex')
+            }) + '\n');
+            ctx.contentByHeight[state.work.height] = state.content;
+        }).nThen(w());
+    }).nThen((w) => {
+        ctx.mut.state = state;
+        const work = state.work;
         console.log("Block " + (work.height-1) + " " + work.lastHash.toString('hex'));
         let retrying = false;
         const again = () => {
@@ -193,6 +235,14 @@ const submitBlock = (ctx, req, res) => {
         const dataBuf = Buffer.concat(data);
         //console.log(dataBuf.toString('hex'));
         const shareFile = Protocol.shareFileDecode(dataBuf);
+
+        if (shareFile.work.height !== state.work.height) {
+            res.statusCode = 400;
+            res.end("Expected share with height [" + state.work.height + "] but " +
+                "share height was [" + shareFile.work.height + "]");
+            return;
+        }
+
         let blockTemplate = Buffer.from(state.blockTemplate).slice(80);
         // the block template is just the block except invalid.
         // We need to replace the header, find the pattern and insert the
