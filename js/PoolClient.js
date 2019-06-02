@@ -68,6 +68,7 @@ const debugGotWork = (work) => {
 };
 
 const connectionChecker = (pool, first) => {
+    //console.log("Pool check connection");
     const to = setTimeout(() => {
         if (first) { return; }
         pool.connected = false;
@@ -81,8 +82,8 @@ const connectionChecker = (pool, first) => {
         }
         const config /*:Protocol_PcConfigJson_t*/ = JSON.parse(data);
         if (!first && JSON.stringify(pool.config) !== JSON.stringify(config)) {
-            delete pool.workByNum[pool.currentHeight];
-            pool.getWorkByNum(pool.currentHeight, (work) => {
+            delete pool.workByNum[config.currentHeight];
+            pool.getWorkByNum(config.currentHeight, (work) => {
                 if (JSON.stringify(work) !== JSON.stringify(pool.work)) {
                     debugGotWork(work);
                     pool.work = work;
