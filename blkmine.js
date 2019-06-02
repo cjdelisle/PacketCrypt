@@ -552,9 +552,11 @@ const pollAnnHandlers = (ctx) => {
                 return void again(server, i, num + 1);
             }
             if (err && err.code === 'EEXIST' && err.annPath) {
-                const path = String(err.annPath);
-                throw new Error("Failed to download ann file to [" + path +
-                    "] file already exists, please delete it and restart");
+                // Lets just continue looking for newer files
+                return void again(server, i, num + 1);
+                // const path = String(err.annPath);
+                // throw new Error("Failed to download ann file to [" + path +
+                //     "] file already exists, please delete it and restart");
             }
             console.log("Requesting ann file [" + num + "] from [" + server + "]" +
                 "got [" + JSON.stringify(err || null) + "] retrying...");
