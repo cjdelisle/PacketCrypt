@@ -462,29 +462,40 @@ static void prepareNextBlock(BlockMiner_t* bm, uint32_t nextBlockHeight) {
     updateAew((NextAnnounceEffectiveWork_t*) bm->aew, bm->annCount, nextBlockHeight);
     qsort(bm->aew, bm->annCount, sizeof bm->aew[0], ewComp);
 
-    bool trash = false;
-    uint32_t lastWork = 0xffffffff;
     for (size_t i = 0; i < bm->annCount; i++) {
-        // if adding the rest of the announcements with the effective work of the next
-        // ann would make the result *worse* than leaving them out, then we will flip
-        // a switch and begin marking them as useless so that they will be replaced.
-        if (!trash) {
-            uint32_t work = bm->aew[i].effectiveWork;
-            if (work > lastWork) {
-                uint64_t last = Difficulty_getHashRateMultiplier(lastWork, i);
-                uint64_t next = Difficulty_getHashRateMultiplier(work, bm->annCount);
-                if (last > next) {
-                    trash = true;
-                }
-            }
-        }
-        lastWork = bm->aew[i].effectiveWork;
-        if (trash) {
-            bm->aew[i].effectiveWork = 0xffffffff;
-        }
-
         // fix the reverse pointers
         bm->aew[i].ann->aewPtr = &bm->aew[i];
+    }
+
+    size_t top = bm->annCount;
+    bool trash;
+    for (int cycle = 0; cycle < 10; cycle++) {
+        trash = false;
+        size_t nextTop = top;
+        for (size_t i = 1; i < top; i++) {
+            // if adding the rest of the announcements with the effective work of the next
+            // ann would make the result *worse* than leaving them out, then we will flip
+            // a switch and begin marking them as useless so that they will be replaced.
+            if (!trash) {
+                uint32_t work = bm->aew[i].effectiveWork;
+                uint32_t lastWork = bm->aew[i-1].effectiveWork;
+                if (work == 0xffffffff) {
+                    // already trashed, ignore it
+                } else if (work > lastWork) {
+                    uint64_t last = Difficulty_getHashRateMultiplier(lastWork, i);
+                    uint64_t next = Difficulty_getHashRateMultiplier(work, top);
+                    if (last > next) {
+                        trash = true;
+                        nextTop = i;
+                    }
+                }
+            }
+            if (trash) {
+                bm->aew[i].effectiveWork = 0xffffffff;
+            }
+        }
+        if (!trash) { break; }
+        top = nextTop;
     }
 
     // This will be non-empty when prepareNextBlock gets called by lockForMining because
