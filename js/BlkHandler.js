@@ -126,7 +126,7 @@ const launchCheckshares = (ctx /*:Context_t*/) => {
 };
 
 const postBlock = (ctx, blockContent /*:Buffer*/) => {
-    Util.httpPost(ctx.mut.cfg.root.masterUrl + '/privileged/block', {
+    const post = Util.httpPost(ctx.mut.cfg.root.masterUrl + '/privileged/block', {
         'Content-Type': 'application/octet-stream',
         'Content-Length': String(blockContent.length)
     }, (res) => {
@@ -154,7 +154,11 @@ const postBlock = (ctx, blockContent /*:Buffer*/) => {
             }
             console.log("postblock OK [" + result + "]");
         });
-    }).end(blockContent);
+    });
+    post.end(blockContent);
+    post.on('error', (err) => {
+        console.log("Failed to post block to master [" + err + "]");
+    });
 };
 
 const uploadBlock = (ctx, file, done) => {

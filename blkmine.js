@@ -356,6 +356,9 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
             });
             ctx.uploadReqs.push(req);
             req.end(share);
+            req.on('error', (err) => {
+                console.log("Failed to upload share [" + err + "]");
+            });
         });
     }).nThen((w) => {
         cb();
