@@ -26,6 +26,8 @@
 #define IN_ANN_CAP (1024*16)
 #define STATE_FILE_VERSION (0)
 
+#define WRITE_EVERY_SECONDS 60
+
 typedef struct AnnEntry_s {
     // beginning of the hash (for deduplication)
     uint64_t start;
@@ -381,8 +383,10 @@ static void processAnns1(Worker_t* w, Result_t* res, int annCount) {
             }
             tryWriteAnnsCritical(w, w->lw.inBuf.parentBlockHeight);
             DEBUGF("New parentBlockHeight [%u]\n", w->lw.inBuf.parentBlockHeight);
-        } else if (outCount + validCount >= OUT_ANN_CAP || (timeOfLastWrite + 15 < now)) {
-            // file is full (it 15 seconds have elapsed), write it out
+        } else if (outCount + validCount >= OUT_ANN_CAP ||
+            (timeOfLastWrite + WRITE_EVERY_SECONDS < now))
+        {
+            // file is full (it WRITE_EVERY_SECONDS seconds have elapsed), write it out
             tryWriteAnnsCritical(w, w->lw.inBuf.parentBlockHeight);
         }
         goodCount = dedupeCritical(w, annCount);
