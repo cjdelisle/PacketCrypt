@@ -2,7 +2,6 @@
 Makefile.in
 Makefile
 /depcomp
-/install-sh
 /missing
 /configure
 /.vscode
@@ -13,7 +12,6 @@ aclocal.m4
 autom4te.cache/
 missing
 stamp-h1
-install-sh
 depcomp
 /config.*
 compile
