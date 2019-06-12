@@ -33,6 +33,18 @@ install the nodejs dependencies.
     make
     npm install
 
+### Alpine linux
+
+First make sure you have the [community](https://wiki.alpinelinux.org/wiki/Enable_Community_Repository)
+repository enabled
+
+    sudo apk update
+    sudo apk add nodejs npm autoconf automake autoconf-archive build-base git libsodium-dev openssl-dev
+    ./autogen.sh
+    ./configure
+    make
+    npm install
+
 ### Apple OSX
 
 Make sure you have [homebrew](https://brew.sh/) installed first, then:
