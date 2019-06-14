@@ -88,22 +88,6 @@ typedef struct StateFile_s {
 } StateFile_t;
 _Static_assert(sizeof(StateFile_t) == StateFile_Header_SZ + sizeof(AnnEntry_t) * OUT_ANN_CAP, "");
 
-// Exactness is not a requirement here, it's ok to play fast and loose
-static double compactToDbl(uint32_t c) {
-    if (c < 1) { return 0; }
-    return (c & 0x007fffff) * pow(256, (c >> 24) - 3);
-}
-static bool hasMoreWork(AnnEntry_t* trueIfMore, AnnEntry_t* ref) {
-    double dtim = compactToDbl(trueIfMore->diff);
-    double dref = compactToDbl(ref->diff);
-    if (trueIfMore->height < ref->height) {
-        dtim *= (ref->height - trueIfMore->height);
-    } else {
-        dref *= (trueIfMore->height - ref->height);
-    }
-    return dtim >= dref;
-}
-
 static void checkedWrite(const char* filename, int fileno, void* ptr, int len) {
     ssize_t written = write(fileno, ptr, len);
     if (written < 0) {
@@ -315,16 +299,6 @@ static int dedupeCritical(Worker_t* w, int inCount) {
         for (int i = 0; i < inCount; i++) {
             AnnEntry_t* td = &lw->dedupsIn[i];
             if (td->start != tblEntry->start) { continue; }
-            if (hasMoreWork(td, tblEntry)) {
-                // toDedup is a duplicate but has more work done on it
-                // so we will replace the dedupTable entry
-                Buf_OBJCPY(tblEntry, td);
-                // We need to flag the entry so that we won't add it to the
-                // table again, but we also need to be able to un-flag it
-                // in order to output the new dedups...
-                td->diff = 0;
-                continue;
-            }
             // toDedup is a dupe but has less work done on it
             td->start = 0;
         }
