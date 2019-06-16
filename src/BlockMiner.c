@@ -143,7 +143,7 @@ static inline enum ThreadState getState(BlockMiner_t* ctx, Worker_t* w) {
     return w->workerState;
 }
 
-#define HASHES_PER_CYCLE 20000
+#define HASHES_PER_CYCLE 2000
 
 typedef struct {
     PacketCrypt_BlockHeader_t hdr;
