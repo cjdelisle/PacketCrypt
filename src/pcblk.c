@@ -5,6 +5,7 @@
 #include "PoolProto.h"
 #include "FileUtil.h"
 #include "Conf.h"
+#include "Difficulty.h"
 
 #include "sodium/crypto_hash_sha256.h"
 #include "sodium/core.h"
@@ -200,11 +201,14 @@ static void beginMining(Context_t* ctx)
     ctx->coinbaseCommit->annLeastWorkTarget = 0xffffffff;
     int res = BlockMiner_lockForMining(ctx->bm, &stats, ctx->coinbaseCommit,
         ctx->currentWork->height, ctx->currentWork->shareTarget);
+    uint64_t hrm = Difficulty_getHashRateMultiplier(
+        ctx->coinbaseCommit->annLeastWorkTarget, stats.finalCount);
     DEBUGF("BlockMiner_lockForMining(): ng: %ld ne: %ld nne: %ld "
-        "og: %ld oe: %ld or: %ld finalCount: %ld minTarget: %08x\n",
+        "og: %ld oe: %ld or: %ld finalCount: %ld minTarget: %08x hashrateMultiplier: %ld\n",
         (long)stats.newGood, (long)stats.newExpired, (long)stats.newNotEnough,
         (long)stats.oldGood, (long)stats.oldExpired, (long)stats.oldReplaced,
-        (long)stats.finalCount, ctx->coinbaseCommit->annLeastWorkTarget);
+        (long)stats.finalCount, ctx->coinbaseCommit->annLeastWorkTarget,
+        (long)hrm);
 
 
     // Even if it failed, we can safely begin allocating announcements again
@@ -372,6 +376,10 @@ int main(int argc, char** argv) {
             sleep(1);
             continue;
         }
+
+        // Stop mining ASAP, it will take some time before the miner threads realize they
+        // need to stop so while they're doing that, we can be loading anns in.
+        BlockMiner_stop(ctx->bm);
 
         // Load whatever anns we can use in the next mining cycle
         // If mining == false then we're not yet locked, quickly grab up

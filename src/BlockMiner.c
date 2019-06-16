@@ -529,15 +529,11 @@ int BlockMiner_lockForMining(
     uint32_t nextBlockHeight,
     uint32_t nextBlockTarget)
 {
-    fprintf(stderr, "Lock for mining, ");
-
     if (bm->state == State_MINING) {
         assert(!BlockMiner_stop(bm));
     }
 
     prepareNextBlock(bm, nextBlockHeight);
-
-    fprintf(stderr, "%d new announcements\n", (int)bm->nextAewLen);
 
     // At this point, the aews are sorted by work done, most to least.
     // we must scratch the announcement entries which are below the minimum
