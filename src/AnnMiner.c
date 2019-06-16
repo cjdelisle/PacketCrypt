@@ -238,6 +238,8 @@ static void getNextJob(Worker_t* w) {
             fprintf(stderr, "AnnMiner: Updating hard_nonce\n");
             makeNextJob(&w->activeJob->hah, next, w->activeJob->hah.annHdr.hardNonce + 1);
         }
+        pthread_rwlock_unlock(&next->jobLock);
+        pthread_rwlock_rdlock(&next->jobLock);
     }
 
     pthread_rwlock_unlock(&w->activeJob->jobLock);
