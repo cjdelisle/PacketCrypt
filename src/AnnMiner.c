@@ -42,6 +42,7 @@ typedef struct {
     HeaderAndHash_t hah;
 
     pthread_rwlock_t jobLock;
+    pthread_mutex_t updateLock;
 } Job_t;
 
 typedef struct Worker_s Worker_t;
@@ -109,6 +110,7 @@ static AnnMiner_t* allocCtx(int numWorkers)
 
     for (uint32_t i = 0; i < (sizeof(ctx->jobs) / sizeof(ctx->jobs[0])); i++) {
         pthread_rwlock_init(&ctx->jobs[i].jobLock, NULL);
+        pthread_mutex_init(&ctx->jobs[i].updateLock, NULL);
     }
 
     ctx->numWorkers = numWorkers;
@@ -123,6 +125,7 @@ static void freeCtx(AnnMiner_t* ctx)
 {
     for (uint32_t i = 0; i < (sizeof(ctx->jobs) / sizeof(ctx->jobs[0])); i++) {
         pthread_rwlock_destroy(&ctx->jobs[i].jobLock);
+        pthread_mutex_destroy(&ctx->jobs[i].updateLock);
     }
     assert(!pthread_cond_destroy(&ctx->cond));
     assert(!pthread_mutex_destroy(&ctx->lock));
@@ -229,20 +232,22 @@ static void makeNextJob(HeaderAndHash_t* hah, Job_t* j, uint32_t nextHardNonce) 
 
 static void getNextJob(Worker_t* w) {
     Job_t* next = &w->ctx->jobs[(w->activeJob == &w->ctx->jobs[1])];
-    pthread_rwlock_rdlock(&next->jobLock);
+    assert(!pthread_mutex_lock(&next->updateLock));
+    assert(!pthread_rwlock_rdlock(&next->jobLock));
 
     if (next->hah.annHdr.hardNonce <= w->activeJob->hah.annHdr.hardNonce) {
-        pthread_rwlock_unlock(&next->jobLock);
-        pthread_rwlock_wrlock(&next->jobLock);
-        if (next->hah.annHdr.hardNonce <= w->activeJob->hah.annHdr.hardNonce) {
-            fprintf(stderr, "AnnMiner: Updating hard_nonce\n");
-            makeNextJob(&w->activeJob->hah, next, w->activeJob->hah.annHdr.hardNonce + 1);
-        }
-        pthread_rwlock_unlock(&next->jobLock);
-        pthread_rwlock_rdlock(&next->jobLock);
+        // We don't need double-checked locking here because we're holding
+        // the updateLock so nobody else can be in here at the same time.
+        assert(!pthread_rwlock_unlock(&next->jobLock));
+        assert(!pthread_rwlock_wrlock(&next->jobLock));
+        fprintf(stderr, "AnnMiner: Updating hard_nonce\n");
+        makeNextJob(&w->activeJob->hah, next, w->activeJob->hah.annHdr.hardNonce + 1);
+        assert(!pthread_rwlock_unlock(&next->jobLock));
+        assert(!pthread_rwlock_rdlock(&next->jobLock));
     }
 
-    pthread_rwlock_unlock(&w->activeJob->jobLock);
+    assert(!pthread_rwlock_unlock(&w->activeJob->jobLock));
+    assert(!pthread_mutex_unlock(&next->updateLock));
     w->activeJob = next;
     w->softNonce = w->softNonceMin;
 }
@@ -251,12 +256,17 @@ static bool checkStop(Worker_t* worker) {
     pthread_mutex_lock(&worker->ctx->lock);
     for (;;) {
         enum ThreadState rts = getRequestedState(worker);
-        setState(worker, rts);
         if (rts != ThreadState_STOPPED) {
+            setState(worker, rts);
             pthread_mutex_unlock(&worker->ctx->lock);
-            return rts == ThreadState_SHUTDOWN;
+            if (rts == ThreadState_SHUTDOWN) {
+                pthread_rwlock_unlock(&worker->activeJob->jobLock);
+                return true;
+            }
+            return false;
         }
         pthread_rwlock_unlock(&worker->activeJob->jobLock);
+        setState(worker, rts);
         pthread_cond_wait(&worker->ctx->cond, &worker->ctx->lock);
         pthread_rwlock_rdlock(&worker->activeJob->jobLock);
     }
