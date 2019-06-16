@@ -236,8 +236,19 @@ const httpPost = module.exports.httpPost = (
     headers /*:{ [string]:string }*/,
     cb /*:(IncomingMessage)=>void*/
 ) => {
-    // $FlowFixMe 3 argument request is a thing
-    return Http.request(url, {
+    let hostname;
+    let path;
+    url.replace(/http:\/\/([^\/]+)(\/.*)$/, (all, h, p) => {
+        hostname = h;
+        path = p;
+        return '';
+    });
+    if (hostname === undefined) {
+        throw new Error("Could not understand [" + url + "] as a url");
+    }
+    return Http.request({
+        host: hostname,
+        path: path,
         method: 'POST',
         headers: headers
     }, cb);
