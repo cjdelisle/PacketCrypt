@@ -7,6 +7,8 @@
 #include "WorkQueue.h"
 #include "FileUtil.h"
 
+#include "sodium/core.h"
+
 #include <stdio.h>
 #include <sys/types.h>
 #include <dirent.h>
@@ -609,6 +611,7 @@ void sigHandler(int sig) {
 }
 
 int main(int argc, const char** argv) {
+    assert(!sodium_init());
     int threads = 1;
     int arg = 1;
 

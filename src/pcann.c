@@ -8,6 +8,8 @@
 #include "packetcrypt/PacketCrypt.h"
 #include "packetcrypt/AnnMiner.h"
 
+#include "sodium/core.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -62,7 +64,7 @@ static void addFile(struct Files* files, const char* filename) {
 }
 
 int main(int argc, const char** argv) {
-
+    assert(!sodium_init());
     if (argc < 2) { return usage(); }
 
     struct Files files = { .count = 0 };

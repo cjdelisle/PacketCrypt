@@ -8,6 +8,8 @@
 #include "WorkQueue.h"
 #include "FileUtil.h"
 
+#include "sodium/core.h"
+
 #include <stdio.h>
 #include <stdbool.h>
 #include <signal.h>
@@ -612,6 +614,7 @@ void destroyMain(MainThread_t* ctx) {
 }
 
 int main(int argc, const char** argv) {
+    assert(!sodium_init());
     if (argc < 5) { return usage(); }
 
     int threads = 1;

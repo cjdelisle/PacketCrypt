@@ -7,6 +7,7 @@
 #include "Conf.h"
 
 #include "sodium/crypto_hash_sha256.h"
+#include "sodium/core.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -257,6 +258,7 @@ static void sighup(int signal) {
 }
 
 int main(int argc, char** argv) {
+    assert(!sodium_init());
     long long maxAnns = 1024*1024;
     int threads = 1;
     int64_t minerId = 0;

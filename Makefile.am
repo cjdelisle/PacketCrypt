@@ -65,7 +65,7 @@ bin_PROGRAMS += bin/pcann
 bin_pcann_SOURCES = src/pcann.c \
                                 include/AnnMiner.h \
                                 include/PacketCrypt.h
-bin_pcann_CFLAGS = -Iinclude
+bin_pcann_CFLAGS = -Iinclude ${sodium_CFLAGS}
 bin_pcann_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_CFLAGS} ${CRYPTO_LIBS}
 
 if ENABLE_DIFFTEST
@@ -98,7 +98,7 @@ bin_checkanns_SOURCES = Makefile \
     src/FilePath.h \
     src/WorkQueue.c src/WorkQueue.h \
     src/FileUtil.c src/FileUtil.h
-bin_checkanns_CFLAGS = -Iinclude
+bin_checkanns_CFLAGS = -Iinclude ${sodium_CFLAGS}
 bin_checkanns_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_CFLAGS} ${CRYPTO_LIBS}
 
 bin_PROGRAMS += bin/checkshares
@@ -113,5 +113,5 @@ bin_checkshares_SOURCES = Makefile \
     src/Hash.h \
     src/WorkQueue.c src/WorkQueue.h \
     src/FileUtil.c src/FileUtil.h
-bin_checkshares_CFLAGS = -Iinclude
+bin_checkshares_CFLAGS = -Iinclude ${sodium_CFLAGS}
 bin_checkshares_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_CFLAGS} ${CRYPTO_LIBS}
