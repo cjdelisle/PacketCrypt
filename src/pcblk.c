@@ -55,20 +55,20 @@ typedef struct Context_s {
 } Context_t;
 
 
-static void loadFile(Context_t* ctx, const char* fileName) {
-    if (ctx->availableAnns < 0) { return; }
+static int loadFile(Context_t* ctx, const char* fileName) {
+    if (ctx->availableAnns < 0) { return 0; }
     strncpy(ctx->filepath.name, fileName, FilePath_NAME_SZ);
 
     int fileno = open(ctx->filepath.path, O_RDONLY);
     if (fileno < 0) {
         DEBUGF("Failed to open [%s] errno=[%s]\n", ctx->filepath.path, strerror(errno));
-        return;
+        return 0;
     }
     struct stat st;
     if (fstat(fileno, &st)) {
         DEBUGF("Failed to fstat [%s] errno=[%s]\n", ctx->filepath.path, strerror(errno));
         close(fileno);
-        return;
+        return 0;
     }
     uint64_t numAnns = st.st_size / sizeof(PacketCrypt_Announce_t);
     if ((off_t)(numAnns * sizeof(PacketCrypt_Announce_t)) != st.st_size) {
@@ -78,21 +78,21 @@ static void loadFile(Context_t* ctx, const char* fileName) {
         if (unlink(ctx->filepath.path)) {
             // Delete the file so that we don't continuously cycle around trying to access it.
             DEBUGF("Failed to delete [%s] errno=[%s]\n", ctx->filepath.path, strerror(errno));
-            return;
+            return 0;
         }
-        return;
+        return 0;
     }
     PacketCrypt_Announce_t* anns = malloc(st.st_size);
     if (!anns) {
         DEBUGF("Unable to allocate memory for [%s], will be skipped\n", ctx->filepath.path);
         close(fileno);
-        return;
+        return 0;
     }
     if (st.st_size != read(fileno, anns, st.st_size)) {
         DEBUGF("Failed to read [%s] errno=[%s]\n", ctx->filepath.path, strerror(errno));
         close(fileno);
         free(anns);
-        return;
+        return 0;
     }
 
     close(fileno);
@@ -102,11 +102,11 @@ static void loadFile(Context_t* ctx, const char* fileName) {
         // better to lose the announcements than to fill the miner to the moon with garbage.
         DEBUGF("Failed to delete [%s] errno=[%s]\n", ctx->filepath.path, strerror(errno));
         free(anns);
-        return;
+        return 0;
     }
 
-    DEBUGF("Loading [%llu] announcements from [%s]\n",
-        (unsigned long long)numAnns, ctx->filepath.path);
+    // DEBUGF("Loading [%llu] announcements from [%s]\n",
+    //     (unsigned long long)numAnns, ctx->filepath.path);
     int ret = BlockMiner_addAnns(ctx->bm, anns, numAnns, true);
     if (ret) {
         if (ret == BlockMiner_addAnns_LOCKED) {
@@ -117,6 +117,7 @@ static void loadFile(Context_t* ctx, const char* fileName) {
     } else {
         ctx->availableAnns -= numAnns;
     }
+    return numAnns;
 }
 
 static void resetAvailableAnns(Context_t* ctx) {
@@ -384,6 +385,8 @@ int main(int argc, char** argv) {
         // all of the announcements which are usable in the block and then lock and mine.
         // If mining == true then we're currently mining but we can prepare for the next
         // block by scooping up any announcements which will be usable by that block.
+        int files = 0;
+        int announcements = 0;
         for (;;) {
             errno = 0;
             struct dirent* file = readdir(wrkdir);
@@ -404,7 +407,11 @@ int main(int argc, char** argv) {
             } else if (fileNum >= (ctx->currentWork->height - 2 - (!ctx->mining))) {
                 continue;
             }
-            loadFile(ctx, file->d_name);
+            announcements += loadFile(ctx, file->d_name);
+            files++;
+        }
+        if (announcements > 0) {
+            DEBUGF("Loaded [%d] announcements from [%d] files\n", announcements, files);
         }
 
         if (!ctx->mining) { beginMining(ctx); }
