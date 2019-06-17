@@ -231,23 +231,23 @@ static void makeNextJob(HeaderAndHash_t* hah, Job_t* j, uint32_t nextHardNonce) 
 }
 
 static void getNextJob(Worker_t* w) {
+    HeaderAndHash_t hah;
+    Buf_OBJCPY(&hah, &w->activeJob->hah);
     Job_t* next = &w->ctx->jobs[(w->activeJob == &w->ctx->jobs[1])];
-    assert(!pthread_mutex_lock(&next->updateLock));
-    assert(!pthread_rwlock_rdlock(&next->jobLock));
+    assert(!pthread_rwlock_unlock(&w->activeJob->jobLock));
 
-    if (next->hah.annHdr.hardNonce <= w->activeJob->hah.annHdr.hardNonce) {
+    assert(!pthread_mutex_lock(&next->updateLock));
+    if (next->hah.annHdr.hardNonce != hah.annHdr.hardNonce + 1) {
         // We don't need double-checked locking here because we're holding
         // the updateLock so nobody else can be in here at the same time.
-        assert(!pthread_rwlock_unlock(&next->jobLock));
         assert(!pthread_rwlock_wrlock(&next->jobLock));
         fprintf(stderr, "AnnMiner: Updating hard_nonce\n");
-        makeNextJob(&w->activeJob->hah, next, w->activeJob->hah.annHdr.hardNonce + 1);
+        makeNextJob(&hah, next, hah.annHdr.hardNonce + 1);
         assert(!pthread_rwlock_unlock(&next->jobLock));
-        assert(!pthread_rwlock_rdlock(&next->jobLock));
     }
-
-    assert(!pthread_rwlock_unlock(&w->activeJob->jobLock));
     assert(!pthread_mutex_unlock(&next->updateLock));
+
+    assert(!pthread_rwlock_rdlock(&next->jobLock));
     w->activeJob = next;
     w->softNonce = w->softNonceMin;
 }
