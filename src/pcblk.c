@@ -379,7 +379,7 @@ int main(int argc, char** argv) {
 
         // Stop mining ASAP, it will take some time before the miner threads realize they
         // need to stop so while they're doing that, we can be loading anns in.
-        BlockMiner_stop(ctx->bm);
+        if (!ctx->mining) { BlockMiner_stop(ctx->bm); }
 
         // Load whatever anns we can use in the next mining cycle
         // If mining == false then we're not yet locked, quickly grab up
