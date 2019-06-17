@@ -40,7 +40,7 @@ const getAnnFileParentNum = (filePath, _cb) => {
         const buf = Buffer.concat(data);
         if (buf.length < 16) { return void cb(new Error("Could not read file [" + filePath + "]")); }
         const blockNo = buf.readUInt32LE(12);
-        console.log("Got announcements with parent block number [" + blockNo + "]");
+        //console.log("Got announcements with parent block number [" + blockNo + "]");
         cb(undefined, blockNo);
     });
     stream.on('error', (err) => {
@@ -186,7 +186,7 @@ const onNewWork = (ctx /*:Context_t*/, work, done) => {
             }
         }));
     }).nThen((w) => {
-        console.log("Writing work.bin");
+        //console.log("Writing work.bin");
         Fs.writeFile(ctx.config.dir + '/wrkdir/_work.bin', work.binary, w((err) => {
             if (err) { throw err; }
             Fs.rename(
@@ -334,7 +334,7 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
                 throw err;
             }
             if (ret.length > 0) {
-                console.log("Uploading shares [" + filePath + "]");
+                //console.log("Uploading shares [" + filePath + "]");
                 fileBuf = ret;
             }
         }));

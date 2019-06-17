@@ -362,7 +362,14 @@ module.exports.deleteUselessAnns = (
                         return;
                     }
                     console.log("Error reading file [" + file + "] [" +
-                        ((err) ? err.message : 'no error') + "]");
+                        ((err) ? err.message : 'runt file') + "]");
+                    Fs.stat(file, w((err, st) => {
+                        if (err) { return; }
+                        if (st.size < 16) {
+                            console.log("Deleting [" + file + "] because it's a runt");
+                            rmcb(f, w());
+                        }
+                    }));
                 }));
             }).nThen((w) => {
                 if (!buf) { return; }
