@@ -241,7 +241,6 @@ static void beginMining(Context_t* ctx)
     Buf_OBJCPY(&ctx->currentWork->blkHdr.hashMerkleRoot, &hashbuf.thirtytwos[0]);
 
     res = BlockMiner_start(ctx->bm, &ctx->currentWork->blkHdr);
-    DEBUGF("BlockMiner_start()\n");
     if (res) {
         if (res == BlockMiner_start_NOT_LOCKED) {
             DEBUGF("BlockMiner_start() -> BlockMiner_start_NOT_LOCKED\n");
@@ -257,7 +256,6 @@ static void beginMining(Context_t* ctx)
 
 static bool g_openNewFile = false;
 static void sighup(int signal) {
-    DEBUGF("sighup\n");
     g_openNewFile = true;
 }
 

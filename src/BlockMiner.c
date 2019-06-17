@@ -198,7 +198,6 @@ static void found(MineResult_t* res, PacketCrypt_BlockHeader_t* hdr, Worker_t* w
         }
         free(output);
     }
-    fprintf(stderr, "BlockMiner: share\n");
 
     free(proof);
 }
@@ -329,7 +328,6 @@ static void freeQueue(BlockMiner_t* ctx)
     ctx->nextAew = NULL;
     ctx->nextAewLen = 0;
     ctx->queue = NULL;
-    fprintf(stderr, "Free Queue\n");
 }
 
 static void waitState(BlockMiner_t* ctx, enum ThreadState desiredState) {
