@@ -2,7 +2,6 @@
 const Fs = require('fs');
 const Http = require('http');
 const EventEmitter = require('events').EventEmitter;
-
 const nThen = require('nthen');
 
 /*::
@@ -237,21 +236,26 @@ const httpPost = module.exports.httpPost = (
     cb /*:(IncomingMessage)=>void*/
 ) => {
     let hostname;
+    let host;
     let path;
-    url.replace(/http:\/\/([^\/]+)(\/.*)$/, (all, h, p) => {
-        hostname = h;
-        path = p;
-        return '';
-    });
-    if (hostname === undefined) {
-        throw new Error("Could not understand [" + url + "] as a url");
+    let parsedUrl = require('url').parse(url);
+    hostname = parsedUrl.hostname
+    host = parsedUrl.host
+    path = parsedUrl.path
+
+    if (hostname == 'localhost') {
+        return Http.request(url, {method: 'POST', headers: headers}, cb);
     }
-    return Http.request({
-        host: hostname,
-        path: path,
-        method: 'POST',
-        headers: headers
-    }, cb);
+
+    else {
+        return Http.request({
+            host: host,
+            path: path,
+            method: 'POST',
+            headers: headers
+        }, cb);
+    }
+
 };
 
 const createMutex = module.exports.createMutex = () /*:Util_Mutex_t*/ => {
