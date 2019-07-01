@@ -98,11 +98,39 @@ _Static_assert(sizeof(PacketCrypt_BlockHeader_t) == 80, "");
  *    +                                                               +
  * 52 |                                                               |
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * 56 |                                                               |
+ *    +                                                               +
+ * 60 |                                                               |
+ *    +                                                               +
+ * 64 |                                                               |
+ *    +                                                               +
+ * 68 |                                                               |
+ *    +                          signing_key                          +
+ * 72 |                                                               |
+ *    +                                                               +
+ * 76 |                                                               |
+ *    +                                                               +
+ * 80 |                                                               |
+ *    +                                                               +
+ * 84 |                                                               |
+ *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * 88
  *
+ * version: Always zero for now
+ * soft_nonce: Nonce which is not dependent on the content of the announcement, can be changed
+ *     without regenerating dataset.
+ * hard_nonce: Additional nonce, rolling this nonce requires regenerating dataset.
+ * work_bits: Difficulty of announcement in bitcoin nBits format
+ * parent_block_height: The height of the most recent known block,
+ *   it's hash is committed in the announcement hashing process.
+ * content_type: An arbitrary field for informing about the content of the announcement
+ * content_hash: announcement content merkle root, opaque for our purposes
+ * signing_key: is non-zero, the final announcement in the block must be immediately followed by
+ *   an ed25519 signature which is validatable using this pubkey.
  *
  * Announcement:
  *
- * [ Header 0:56 ][ AnnMerkle proof 56:952 ][ Item 4 Prefix 952:1024 ]
+ * [ Header 0:88 ][ AnnMerkle proof 88:1008 ][ Item 4 Prefix 1008:1024 ]
  */
 typedef struct {
     uint8_t version;
@@ -113,12 +141,14 @@ typedef struct {
 
     uint64_t contentType;
     uint8_t contentHash[32];
+
+    uint8_t signingKey[32];
 } PacketCrypt_AnnounceHdr_t;
-_Static_assert(sizeof(PacketCrypt_AnnounceHdr_t) == 56, "");
+_Static_assert(sizeof(PacketCrypt_AnnounceHdr_t) == 88, "");
 
 typedef struct {
     PacketCrypt_AnnounceHdr_t hdr;
-    uint64_t proof[121];
+    uint64_t proof[117];
 } PacketCrypt_Announce_t;
 _Static_assert(sizeof(PacketCrypt_Announce_t) == 1024, "");
 
