@@ -78,9 +78,9 @@ _Static_assert(sizeof(PacketCrypt_BlockHeader_t) == 80, "");
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  * 12 |                     parent_block_height                       |
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * 16 |                                                               |
- *    +                         content_type                          +
- * 20 |                                                               |
+ * 16 |                         content_type                          |
+ *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * 20 |                        content_length                         |
  *    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  * 24 |                                                               |
  *    +                                                               +
@@ -127,10 +127,11 @@ _Static_assert(sizeof(PacketCrypt_BlockHeader_t) == 80, "");
  * content_hash: announcement content merkle root, opaque for our purposes
  * signing_key: is non-zero, the final announcement in the block must be immediately followed by
  *   an ed25519 signature which is validatable using this pubkey.
+ * content_length: the size of the content
  *
  * Announcement:
  *
- * [ Header 0:88 ][ AnnMerkle proof 88:1008 ][ Item 4 Prefix 1008:1024 ]
+ * [ Header 0:88 ][ Item 4 Prefix 88:128 ][ AnnMerkle proof 128:1024 ]
  */
 typedef struct {
     uint8_t version;
@@ -139,7 +140,8 @@ typedef struct {
     uint32_t workBits;
     uint32_t parentBlockHeight;
 
-    uint64_t contentType;
+    uint32_t contentType;
+    uint32_t contentLength;
     uint8_t contentHash[32];
 
     uint8_t signingKey[32];
@@ -154,8 +156,8 @@ _Static_assert(sizeof(PacketCrypt_Announce_t) == 1024, "");
 
 typedef struct {
     PacketCrypt_BlockHeader_t blockHeader;
+    uint32_t _pad;
     uint32_t nonce2;
-    uint32_t proofLen;
     PacketCrypt_Announce_t announcements[PacketCrypt_NUM_ANNS];
     uint8_t proof[8]; // this is a flexible length buffer
 } PacketCrypt_HeaderAndProof_t;

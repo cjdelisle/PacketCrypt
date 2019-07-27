@@ -11,7 +11,11 @@ const Util = require('./Util.js');
 //// work -> we are connected to the pool, the work has changed
 
 /*::
-import type { Protocol_PcConfigJson_t, Protocol_Work_t } from './Protocol.js'
+import type {
+    Protocol_PcConfigJson_t,
+    Protocol_Work_t,
+    Protocol_RawBlockTemplate_t
+} from './Protocol.js'
 export type PoolClient_t = {
     _ee: EventEmitter,
     url: string,
@@ -25,6 +29,8 @@ export type PoolClient_t = {
     onDisconnected: (f:()=>void)=>void,
     getMasterConf: ((Protocol_PcConfigJson_t)=>void)=>void,
     getWorkByNum: (number, (Protocol_Work_t)=>void)=>void,
+    getAnn: (Buffer, cb:(?Error, ?Buffer)=>void)=>void,
+    getBlockTemplate: (cb:(?Error, ?Protocol_RawBlockTemplate_t)=>void)=>void
 };
 */
 
@@ -32,6 +38,9 @@ const debug = (msg) => { console.error("PoolClient: " + msg); };
 
 const workUrl2 = (pool /*:PoolClient_t*/, height /*:number*/) => {
     return pool.config.masterUrl + '/work_' + height + '.bin';
+};
+const btUrl2 = (pool /*:PoolClient_t*/, height /*:number*/) => {
+    return pool.config.masterUrl + '/bt_' + height + '.bin';
 };
 
 const DISCONNECTED_MS = 15 * 1000;
@@ -68,19 +77,28 @@ const debugGotWork = (work) => {
 };
 
 const connectionChecker = (pool, first) => {
-    //console.log("Pool check connection");
+    console.log(String(new Date()) + " Pool check connection");
     const to = setTimeout(() => {
         if (first) { return; }
         pool.connected = false;
+        console.log(String(new Date()) + " Pool connection lost - this is a bug - please restart");
+        process.exit(333);
         pool._ee.emit('disconnected');
     }, DISCONNECTED_MS);
 
     Util.httpGetStr(pool.url + '/config.json', (err, data) => {
+        console.log(String(new Date()) + ' http req returned');
         if (!data) {
             debug("Failed to get config.json [" + JSON.stringify(err || null) + "] retrying");
             return true;
         }
         const config /*:Protocol_PcConfigJson_t*/ = JSON.parse(data);
+        const v = typeof(config.version) === 'undefined' ? undefined : config.version;
+        if (v !== Protocol.VERSION) {
+            console.error("Pool version is [" + String(v) + "] and this miner requires version [" +
+                Protocol.VERSION + "] please upgrade");
+            process.exit(100);
+        }
         if (!first && JSON.stringify(pool.config) !== JSON.stringify(config)) {
             delete pool.workByNum[config.currentHeight];
             pool.getWorkByNum(config.currentHeight, (work) => {
@@ -116,22 +134,80 @@ const connectionChecker = (pool, first) => {
     });
 };
 
+const getAnn = (pool, masterConf, hash /*:Buffer*/, cb) => {
+    const node = hash.readUInt32LE(0) % masterConf.downloadAnnUrls.length;
+    const url = masterConf.downloadAnnUrls[node] + '/ann/ann_' + hash.toString('hex') + '.bin';
+    debug("Getting Announcement [" + url + "]");
+    Util.httpGetBin(url, (err, res) => {
+        if (!res) {
+            debug("Failed to get [" + url + "] [" + JSON.stringify(err || null) + "]");
+            if ((err /*:any*/).statusCode === 404) {
+                return void cb(new Error("not found"));
+            }
+            return true;
+        }
+        cb(undefined, res);
+    });
+};
+
 module.exports.create = (poolUrl /*:string*/) /*:PoolClient_t*/ => {
     const ee = new EventEmitter();
     const pool = {};
     pool._ee = ee;
     pool.url = poolUrl;
     pool.work = undefined;
+    pool.bt = undefined;
     pool.workByNum = {};
     pool.connected = false;
     pool.reconnects = 0;
     pool.reconnectTo = undefined;
 
-    const onConfig = [];
+    const getWork = [];
+    pool.getWork = (f /*:(Protocol_Work_t)=>void*/) => {
+        if (pool.work) { return void f(pool.work); }
+        getWork.push(f);
+    };
+    ee.on('work', (w) => {
+        getWork.forEach((f) => (f(w)));
+        getWork.length = 0;
+    });
+
+    const getMasterConf = [];
     pool.getMasterConf = (f /*:(Protocol_PcConfigJson_t)=>void*/) => {
         if (pool.config) { return void setTimeout(() => f(pool.config)); }
-        onConfig.push(f);
+        getMasterConf.push(f);
     };
+    pool.getWork((w) => {
+        getMasterConf.forEach((f) => (f(pool.config)));
+        getMasterConf.length = 0;
+    });
+
+    pool.getBlockTemplate = (f /*:(?Error, ?Protocol_RawBlockTemplate_t)=>void*/) => {
+        pool.getWork((w) => {
+            if (pool.bt && pool.bt.height === w.height) {
+                return void setTimeout(() => {
+                    f(undefined, pool.bt);
+                });
+            }
+            const url = btUrl2(pool, w.height);
+            //console.log("Getting: " + url);
+            Util.httpGetBin(url, (err, ret) => {
+                if (!ret) {
+                    debug("Error getting [" + url + "] [" + JSON.stringify(err || null) + "], retrying");
+                    return true;
+                }
+                try {
+                    pool.bt = Protocol.blockTemplateDecode(ret);
+                } catch (e) {
+                    console.log("Error decoding ann at [" + url + "] [" + e + "]");
+                    f(e);
+                    return;
+                }
+                f(undefined, pool.bt);
+            });
+        });
+    };
+
     pool.getWorkByNum = (num /*:number*/, f /*:(Protocol_Work_t)=>void*/) => {
         if (pool.workByNum[num]) {
             const work = pool.workByNum[num];
@@ -153,11 +229,9 @@ module.exports.create = (poolUrl /*:string*/) /*:PoolClient_t*/ => {
     };
     pool.onConnected = (f /*:()=>void*/) => { ee.on('connected', f); };
     pool.onDisconnected = (f /*:()=>void*/) => { ee.on('disconnected', f); };
-
-    ee.on('work', Util.once(() => {
-        onConfig.forEach((f) => (f(pool.config)));
-        onConfig.splice(0, Infinity);
-    }));
+    pool.getAnn = (hash /*:Buffer*/, cb /*:(?Error, ?Buffer)=>void*/) => {
+        pool.getMasterConf((mc) => { getAnn(pool, mc, hash, cb); });
+    };
 
     connectionChecker(pool, true);
     return pool;

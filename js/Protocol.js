@@ -8,8 +8,7 @@ export type Protocol_PcConfigJson_t = {
     submitAnnUrls: Array<string>,
     downloadAnnUrls: Array<string>,
     submitBlockUrls: Array<string>,
-    annMinWork: number,
-    shareMinWork: number
+    version: number,
 };
 
 export type Protocol_RawBlockTemplate_t = {
@@ -19,6 +18,7 @@ export type Protocol_RawBlockTemplate_t = {
     merklebranch: Array<string>,
     transactions: Array<string>
 };
+
 export type Protocol_Work_t = {
     height: number,
     coinbase_no_witness: Buffer,
@@ -26,11 +26,13 @@ export type Protocol_Work_t = {
     annTarget: number,
     header: Buffer,
     lastHash: Buffer,
-    contentHash: Buffer,
+    signingKey: Buffer,
     proof: Array<Buffer>,
     binary: Buffer,
 };
 */
+
+module.exports.VERSION = 1;
 
 const bufferFromInt = (i) => {
     const b = Buffer.alloc(4);
@@ -46,7 +48,7 @@ const workEncode = module.exports.workEncode = (work /*:Protocol_Work_t*/) /*:Bu
     const merkles = Buffer.concat(work.proof);
     return Buffer.concat([
         work.header,
-        work.contentHash,
+        work.signingKey,
         shareTarget,
         annTarget,
         height,
@@ -59,7 +61,7 @@ const workEncode = module.exports.workEncode = (work /*:Protocol_Work_t*/) /*:Bu
 // 80 + 32 + 4 + 4 + 4 + 1024 + 1024
 module.exports.workFromRawBlockTemplate = (
     x /*:Protocol_RawBlockTemplate_t*/,
-    contentHash /*:Buffer*/,
+    signingKey /*:Buffer*/,
     shareTarget /*:number*/,
     annTarget /*:number*/
 ) /*:Protocol_Work_t*/ => {
@@ -70,7 +72,7 @@ module.exports.workFromRawBlockTemplate = (
         shareTarget: shareTarget,
         annTarget: annTarget,
         header: header,
-        contentHash: contentHash,
+        signingKey: signingKey,
         lastHash: header.slice(4, 4+32),
         proof: x.merklebranch.map(Util.bufFromHex),
         binary: Buffer.alloc(0),
@@ -82,7 +84,7 @@ module.exports.workFromRawBlockTemplate = (
 const workDecode = module.exports.workDecode = (work /*:Buffer*/) /*:Protocol_Work_t*/ => {
     let i = 0;
     const header = work.slice(i, i += 80);
-    const contentHash = work.slice(i, i += 32);
+    const signingKey = work.slice(i, i += 32);
     const shareTarget = work.readInt32LE(i); i += 4;
     const annTarget = work.readInt32LE(i); i += 4;
     const height = work.readInt32LE(i); i += 4;
@@ -95,7 +97,7 @@ const workDecode = module.exports.workDecode = (work /*:Buffer*/) /*:Protocol_Wo
     }
     return Object.freeze({
         header: header,
-        contentHash: contentHash,
+        signingKey: signingKey,
         shareTarget: shareTarget,
         annTarget: annTarget,
         height: height,
@@ -106,11 +108,32 @@ const workDecode = module.exports.workDecode = (work /*:Buffer*/) /*:Protocol_Wo
     });
 };
 
+const BLOCK_TEMPLATE_VERSION = module.exports.BLOCK_TEMPLATE_VERSION = 1;
+
 module.exports.blockTemplateEncode = (rbt /*:Protocol_RawBlockTemplate_t*/) => {
-    const out = rbt.transactions.map(Util.bufFromHex);
-    out.unshift(Util.mkVarInt(rbt.transactions.length));
-    out.unshift(Util.bufFromHex(rbt.header));
-    return Buffer.concat(out);
+    return Util.joinVarInt([
+        Util.mkVarInt(BLOCK_TEMPLATE_VERSION),
+        Util.mkVarInt(rbt.height),
+        Util.bufFromHex(rbt.header),
+        Util.bufFromHex(rbt.coinbase_no_witness),
+        Util.joinVarInt(rbt.merklebranch.map(Util.bufFromHex)),
+        Util.joinVarInt(rbt.transactions.map(Util.bufFromHex))
+    ]);
+};
+
+module.exports.blockTemplateDecode = (buf /*:Buffer*/) /*:Protocol_RawBlockTemplate_t*/ => {
+    const bufs = Util.splitVarInt(buf);
+    const version = Util.parseVarInt(bufs[0])[0];
+    if (version !== BLOCK_TEMPLATE_VERSION) {
+        throw new Error("unexpected version [" + String(version) + "]");
+    }
+    return {
+        height: Util.parseVarInt(bufs[1])[0],
+        header: bufs[2].toString('hex'),
+        coinbase_no_witness: bufs[3].toString('hex'),
+        merklebranch: Util.splitVarInt(bufs[4]).map((x) => (x.toString('hex'))),
+        transactions: Util.splitVarInt(bufs[5]).map((x) => (x.toString('hex')))
+    };
 };
 
 /*
@@ -138,17 +161,23 @@ export type Protocol_AnnPost_t = {
     hashNum: number,
     hashMod: number,
     _pad?: number,
-    contentHash: Buffer,
+    signingKey: Buffer,
     parentBlockHash: Buffer,
     minWork: number,
     mostRecentBlock: number,
     payTo: string
 };
+
+
+// Align with checkanns.c processAnns()
 export type Protocol_AnnResult_t = {
     accepted: number,
-    duplicates: number,
-    invalid: number,
-    payTo: string
+    dup: number,
+    inval: number,
+    badHash: number,
+    runt: number,
+    internalErr: number,
+    payTo: string,
 };
 */
 module.exports.annPostEncode = (post /*:Protocol_AnnPost_t*/) => {
@@ -158,23 +187,13 @@ module.exports.annPostEncode = (post /*:Protocol_AnnPost_t*/) => {
     out[i++] = post.hashNum;
     out[i++] = post.hashMod;
     if (post._pad) { out.writeUInt16LE(post._pad, i); } i += 2;
-    post.contentHash.copy(out, i, 0, 32); i += 32;
+    post.signingKey.copy(out, i, 0, 32); i += 32;
     post.parentBlockHash.copy(out, i, 0, 32); i += 32;
     out.writeUInt32LE(post.minWork, i); i += 4;
     out.writeUInt32LE(post.mostRecentBlock, i); i += 4;
     Buffer.from(post.payTo, 'utf8').copy(out, i);
     return out;
 };
-
-module.exports.annResultDecode = (res /*:Buffer*/) /*:Protocol_AnnResult_t*/ => {
-    return {
-        accepted: res.readUInt32LE(0),
-        duplicates: res.readUInt32LE(4),
-        invalid: res.readUInt32LE(8),
-        payTo: res.slice(12, res.indexOf(0, 12)).toString('utf8')
-    };
-};
-
 
 /*
 typedef struct ShareHeader_s {

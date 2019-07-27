@@ -97,21 +97,7 @@ bin_checkanns_SOURCES = Makefile \
     src/Time.h \
     src/FilePath.h \
     src/WorkQueue.c src/WorkQueue.h \
-    src/FileUtil.c src/FileUtil.h
+    src/FileUtil.c src/FileUtil.h \
+    src/ContentMerkle.c src/ContentMerkle.h
 bin_checkanns_CFLAGS = -Iinclude ${sodium_CFLAGS}
 bin_checkanns_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_CFLAGS} ${CRYPTO_LIBS}
-
-bin_PROGRAMS += bin/checkshares
-bin_checkshares_SOURCES = Makefile \
-    src/checkshares.c \
-    include/packetcrypt/PacketCrypt.h \
-    include/packetcrypt/BlockMiner.h \
-    include/packetcrypt/Validate.h \
-    src/Buf.h \
-    src/FilePath.h \
-    src/PoolProto.h \
-    src/Hash.h \
-    src/WorkQueue.c src/WorkQueue.h \
-    src/FileUtil.c src/FileUtil.h
-bin_checkshares_CFLAGS = -Iinclude ${sodium_CFLAGS}
-bin_checkshares_LDADD = libpacketcrypt.a ${sodium_LIBS} ${PTHREAD_CFLAGS} ${CRYPTO_LIBS}

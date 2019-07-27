@@ -2,11 +2,16 @@
 const Fs = require('fs');
 const Http = require('http');
 const EventEmitter = require('events').EventEmitter;
+const Crypto = require('crypto');
+const Tweetnacl = require('tweetnacl');
+const Blake2b = require('blake2b');
 
 const nThen = require('nthen');
 
 /*::
 import type { IncomingMessage, ServerResponse } from 'http'
+
+import type { Config_t } from './Config.js'
 
 export type Util_LongPollServer_t = {
     onReq: (IncomingMessage, ServerResponse)=>void,
@@ -81,21 +86,6 @@ const once = module.exports.once = /*::<F:Function>*/(f /*:F*/) /*:F*/ => {
     }/*:any*/) /*:F*/);
 };
 
-module.exports.httpGet = (url /*:string*/, cb /*:(IncomingMessage)=>void*/) => {
-    const again = () => {
-        Http.get(url, (res) => {
-            if (res.statusCode !== 200) {
-                console.error("Http request for [" + url + "] failed [" + res.statusCode +
-                    "] trying again in 1 second");
-                setTimeout(again, 10000);
-                return;
-            }
-            cb(res);
-        });
-    };
-    again();
-};
-
 const MAX_FAST_RECONNECTS = 10;
 const FAST_RECONNECT_MS = 1000;
 const RECONNECT_MS = 10000;
@@ -138,19 +128,42 @@ const httpGet = module.exports.httpGet = (
     url /*:string*/,
     cb /*:(?Error|{statusCode:number}, ?Buffer|string)=>?bool*/
 ) => {
-    return httpGetStream(url, (err, res) => {
-        if (!res) { return cb(err); }
-        const cb1 = once(cb);
-        const data = [];
-        res.on('data', (d) => { data.push(d); });
-        res.on('error', (e) => { cb1(e); });
-        res.on('end', () => {
-            if (typeof(data[0]) === 'string') {
-                return cb1(undefined, data.join(''));
+    let reconnects = 0;
+    const ee = new EventEmitter();
+    const again = () => {
+        const cb1 = once((err, res) => {
+            if (cb(err, res) === true) {
+                const reconnectMs = (reconnects > MAX_FAST_RECONNECTS) ?
+                RECONNECT_MS : FAST_RECONNECT_MS;
+                setTimeout(again, reconnectMs);
+                console.log("Reconnect to [" + url + "] in [" + reconnectMs + "]ms");
+                reconnects++;
             }
-            return cb1(undefined, Buffer.concat(data));
         });
-    });
+        const h = Http.get(url, (res) => {
+            if (res.statusCode !== 200) {
+                if (res.statusCode === 300 && res.headers['x-pc-longpoll'] === 'try-again') {
+                    return void again();
+                }
+                cb1({ statusCode: res.statusCode });
+            } else {
+                const data = [];
+                res.on('data', (d) => { data.push(d); });
+                res.on('error', (e) => { cb1(e); });
+                res.on('end', () => {
+                    if (typeof(data[0]) === 'string') {
+                        return cb1(undefined, data.join(''));
+                    }
+                    return cb1(undefined, Buffer.concat(data));
+                });
+            }
+        });
+        h.on('error', (e) => { cb1(e); });
+        h.on('socket', (s) => {
+            s.on('connect', () => { ee.emit('connection'); });
+        });
+    };
+    again();
 };
 
 const httpGetBin = module.exports.httpGetBin = (
@@ -399,16 +412,75 @@ const mkVarInt = module.exports.mkVarInt = (num /*:number*/) => {
     if (num <= 0xffff) {
         const b = Buffer.alloc(3);
         b[0] = 0xfd;
-        b.writeInt16LE(num, 1);
+        b.writeUInt16LE(num, 1);
         return b;
     }
     if (num <= 0xffffffff) {
         const b = Buffer.alloc(5);
         b[0] = 0xfe;
-        b.writeInt32LE(num, 1);
+        b.writeUInt32LE(num, 1);
         return b;
     }
     throw new Error("64 bit varint unimplemented");
+};
+
+const parseVarInt = module.exports.parseVarInt = (buf /*:Buffer*/) /*:[number,number]*/ => {
+    if (buf.length < 1) { throw new Error("ran out of data"); }
+    if (buf[0] <= 0xfc) { return [ buf[0], 1 ]; }
+    if (buf.length < 3) { throw new Error("ran out of data"); }
+    if (buf[0] <= 0xfd) { return [ buf.readUInt16LE(1), 3 ]; }
+    if (buf.length < 5) { throw new Error("ran out of data"); }
+    if (buf[0] <= 0xfe) { return [ buf.readUInt32LE(1), 5 ]; }
+    throw new Error("64 bit varint is unimplemented");
+};
+
+const splitVarInt = module.exports.splitVarInt = (buf /*:Buffer*/) /*:Array<Buffer>*/ => {
+    const out = [];
+    while (buf.length) {
+        const x = parseVarInt(buf);
+        if (x[1] + x[0] > buf.length) { throw new Error("ran over the buffer"); }
+        out.push(buf.slice(x[1], x[1] + x[0]));
+        buf = buf.slice(x[1] + x[0]);
+    }
+    return out;
+};
+
+const joinVarInt = module.exports.joinVarInt = (bufs /*:Array<Buffer>*/) /*:Buffer*/ => {
+    const all = [];
+    bufs.forEach((b) => {
+        all.push(mkVarInt(b.length));
+        all.push(b);
+    });
+    return Buffer.concat(all);
+};
+
+const getKeypair = module.exports.getKeypair = (rootCfg /*:Config_t*/, height /*:number*/) => {
+    const h = Buffer.alloc(4);
+    h.writeUInt32LE(height, 0);
+    const secBuf = Buffer.from(rootCfg.privateSeed, 'utf8');
+    const s = Crypto.createHash('sha256').update(Buffer.concat([secBuf, h])).digest();
+    return Tweetnacl.sign.keyPair.fromSeed(s);
+};
+
+const Util_log2ceil = (x) => Math.ceil(Math.log2(x));
+const annComputeContentHash = module.exports.annComputeContentHash = (buf /*:Buffer*/) => {
+    if (buf.length < 32) {
+        const out = Buffer.alloc(32);
+        buf.copy(out);
+        return out;
+    }
+    let b;
+    if (buf.length <= 64) {
+        b = Buffer.alloc(64);
+        buf.copy(b);
+    } else {
+        const halfLen = 1 << (Util_log2ceil(buf.length) - 1);
+        b = Buffer.concat([
+            annComputeContentHash(buf.slice(0,halfLen)),
+            annComputeContentHash(buf.slice(halfLen))
+        ]);
+    }
+    return Blake2b(32).update(b).digest(Buffer.alloc(32));
 };
 
 Object.freeze(module.exports);

@@ -3,8 +3,8 @@ const Crypto = require('crypto');
 const Fs = require('fs');
 const Http = require('http');
 const nThen = require('nthen');
-const Blake2b = require('blake2b');
 const WriteFileAtomic = require('write-file-atomic');
+const Tweetnacl = require('tweetnacl');
 
 const Protocol = require('./Protocol.js');
 const Rpc = require('./Rpc.js');
@@ -14,21 +14,23 @@ const Util = require('./Util.js');
 import type { WriteStream } from 'fs'
 import type { IncomingMessage, ServerResponse } from 'http'
 import type { Protocol_RawBlockTemplate_t, Protocol_Work_t, Protocol_PcConfigJson_t } from './Protocol.js'
-import type { Rpc_Client_t, Rpc_Config_t } from './Rpc.js';
+import type { Rpc_Client_t } from './Rpc.js';
 import type { Util_LongPollServer_t } from './Util.js';
 import type { Config_t } from './Config.js';
 
 export type Master_Config_t = {
     root: Config_t,
     port: number,
-    rpc: Rpc_Config_t,
     annMinWork: number,
     shareMinWork: number
 };
 
 type State_t = {
     work: Protocol_Work_t,
-    content: Buffer,
+    keyPair: {
+        secretKey: Uint8Array,
+        publicKey: Uint8Array
+    },
     blockTemplate: Buffer
 };
 
@@ -36,12 +38,10 @@ type Context_t = {
     workdir: string,
     rpcClient: Rpc_Client_t,
     longPollServer: Util_LongPollServer_t,
-    contentByHeight: { [number]:Buffer },
     mut: {
         cfg: Master_Config_t,
-        contentFile: WriteStream,
         longPollId: void|string,
-        state: void|State_t,
+        state: void|State_t
     }
 }
 */
@@ -49,10 +49,6 @@ type Context_t = {
 const headers = (res) => {
     res.setHeader("cache-control", "max-age=1000");
     res.setHeader("content-type", "application/octet-stream");
-};
-
-const getHash = (content) => {
-    return (Blake2b(32).update(content.slice(1)).digest(Buffer.alloc(32))/*:Buffer*/);
 };
 
 const reverseBuffer = (buf) => {
@@ -66,23 +62,22 @@ const onBlock = (ctx /*:Context_t*/) => {
     let newState;
     let done;
     nThen((w) => {
-        // Create some content to go with the new work
-        const content = Crypto.randomBytes(16);
-        content[0] = 15;
         // Make work entry
         ctx.rpcClient.getRawBlockTemplate(w((err, ret) => {
-            if (err || !ret) { throw new Error(JSON.stringify(err)); }
-            let work = Protocol.workFromRawBlockTemplate(ret.result, getHash(content),
+            if (!ret) { throw new Error(err); }
+            const keyPair = Util.getKeypair(ctx.mut.cfg.root, ret.result.height);
+            let work = Protocol.workFromRawBlockTemplate(ret.result, keyPair.publicKey,
                 ctx.mut.cfg.shareMinWork, ctx.mut.cfg.annMinWork);
             newState = Object.freeze({
                 work: work,
-                content: content,
+                keyPair: keyPair,
                 blockTemplate: Protocol.blockTemplateEncode(ret.result)
             });
         }));
     }).nThen((w) => {
         // Check if the work file exists already, if it does then we're going
-        // to load it and override our new state.
+        // to load it and override our new state to avoid miners submitting
+        // shares on the old state and getting rejected.
         const fileName = ctx.workdir + '/work_' + newState.work.height + '.bin';
         const fileNameBT = ctx.workdir + '/bt_' + newState.work.height + '.bin';
         let work;
@@ -103,12 +98,12 @@ const onBlock = (ctx /*:Context_t*/) => {
                 blockTemplate = ret;
             }));
         }).nThen((w) => {
-            if (work && blockTemplate && ctx.contentByHeight[work.height]) {
+            if (work && blockTemplate) {
                 console.log("Using an existing block template for block [" +
                     newState.work.height + "]");
                 state = Object.freeze({
                     work: work,
-                    content: ctx.contentByHeight[work.height],
+                    keyPair: newState.keyPair,
                     blockTemplate: blockTemplate
                 });
             } else {
@@ -142,13 +137,6 @@ const onBlock = (ctx /*:Context_t*/) => {
                 }));
             };
             againBT();
-        }).nThen((w) => {
-            if (ctx.contentByHeight[state.work.height]) { return; }
-            ctx.mut.contentFile.write(JSON.stringify({
-                height: state.work.height,
-                content: state.content.toString('hex')
-            }) + '\n');
-            ctx.contentByHeight[state.work.height] = state.content;
         }).nThen(w());
     }).nThen((w) => {
         ctx.mut.state = state;
@@ -207,8 +195,7 @@ const configReq = (ctx, height, _req, res) => {
         submitAnnUrls: cfg.root.annHandlers.map((x) => (x.url + '/submit')),
         downloadAnnUrls: cfg.root.annHandlers.map((x) => (x.url)),
         submitBlockUrls: cfg.root.blkHandlers.map((x) => (x.url + '/submit')),
-        annMinWork: cfg.annMinWork,
-        shareMinWork: cfg.shareMinWork
+        version: Protocol.VERSION
     };
     res.end(JSON.stringify(out, null, '\t'));
 };
@@ -255,35 +242,15 @@ const submitBlock = (ctx, req, res) => {
         }
         shareFile.share.coinbaseCommit.copy(blockTemplate, offset+2);
 
-        // We need to split apart the pcp in order to re-add the content
-        // to the announcements.
-        const anns = [];
-        for (let i = 8; i < 4096; i += 1024) {
-            const ann = shareFile.share.packetCryptProof.slice(i, i+1024);
-            const num = ann.readInt32LE(12) + 1;
-            const content = ctx.contentByHeight[num];
-            if (!content) {
-                console.log("Content at height [" + num + "] is unknown");
-                res.statusCode = 400;
-                res.end("Could not find ann content at height [" + num + "]");
-                return;
-            }
-            anns.push(ann);
-            anns.push(content);
-        }
-
         const blockStr = Buffer.concat([
             shareFile.share.blockHeader,
-            shareFile.share.packetCryptProof.slice(0,8),
-            Buffer.concat(anns),
-            shareFile.share.packetCryptProof.slice(4096+8),
+            shareFile.share.packetCryptProof,
             blockTemplate
         ]).toString('hex');
         //console.log("(apparently) found a block");
         //console.log(blockStr);
-        // $FlowFixMe // need to add a type for this function
         ctx.rpcClient.submitBlock(blockStr, (err, ret) => {
-            if (!err) { err = ret.result; }
+            if (!err && ret) { err = ret.result; }
             if (err) {
                 const serr = String(err);
                 if (serr.indexOf("rejected: already have block") === 0) {
@@ -318,7 +285,7 @@ const onReq = (ctx /*:Context_t*/, req, res) => {
     }
     let worknum = -1;
     req.url.replace(/.*\/work_([0-9]+)\.bin$/, (_, num) => ((worknum = Number(num)) + ''));
-    if (worknum < 0) {
+    if (worknum < 0 || isNaN(worknum)) {
     } else if (worknum === (state.work.height+1)) {
         headers(res);
         ctx.longPollServer.onReq(req, res);
@@ -336,6 +303,23 @@ const onReq = (ctx /*:Context_t*/, req, res) => {
         });
         return;
     }
+
+    req.url.replace(/.*\/bt_([0-9]+)\.bin$/, (_, num) => ((worknum = Number(num)) + ''));
+    if (worknum < 0 || isNaN(worknum)) {
+    } else {
+        const fileName = ctx.workdir + '/bt_' + worknum + '.bin';
+        Fs.stat(fileName, (err, st) => {
+            if (err || !st.isFile()) {
+                res.statusCode = 404;
+                res.end('');
+            } else {
+                headers(res);
+                Fs.createReadStream(fileName).pipe(res);
+            }
+        });
+        return;
+    }
+
     res.statusCode = 404;
     res.end('');
     return;
@@ -344,52 +328,27 @@ const onReq = (ctx /*:Context_t*/, req, res) => {
 module.exports.create = (cfg /*:Master_Config_t*/) => {
     const workdir = cfg.root.rootWorkdir + '/master_' + cfg.port;
     let ctx;
+    let secret;
     nThen((w) => {
         Util.checkMkdir(workdir, w());
     }).nThen((w) => {
         ctx = Object.freeze({
             workdir: workdir,
-            rpcClient: Rpc.create(cfg.rpc),
+            rpcClient: Rpc.create(cfg.root.rpc),
             longPollServer: Util.longPollServer(workdir),
-            contentByHeight: {},
+            secret: secret,
             mut: {
                 cfg: cfg,
-                contentFile: undefined,
                 longPollId: undefined,
                 state: undefined
             }
         });
-        Fs.readFile(workdir + '/content.ndjson', 'utf8', w((err, ret) => {
-            if (err) {
-                if (err.code === 'ENOENT') { return; }
-                // This will happen during launch so the admin can see it
-                console.error("Failed to read [" + workdir + "/content.ndjson], giving up");
-                process.exit(100);
-            }
-            const lines = ret.split('\n');
-            lines.forEach((l, i) => {
-                if (!l) { return; }
-                try {
-                    const o = JSON.parse(l);
-                    if (typeof(o.height) !== 'number') {
-                    } else if (typeof(o.content) !== 'string' || !/[a-f0-9]*/.test(o.content)) {
-                    } else {
-                        ctx.contentByHeight[o.height] = Buffer.from(o.content, 'hex');
-                        return;
-                    }
-                } catch (_) { }
-                console.error("content.ndjson:" + i + " could not be parsed");
-            });
-        }));
     }).nThen((w) => {
         console.log("This pool master is configured to run with the following workers:");
         cfg.root.annHandlers.forEach((h) => { console.log(" - AnnHandler: " + h.url); });
         cfg.root.blkHandlers.forEach((h) => { console.log(" - BlkHandler: " + h.url); });
         console.log("It will tell miners to send their work to those urls.");
         console.log();
-
-        ctx.mut.contentFile = Fs.createWriteStream(workdir + "/content.ndjson", { flags: "a" });
-        // $FlowFixMe // complaining that contentFile is potentially null
         onBlock(ctx);
     });
     Http.createServer((req, res) => {

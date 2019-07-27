@@ -18,7 +18,7 @@ _Static_assert(sizeof(Announce_Merkle_Branch) == 896, "");
 
 #define Announce_lastAnnPfx_SZ \
     (1024 - sizeof(PacketCrypt_AnnounceHdr_t) - sizeof(Announce_Merkle_Branch))
-_Static_assert(Announce_lastAnnPfx_SZ == 72, "");
+_Static_assert(Announce_lastAnnPfx_SZ == 40, "");
 
 typedef struct {
     PacketCrypt_AnnounceHdr_t hdr;

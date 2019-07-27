@@ -9,6 +9,8 @@
 #include "Work.h"
 #include "Util.h"
 
+#include "sodium/crypto_sign_ed25519.h"
+
 int Validate_checkAnn(
     uint8_t annHashOut[32],
     const PacketCrypt_Announce_t* pcAnn,
@@ -115,6 +117,7 @@ static int checkPcHash(uint64_t indexesOut[PacketCrypt_NUM_ANNS],
 }
 
 int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
+                        uint32_t hapLen,
                         uint32_t blockHeight,
                         uint32_t shareTarget,
                         const PacketCrypt_Coinbase_t* coinbaseCommitment,
@@ -122,6 +125,9 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
                         uint8_t workHashOut[static 32],
                         PacketCrypt_ValidateCtx_t* vctx)
 {
+    if (hapLen < PacketCrypt_HeaderAndProof_SIZEOF(0)) {
+        return Validate_checkBlock_PCP_INVAL;
+    }
     if (coinbaseCommitment->magic != PacketCrypt_Coinbase_MAGIC) {
         return Validate_checkBlock_BAD_COINBASE;
     }
@@ -151,10 +157,12 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
         Hash_COMPRESS32_OBJ(&annHashes[i], ann);
     }
 
+    uint32_t proofLen = hapLen - PacketCrypt_HeaderAndProof_SIZEOF(0);
+
     // hash PacketCryptProof
     Buf32_t pcpHash;
     if (PacketCryptProof_hashProof(
-        &pcpHash, annHashes, coinbaseCommitment->numAnns, annIndexes, hap->proof, hap->proofLen))
+        &pcpHash, annHashes, coinbaseCommitment->numAnns, annIndexes, hap->proof, proofLen))
     {
         return Validate_checkBlock_PCP_INVAL;
     }
@@ -165,4 +173,38 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
     }
 
     return chk;
+}
+
+// Return a string form of the result of Validate_checkBlock()
+// if the result is Validate_checkBlock_OK (0) then NULL is returned.
+// any unrecognized code returns "Validate_checkBlock_UNKNOWN_ERROR"
+char* Validate_checkBlock_outToString(int code) {
+    #define XX(x) case x: return #x;
+    #define XXX(x) case x ## _: { \
+        switch ((code >> 8) & 0xff) { \
+            case 0: return #x "(0)"; \
+            case 1: return #x "(1)"; \
+            case 2: return #x "(2)"; \
+            case 3: return #x "(3)"; \
+            default: return #x "(unknown)"; \
+        } \
+    }
+    switch (code) {
+        case Validate_checkBlock_OK: return NULL;
+        XX(Validate_checkBlock_SHARE_OK)
+
+        XXX(Validate_checkBlock_ANN_INVALID)
+        XXX(Validate_checkBlock_ANN_INSUF_POW)
+        XXX(Validate_checkBlock_ANN_SIG_INVALID)
+        XXX(Validate_checkBlock_ANN_CONTENT_INVALID)
+
+        XX(Validate_checkBlock_PCP_INVAL)
+        XX(Validate_checkBlock_PCP_MISMATCH)
+        XX(Validate_checkBlock_INSUF_POW)
+        XX(Validate_checkBlock_BAD_COINBASE)
+        default:;
+    }
+    #undef XX
+    #undef XXX
+    return "Validate_checkBlock_UNKNOWN_ERROR";
 }

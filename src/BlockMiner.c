@@ -84,7 +84,7 @@ struct BlockMiner_s {
     // aew for the entries in the announceList queue.
     // This is sorted every time new work is added in order to make sure the best
     // announcements in the queue float up to the top.
-    // If readyForBlock is zero, this is NULL.
+    // If readyForBlock is -1, this is NULL.
     NextAnnounceEffectiveWork_t* nextAew;
     size_t nextAewLen;
     AnnounceList_t* queue;
@@ -99,7 +99,7 @@ struct BlockMiner_s {
 
     uint32_t effectiveTarget;
 
-    uint32_t readyForBlock;
+    int32_t readyForBlock;
     uint32_t currentlyMining;
 
     enum State state;
@@ -157,12 +157,12 @@ static void found(MineResult_t* res, PacketCrypt_BlockHeader_t* hdr, Worker_t* w
     uint8_t* proof = PacketCryptProof_mkProof(&proofSz, w->bm->tree, res->items);
 
     ssize_t outputSize = BlockMiner_Share_SIZEOF(proofSz);
-    BlockMiner_Share_t* output = malloc(outputSize);
+    BlockMiner_Share_t* output = calloc(outputSize, 1);
     assert(output);
+    output->length = outputSize;
     Buf_OBJCPY(&output->coinbase, &w->bm->coinbase);
     Buf_OBJCPY(&output->hap.blockHeader, hdr);
     output->hap.nonce2 = res->lowNonce;
-    output->hap.proofLen = proofSz;
     memcpy(output->hap.proof, proof, proofSz);
 
     Buf32_t root2;
@@ -306,6 +306,7 @@ BlockMiner_t* BlockMiner_create(
     ctx->numWorkers = threads;
     ctx->workers = workers;
     ctx->beDeterministic = true;
+    ctx->readyForBlock = -1;
 
     for (int i = 0; i < threads; i++) {
         ctx->workers[i].bm = ctx;
@@ -433,7 +434,7 @@ int BlockMiner_addAnns(BlockMiner_t* bm, PacketCrypt_Announce_t* anns, uint64_t 
     l->count = count;
     l->next = bm->queue;
     bm->queue = l;
-    if (bm->readyForBlock > 0) {
+    if (bm->readyForBlock >= 0) {
         prepareAnns(bm, l, bm->readyForBlock);
         qsort(bm->nextAew, bm->nextAewLen, sizeof bm->nextAew[0], ewComp);
     }
@@ -444,7 +445,7 @@ int BlockMiner_addAnns(BlockMiner_t* bm, PacketCrypt_Announce_t* anns, uint64_t 
 // all announcements to be ready. It can be called during mining, and should, because
 // lockForMining is in the critical path between receiving work and beginning to mine.
 static void prepareNextBlock(BlockMiner_t* bm, uint32_t nextBlockHeight) {
-    if (bm->readyForBlock == nextBlockHeight) {
+    if (bm->readyForBlock == (int32_t)nextBlockHeight) {
         // nothing to do, everything is setup already
         return;
     }
@@ -517,7 +518,7 @@ static void postLockCleanup(BlockMiner_t* bm) {
     // We're going to clear readyForBlock because in theory the caller might be
     // wanting to mine an entirely different block and we could end up trashing
     // all of their announcements as they provide them.
-    bm->readyForBlock = 0;
+    bm->readyForBlock = -1;
 }
 
 int BlockMiner_lockForMining(

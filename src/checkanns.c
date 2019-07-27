@@ -6,6 +6,7 @@
 #include "FilePath.h"
 #include "WorkQueue.h"
 #include "FileUtil.h"
+#include "ContentMerkle.h"
 
 #include "sodium/core.h"
 
@@ -25,7 +26,7 @@
 
 #define OUT_ANN_CAP (1024*16)
 #define DEDUPE_INITIAL_CAP (1024*1024)
-#define IN_ANN_CAP (1024*16)
+#define IN_ANN_CAP 1
 #define STATE_FILE_VERSION (0)
 
 #define WRITE_EVERY_SECONDS 60
@@ -45,12 +46,14 @@ _Static_assert(sizeof(AnnEntry_t) == 16, "");
 #define DEBUGF(...) fprintf(stderr, "checkanns: " __VA_ARGS__)
 
 static int usage() {
-    fprintf(stderr, "Usage: ./checkanns <indir> <outdir> <anndir> <statedir> <tmpdir>\n"
+    fprintf(stderr, "Usage: ./checkanns <indir> <outdir> <anndir> <statedir> <tmpdir> "
+            "<contentdir>\n"
         "    <indir>           # a dir which will be scanned for incoming ann files\n"
         "    <outdir>          # a dir where result files will be placed\n"
         "    <anndir>          # a dir where verified announcements will be placed\n"
         "    <statedir>        # a dir which will be used for keeping track of duplicates\n"
         "    <tempdir>         # a dir which will be used for creating result files\n"
+        "    <contentdir>      # a dir where announcement headers+content will be placed\n"
         "\n"
         "    See https://github.com/cjdelisle/PacketCrypt/blob/master/docs/checkanns.md\n"
         "    for more information\n");
@@ -62,7 +65,7 @@ typedef struct AnnPost_s {
     uint8_t hashNum;
     uint8_t hashMod;
     uint16_t _pad;
-    Buf32_t contentHash;
+    Buf32_t signingKey;
     Buf32_t parentBlockHash;
     uint32_t minWork;
     uint32_t parentBlockHeight;
@@ -116,6 +119,9 @@ typedef struct Result_s {
     uint32_t accepted;
     uint32_t duplicates;
     uint32_t invalid;
+    uint32_t badContentHash;
+    uint32_t runt;
+    uint32_t internalError;
     uint8_t payTo[64];
 } Result_t;
 
@@ -145,10 +151,21 @@ typedef struct LocalWorker_s {
 
     FilePath_t* inFile;
 
+    // The report back to the submitter of the announcement(s)
     FilePath_t outFile;
+
+    // This is a file in the temp dir, it's used to write a file then copy it after.
+    // its name can change at any time so it must be set just before opening it.
     FilePath_t tmpFile;
+
+    // This is a file which stores the deduplication table
     FilePath_t stateFile;
+
+    // This is a file which stores a batch of announcement headers for downloading by block miners.
     FilePath_t annFile;
+
+    // This file stores the header and content of a single announcement.
+    FilePath_t annContentFile;
 
     // Used for validation
     PacketCrypt_ValidateCtx_t vctx;
@@ -169,8 +186,8 @@ static int validateAnns(LocalWorker_t* lw, int annCount) {
     int goodCount = 0;
     int modulo = (lw->inBuf.hashMod > 0) ? lw->inBuf.hashMod : 1;
     for (int i = 0; i < annCount; i++) {
-        if (Buf_OBJCMP(&lw->inBuf.contentHash, &lw->inBuf.anns[i].hdr.contentHash)) {
-            // wrong content hash (probably a race condition in the miner)
+        if (Buf_OBJCMP(&lw->inBuf.signingKey, &lw->inBuf.anns[i].hdr.signingKey)) {
+            // wrong signing key (probably a race condition in the miner mixing different anns)
         } else if (lw->inBuf.parentBlockHeight != lw->inBuf.anns[i].hdr.parentBlockHeight) {
             // wrong parent block height
         } else if (lw->inBuf.minWork < lw->inBuf.anns[i].hdr.workBits) {
@@ -337,7 +354,11 @@ static int dedupeCritical(Worker_t* w, int inCount) {
     return goodCount;
 }
 
-static void processAnns1(Worker_t* w, Result_t* res, int annCount) {
+static bool processAnns1(Worker_t* w, Result_t* res, int fileNo) {
+    // We're setup for doing batches of announcements, but currently
+    // we're doing just one at a time.
+    int annCount = 1;
+
     mkDedupes(w->lw.dedupsIn, w->lw.inBuf.anns, annCount);
     int validCount = validateAnns(&w->lw, annCount);
 
@@ -352,7 +373,7 @@ static void processAnns1(Worker_t* w, Result_t* res, int annCount) {
         uint64_t timeOfLastWrite = sao->timeOfLastWrite;
         if (w->lw.inBuf.parentBlockHeight != cph) {
             if (w->lw.inBuf.parentBlockHeight < cph) {
-                DEBUGF("File [%s] has parentBlockHash [%d] which is too old\n",
+                DEBUGF("File [%s] has parent block height [%d] which is too old\n",
                     w->lw.inFile->name, w->lw.inBuf.parentBlockHeight);
                 validCount = 0;
                 break;
@@ -362,7 +383,7 @@ static void processAnns1(Worker_t* w, Result_t* res, int annCount) {
         } else if (outCount + validCount >= OUT_ANN_CAP ||
             (timeOfLastWrite + WRITE_EVERY_SECONDS < now))
         {
-            // file is full (it WRITE_EVERY_SECONDS seconds have elapsed), write it out
+            // file is full (or WRITE_EVERY_SECONDS seconds have elapsed), write it out
             tryWriteAnnsCritical(w, w->lw.inBuf.parentBlockHeight);
         }
         goodCount = dedupeCritical(w, annCount);
@@ -372,9 +393,11 @@ static void processAnns1(Worker_t* w, Result_t* res, int annCount) {
     res->accepted += goodCount;
     res->duplicates += (validCount - goodCount);
     res->invalid += (annCount - validCount);
+
+    return goodCount > 0;
 }
 
-static void processAnns(Worker_t* w, int fileNo, int annCount) {
+static void processAnns(Worker_t* w, int fileNo) {
     Result_t res;
     Buf_OBJSET(&res, 0);
     Buf_OBJCPY(res.payTo, w->lw.inBuf.payTo);
@@ -383,25 +406,112 @@ static void processAnns(Worker_t* w, int fileNo, int annCount) {
     Time_BEGIN(t);
     DEBUGF("Processing ann file %s\n", w->lw.inFile->name);
     for (;;) {
-        processAnns1(w, &res, annCount);
+        uint8_t* contentBuf = NULL;
+        uint32_t len = w->lw.inBuf.anns[0].hdr.contentLength;
+        if (len > 32) {
+            // contentLength > 32 = Out-of-band content
+            // therefore the content should follow the announcement header
+            contentBuf = malloc(len);
+            assert(contentBuf);
+            ssize_t len2 = read(fileNo, contentBuf, len);
+            if (len2 < 0) {
+                DEBUGF("Error reading file content, errno=[%s]\n", strerror(errno));
+                res.internalError++;
+                break;
+            } else if (len2 < len) {
+                DEBUGF("Runt announcement file [%s], content partially read\n",
+                    w->lw.inFile->name);
+                res.runt++;
+                break;
+            }
+            Buf32_t b;
+            ContentMerkle_compute(&b, contentBuf, len);
+            if (Buf_OBJCMP(&b, w->lw.inBuf.anns[0].hdr.contentHash)) {
+                DEBUGF("Announcement in file [%s] content doesn't match hash\n",
+                    w->lw.inFile->name);
+                res.badContentHash++;
+                break;
+            }
+        }
+        if (len > 0) {
+            Buf32_t headerHash;
+            Hash_COMPRESS32_OBJ(&headerHash, &w->lw.inBuf.anns[0]);
+            uint8_t hash[65];
+            for (int i = 0; i < 32; i++) {
+                sprintf(&hash[i*2], "%02x", headerHash.bytes[i]);
+            }
+            hash[64] = '\0';
+            snprintf(w->lw.annContentFile.name, FilePath_NAME_SZ, "ann_%s.bin", hash);
+            strncpy(w->lw.tmpFile.name, w->lw.annContentFile.name, FilePath_NAME_SZ);
+            int outFileNo = open(w->lw.tmpFile.path, O_CREAT | O_WRONLY, 0666);
+            if (outFileNo < 0) {
+                DEBUGF("Unable to open output file [%s] [%s]\n",
+                    w->lw.tmpFile.path, strerror(errno));
+                assert(0);
+            }
+            checkedWrite(w->lw.tmpFile.path, outFileNo, &w->lw.inBuf.anns[0], 1024);
+            if (contentBuf) {
+                checkedWrite(w->lw.tmpFile.path, outFileNo, contentBuf, len);
+            }
+            close(outFileNo);
+            if (processAnns1(w, &res, fileNo)) {
+                if (rename(w->lw.tmpFile.path, w->lw.annContentFile.path)) {
+                    DEBUGF("error renaming temp file [%s] to content file [%s] [%s]\n",
+                        w->lw.tmpFile.path, w->lw.annContentFile.path, strerror(errno));
+                    assert(0);
+                }
+            } else {
+                if (unlink(w->lw.tmpFile.path)) {
+                    DEBUGF("error deleting temp file [%s] [%s]\n",
+                        w->lw.tmpFile.path, strerror(errno));
+                    assert(0);
+                }
+            }
+        } else {
+            processAnns1(w, &res, fileNo);
+        }
+
+        free(contentBuf);
+
         ssize_t bytes = read(fileNo, w->lw.inBuf.anns,
             sizeof(PacketCrypt_Announce_t) * IN_ANN_CAP);
         if (bytes < 0) {
             DEBUGF("Error reading file errno=[%s]\n", strerror(errno));
+            res.internalError++;
             break;
         } else if (bytes == 0) {
             break;
+        } else if (bytes < 1024) {
+            DEBUGF("File [%s] contains a runt ann\n", w->lw.inFile->name);
+            res.runt++;
+            break;
         }
-        annCount = bytes / sizeof(PacketCrypt_Announce_t);
     }
+    strncpy(w->lw.tmpFile.name, w->lw.inFile->name, FilePath_NAME_SZ);
     int outFileNo = open(w->lw.tmpFile.path, O_EXCL | O_CREAT | O_WRONLY, 0666);
     if (outFileNo < 0) {
         DEBUGF("Unable to open output file [%s] [%s]\n",
             w->lw.tmpFile.path, strerror(errno));
         assert(0);
     }
-    checkedWrite(w->lw.tmpFile.path, outFileNo, &res, sizeof(res));
+
+    for (int i = 0; i < 64; i++) {
+        if (!res.payTo[i]) { continue; }
+        if (res.payTo[i] < 32 || res.payTo[i] > 126 ||
+            res.payTo[i] == '\\' || res.payTo[i] == '"')
+        {
+            res.payTo[i] = '_';
+        }
+    }
+    // Align with Protocol.js Protocol_AnnResult_t
+    uint8_t buf[256];
+    snprintf(buf, 256, "{\"accepted\":%d,\"dup\":%d,\"inval\":%d,"
+        "\"badHash\":%d,\"runt\":%d,\"internalErr\":%d,\"payTo\":\"%s\"}",
+        res.accepted, res.duplicates, res.invalid, res.badContentHash, res.runt,
+        res.internalError, res.payTo);
+    checkedWrite(w->lw.tmpFile.path, outFileNo, buf, strlen(buf));
     close(outFileNo);
+    strncpy(w->lw.outFile.name, w->lw.inFile->name, FilePath_NAME_SZ);
     if (rename(w->lw.tmpFile.path, w->lw.outFile.path)) {
         DEBUGF("error renaming temp file [%s] to out file [%s] [%s]\n",
             w->lw.tmpFile.path, w->lw.outFile.path, strerror(errno));
@@ -444,13 +554,11 @@ void* workerLoop(void* vWorker) {
             DEBUGF("File [%s] is a runt\n", w->lw.inFile->path);
             continue;
         } else if (w->lw.inBuf.version != 0) {
-            // be quiet since this might trigger a lot in case of old and new versions running together.
+            DEBUGF("File [%s] has incompatible version [%d]\n",
+                w->lw.inFile->path, w->lw.inBuf.version);
             continue;
         }
-        int annCount = (bytes - AnnPost_HEADER_SZ) / sizeof(PacketCrypt_Announce_t);
-        strncpy(w->lw.outFile.name, w->lw.inFile->name, FilePath_NAME_SZ);
-        strncpy(w->lw.tmpFile.name, w->lw.inFile->name, FilePath_NAME_SZ);
-        processAnns(w, inFileNo, annCount);
+        processAnns(w, inFileNo);
     }
 }
 
@@ -471,7 +579,8 @@ static MasterThread_t* createMaster(
     const char* outDir,
     const char* annDir,
     const char* stateDir,
-    const char* tmpDir
+    const char* tmpDir,
+    const char* contentDir
 ) {
     MasterThread_t* mt = calloc(sizeof(MasterThread_t), 1);
     assert(mt);
@@ -497,6 +606,7 @@ static MasterThread_t* createMaster(
         FilePath_create(&w->lw.annFile, annDir);
         FilePath_create(&w->lw.stateFile, stateDir);
         FilePath_create(&w->lw.tmpFile, tmpDir);
+        FilePath_create(&w->lw.annContentFile, contentDir);
     }
     return mt;
 }
@@ -508,6 +618,7 @@ static void destroyMaster(MasterThread_t* mt) {
         FilePath_destroy(&w->lw.annFile);
         FilePath_destroy(&w->lw.stateFile);
         FilePath_destroy(&w->lw.tmpFile);
+        FilePath_destroy(&w->lw.annContentFile);
     }
     free(mt->workers);
     free(mt->g.sao);
@@ -615,7 +726,7 @@ int main(int argc, const char** argv) {
     int threads = 1;
     int arg = 1;
 
-    if ((argc - arg) < 5) { return usage(); }
+    if ((argc - arg) < 6) { return usage(); }
 
     if (!strcmp(argv[arg], "--threads")) {
         arg++;
@@ -626,21 +737,24 @@ int main(int argc, const char** argv) {
         }
         arg++;
     }
-    if ((argc - arg) < 5) { return usage(); }
+    if ((argc - arg) < 6) { return usage(); }
 
     const char* inDir = argv[arg++];
     const char* outDir = argv[arg++];
     const char* annDir = argv[arg++];
     const char* stateDir = argv[arg++];
     const char* tmpDir = argv[arg++];
+    const char* contentDir = argv[arg++];
 
     FileUtil_checkDir("input", inDir);
     FileUtil_checkDir("output", outDir);
     FileUtil_checkDir("announcement", annDir);
     FileUtil_checkDir("state", stateDir);
     FileUtil_checkDir("temp", tmpDir);
+    FileUtil_checkDir("content", contentDir);
 
-    MasterThread_t* mt = createMaster(threads, inDir, outDir, annDir, stateDir, tmpDir);
+    MasterThread_t* mt =
+        createMaster(threads, inDir, outDir, annDir, stateDir, tmpDir, contentDir);
 
     {
         DIR* d = opendir(stateDir);

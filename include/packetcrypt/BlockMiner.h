@@ -33,11 +33,13 @@ typedef struct BlockMiner_Stats_s {
 
 // This is the result which is written out to the file descriptor.
 typedef struct BlockMiner_Share_s {
+    uint32_t length;
+    uint32_t _pad;
     PacketCrypt_Coinbase_t coinbase;
     PacketCrypt_HeaderAndProof_t hap;
 } BlockMiner_Share_t;
 #define BlockMiner_Share_SIZEOF(proofLen) \
-    (sizeof(PacketCrypt_Coinbase_t) + PacketCrypt_HeaderAndProof_SIZEOF(proofLen))
+    (4 + 4 + sizeof(PacketCrypt_Coinbase_t) + PacketCrypt_HeaderAndProof_SIZEOF(proofLen))
 _Static_assert(BlockMiner_Share_SIZEOF(8) == sizeof(BlockMiner_Share_t), "");
 
 /**

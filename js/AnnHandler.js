@@ -69,6 +69,7 @@ const launchCheckanns = (ctx /*:Context_t*/) => {
         ctx.workdir + '/anndir',
         ctx.workdir + '/statedir',
         ctx.workdir + '/tmpdir',
+        ctx.workdir + '/contentdir',
     ];
     console.log(ctx.mut.cfg.root.checkannsPath + ' ' + args.join(' '));
     const checkanns = ctx.mut.checkanns = Spawn(ctx.mut.cfg.root.checkannsPath, args, {
@@ -99,10 +100,10 @@ const onSubmit = (ctx, req, res) => {
         res.statusCode = 500;
         return void res.end("currentWork is unknown");
     }
-    if (worknum > ctx.poolClient.currentHeight || worknum < ctx.poolClient.currentHeight-1) {
+    if (worknum > ctx.poolClient.currentHeight || worknum < ctx.poolClient.currentHeight-3) {
         res.statusCode = 400;
         return void res.end("x-pc-worknum out of range, range: [" +
-            (ctx.poolClient.currentHeight-1) + "] to [" + ctx.poolClient.currentHeight + "]");
+            (ctx.poolClient.currentHeight-3) + "] to [" + ctx.poolClient.currentHeight + "]");
     }
     const fileName = 'annshare_' + worknum + '_' + Crypto.randomBytes(16).toString('hex') + '.bin';
     const fileUploadPath = ctx.workdir + '/uploaddir/' + fileName;
@@ -113,7 +114,7 @@ const onSubmit = (ctx, req, res) => {
         const post = {
             hashNum: ctx.mut.hashNum,
             hashMod: ctx.mut.hashMod,
-            contentHash: work.contentHash,
+            signingKey: work.signingKey,
             parentBlockHash: work.lastHash,
             minWork: currentWork.annTarget,
             mostRecentBlock: worknum - 1,
@@ -158,6 +159,7 @@ const getResult = (ctx, req, res) => {
         res.statusCode = 404;
         return void res.end();
     }
+    res.setHeader('Content-type', 'application/json');
     if (!ctx.mut.outdirLongpoll) { throw new Error(); }
     ctx.mut.outdirLongpoll.onReq(req, res);
 };
@@ -198,6 +200,31 @@ const getAnns = (ctx, req, res) => {
     }
 };
 
+const getAnn = (ctx, req, res) => {
+    if (Util.badMethod('GET', req, res)) { return; }
+    const fileName = req.url.split('/').pop();
+    let fileNo;
+    fileName.replace(/^ann_([a-fA-F0-9]{64})\.bin$/, (all, a) => {
+        fileNo = Buffer.from(a, 'hex');
+        return '';
+    });
+    if (!fileNo) {
+        res.statusCode = 404;
+        return void res.end();
+    }
+    Fs.readFile(ctx.workdir + '/contentdir/' + fileName, (err, ret) => {
+        if (err && err.code === 'ENOENT') {
+            res.statusCode = 404;
+            return void res.end();
+        } else if (err) {
+            console.log("Error reading file [" + JSON.stringify(err) + "]");
+            res.statusCode = 500;
+            return void res.end();
+        }
+        res.end(ret);
+    });
+};
+
 const onReq = (ctx, req, res) => {
     if (!ctx.mut.ready) {
         res.statusCode = 500;
@@ -206,6 +233,7 @@ const onReq = (ctx, req, res) => {
     if (req.url === '/submit') { return void onSubmit(ctx, req, res); }
     if (req.url.startsWith('/outdir/')) { return void getResult(ctx, req, res); }
     if (req.url.startsWith('/anns/')) { return void getAnns(ctx, req, res); }
+    if (req.url.startsWith('/ann/')) { return void getAnn(ctx, req, res); }
     res.statusCode = 404;
     return void res.end(JSON.stringify({ error: "not found" }));
 };
@@ -233,6 +261,7 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
             Util.checkMkdir(ctx.workdir + '/outdir', w());
             Util.checkMkdir(ctx.workdir + '/anndir', w());
             Util.checkMkdir(ctx.workdir + '/statedir', w());
+            Util.checkMkdir(ctx.workdir + '/contentdir', w());
 
             Util.checkMkdir(ctx.workdir + '/tmpdir', w());
             Util.checkMkdir(ctx.workdir + '/uploaddir', w());

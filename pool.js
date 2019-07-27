@@ -11,10 +11,19 @@ import type { Config_t } from './js/Config.js'
 */
 
 const config = {};
+config.privateSeed = 'controls who can mine with your announcements, you should change it';
 config.masterUrl = 'http://pool.cjdns.fr/ng_master';
 config.rootWorkdir = './datastore/pool';
 config.checkannsPath = './bin/checkanns';
 config.checksharesPath = './bin/checkshares';
+config.rpc = {
+    protocol: 'https',
+    user: '/j/N4iV5SgMzSH6U3t6gkrs04Lg=',
+    pass: 'yqHQLrkt/EKUHIGrn7t33O6sDLg=',
+    host: '127.0.0.1',
+    port: 18334,
+    rejectUnauthorized: false
+};
 config.annHandlers = [
     { url: 'http://pool.cjdns.fr/ng_ann0', port: 8081, threads: 4, root: config },
     //{ url: 'http://localhost:8082', port: 8082, threads: 4, root: config },
@@ -25,14 +34,6 @@ config.blkHandlers = [
 ];
 config.master = {
     port: 8080,
-    rpc: {
-        protocol: 'https',
-        user: '/j/N4iV5SgMzSH6U3t6gkrs04Lg=',
-        pass: 'yqHQLrkt/EKUHIGrn7t33O6sDLg=',
-        host: '127.0.0.1',
-        port: 18334,
-        rejectUnauthorized: false
-    },
     annMinWork:   0x20000fff,
     shareMinWork: 0x20000fff,
     root: config,

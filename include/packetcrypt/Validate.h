@@ -16,20 +16,26 @@ int Validate_checkAnn(
     PacketCrypt_ValidateCtx_t* vctx);
 
 enum {
-    Validate_checkBlock_OK =               0,
-    Validate_checkBlock_RUNT =             (1<<8),
-    Validate_checkBlock_ANN_INVALID_ =     (2<<8),
-    Validate_checkBlock_ANN_INSUF_POW_ =   (3<<8),
-    Validate_checkBlock_PCP_INVAL =        (4<<8),
-    Validate_checkBlock_PCP_MISMATCH =     (5<<8),
-    Validate_checkBlock_INSUF_POW =        (6<<8),
-    Validate_checkBlock_BAD_COINBASE =     (7<<8),
-    Validate_checkBlock_SHARE_OK =         (8<<8)
+    Validate_checkBlock_OK =                    0,
+    Validate_checkBlock_SHARE_OK =              1<<8,
+    Validate_checkBlock_ANN_INVALID_ =          2<<8,
+    Validate_checkBlock_ANN_INSUF_POW_ =        3<<8,
+    Validate_checkBlock_ANN_SIG_INVALID_ =      4<<8,
+    Validate_checkBlock_ANN_CONTENT_INVALID_ =  5<<8,
+    Validate_checkBlock_PCP_INVAL =             6<<8,
+    Validate_checkBlock_PCP_MISMATCH =          7<<8,
+    Validate_checkBlock_INSUF_POW =             8<<8,
+    Validate_checkBlock_BAD_COINBASE =          9<<8,
 };
 #define Validate_checkBlock_ANN_INVALID(x) (Validate_checkBlock_ANN_INVALID_ | (x))
 #define Validate_checkBlock_ANN_INSUF_POW(x) (Validate_checkBlock_ANN_INSUF_POW_ | (x))
+#define Validate_checkBlock_ANN_SIG_INVALID(x) (Validate_checkBlock_ANN_SIG_INVALID_ | (x))
+#define Validate_checkBlock_ANN_CONTENT_INVALID(x) (Validate_checkBlock_ANN_CONTENT_INVALID_ | (x))
+
+char* Validate_checkBlock_outToString(int code);
 
 int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
+                        uint32_t hapLen,
                         uint32_t blockHeight,
                         uint32_t shareTarget,
                         const PacketCrypt_Coinbase_t* coinbaseCommitment,

@@ -205,6 +205,13 @@ const onNewWork = (ctx /*:Context_t*/, work, done) => {
 };
 
 /*
+typedef struct BlockMiner_Share_s {
+    uint32_t length;
+    uint32_t _pad;
+    PacketCrypt_Coinbase_t coinbase;
+    PacketCrypt_HeaderAndProof_t hap;
+} BlockMiner_Share_t;
+
 typedef struct {
     uint32_t magic;
 
@@ -214,12 +221,12 @@ typedef struct {
     uint8_t merkleRoot[32];
     uint64_t numAnns;
 } PacketCrypt_Coinbase_t;
-_Static_assert(sizeof(PacketCrypt_Coinbase_t) == 32+8+4+4, "");
+_Static_assert(sizeof(PacketCrypt_Coinbase_t) == 48, "");
 typedef struct {
     PacketCrypt_BlockHeader_t blockHeader;
-    uint32_t nonce2;
-    uint32_t proofLen; <-- offset 48+84
-    PacketCrypt_Announce_t announcements[PacketCrypt_NUM_ANNS]; <-- length without proof: 48+88+1024*4
+    uint32_t _pad;
+    uint32_t nonce2; <-- offset 8+48+80+4
+    PacketCrypt_Announce_t announcements[PacketCrypt_NUM_ANNS]; <-- length without proof: 8+48+80+4+4+1024*4
     uint8_t proof[];
 } PacketCrypt_HeaderAndProof_t;
 */
@@ -229,14 +236,8 @@ const splitShares = (buf /*:Buffer*/) /*:Array<Buffer>*/ => {
     // First we need to get the length of an individual header-and-proof from the buf,
     // then we slice off the first <len> bytes and then repeat.
     if (buf.length === 0) { return []; }
-    const proofLen = buf.readUInt32LE(48+84);
-    const shareLen = 48 + 88 + (1024 * 4) + proofLen;
-    if (buf.length < shareLen) {
-        console.log("WARNING: short share entry of length [" + buf.length + "]");
-        return [];
-    }
-    if (buf.length === shareLen) { return [ buf ]; }
-    const out = [ buf.slice(0, shareLen) ];
+    const shareLen = buf.readUInt32LE(0);
+    const out = [ buf.slice(8, shareLen) ];
     const more = splitShares(buf.slice(shareLen));
     more.forEach((x) => { out.push(x); });
     return out;
@@ -343,7 +344,9 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
         if (ctx.miner) { ctx.miner.kill('SIGHUP'); }
         ctx.handledShares[filePath] = true;
         splitShares(fileBuf).forEach((share, i) => {
-            const hash = Blake2b(64).update(share).digest(Buffer.alloc(64));
+            // skip coinbase + bitcoinheader + _pad
+            const proof = share.slice(48 + 80 + 4);
+            const hash = Blake2b(32).update(proof).digest(Buffer.alloc(32));
             const handlerNum = hash.readUInt16LE(0) % ctx.masterConf.submitBlockUrls.length;
             const url = ctx.masterConf.submitBlockUrls[handlerNum];
             //console.log(share.toString('hex'));

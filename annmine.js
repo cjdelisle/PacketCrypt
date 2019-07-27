@@ -1,17 +1,15 @@
 /*@flow*/
 const Spawn = require('child_process').spawn;
 const Fs = require('fs');
-const Crypto = require('crypto');
 const nThen = require('nthen');
 const Minimist = require('minimist');
 
 const Pool = require('./js/PoolClient.js');
 const Util = require('./js/Util.js');
-const Protocol = require('./js/Protocol.js');
 
 /*::
 import type { PoolClient_t } from './js/PoolClient.js'
-import type { Protocol_Work_t } from './js/Protocol.js'
+import type { Protocol_Work_t, Protocol_AnnResult_t } from './js/Protocol.js'
 import type { Config_Miner_t } from './js/Config.js'
 import type { Util_Mutex_t } from './js/Util.js'
 import type { ChildProcess } from 'child_process'
@@ -98,7 +96,7 @@ const rotateAndUpload = (ctx /*:Context_t*/, lastWork /*:Work_t*/, done) => {
         });
     }).nThen((w) => {
         ctx.submitAnnUrls.forEach((url, i) => {
-            if (!files[i]) { return; }
+            if (!files[i] || !fileContent[i].length) { return; }
             const file = getFileName(ctx.config, i);
             console.error("http post [" + url + "] worknum [" +
                 String(lastWork.protocolWork.height) + "] file [" + file + "]");
@@ -118,7 +116,21 @@ const rotateAndUpload = (ctx /*:Context_t*/, lastWork /*:Work_t*/, done) => {
                 console.error("Failed http post to [" + url + "] [" + JSON.stringify(err) + "]");
                 Util.listRemove(ctx.uploads, r);
             });
-            req.end(fileContent[i]);
+            // If we specified file content then we're only going to do this once...
+            // and we're also going to only post the first announcement which the miner
+            // found.
+            if (ctx.config.content) {
+                const content = ctx.config.content;
+                req.write(fileContent[i].slice(0,1024));
+                if (content.val.length > 32) {
+                    req.write(content.val);
+                }
+                req.end();
+                // then we're going to drop any other anns
+                files.length = 0;
+            } else {
+                req.end(fileContent[i]);
+            }
         });
     }).nThen((_w) => {
         done();
@@ -131,6 +143,40 @@ const messageMiner = (ctx, msg) => {
 };
 
 const refreshWorkLoop = (ctx) => {
+    // If content is specified then we want to check for a find once every half second
+    // and when there is one, we want to submit it as quickly as possible.
+    if (ctx.config.content) {
+        const to = setTimeout(() => { refreshWorkLoop(ctx); }, 500);
+        let hasFind = false;
+        ctx.inMutex((done) => {
+            nThen((w) => {
+                let nt = nThen;
+                ctx.submitAnnUrls.forEach((url, i) => {
+                    nt = nt((w) => {
+                        const file = getFileName(ctx.config, i);
+                        Fs.stat(file, w((err, st) => {
+                            if (err && err.code === 'ENOENT') { return; }
+                            if (err) { return void console.log(err); }
+                            if (st.size > 0) { hasFind = true; }
+                        }));
+                    }).nThen;
+                });
+                nt(w());
+            }).nThen((w) => {
+                if (!hasFind) { return; }
+                if (!ctx.currentWork) { return; }
+                const work = ctx.currentWork;
+                rotateAndUpload(ctx, work, w(() => {
+                    if (!ctx.currentWork) { throw new Error("currentWork disappeared"); }
+                    clearTimeout(to);
+                }));
+            }).nThen((_) => {
+                done();
+            });
+        });
+        return;
+    }
+
     setTimeout(() => { refreshWorkLoop(ctx); }, (Math.random() * 10000) + 5000);
     ctx.inMutex((done) => {
         nThen((w) => {
@@ -152,11 +198,22 @@ const poolOnWork = (ctx /*:Context_t*/, w) => {
         // send a new request for the miner process
         // we don't really get an acknoledgement back from this so we'll
         // just fire-and-forget
-        const request = Buffer.alloc(56+32);
-        request.writeUInt32LE(ctx.pool.config.annMinWork, 8);
+        const request = Buffer.alloc(88+32);
+        request.writeUInt32LE(w.annTarget, 8);
         request.writeUInt32LE(w.height - 1, 12);
-        w.contentHash.copy(request, 24);
-        w.lastHash.copy(request, 56);
+        w.signingKey.copy(request, 56);
+        w.lastHash.copy(request, 88);
+
+        if (ctx.config.content) {
+            const content = ctx.config.content;
+            request.writeUInt32LE(content.type, 16);
+            request.writeUInt32LE(content.val.length, 20);
+            if (content.val.length <= 32) {
+                content.val.copy(request, 24);
+            } else {
+                Util.annComputeContentHash(content.val).copy(request, 24);
+            }
+        }
 
         // set a random hard_nonce so that we won't collide with other miners
         request.writeInt32LE(ctx.config.minerId, 4);
@@ -195,7 +252,7 @@ const checkResultLoop = (ctx /*:Context_t*/) => {
     const again = () => {
         if (!ctx.resultQueue.length) { return void setTimeout(again, 5000); }
         const url = ctx.resultQueue.shift();
-        Util.httpGetBin(url, (err, res) => {
+        Util.httpGetStr(url, (err, res) => {
             if (!res) {
                 const e /*:any*/ = err;
                 // 404s are normal because we're polling waiting for the file to exist
@@ -204,13 +261,26 @@ const checkResultLoop = (ctx /*:Context_t*/) => {
                 }
                 return true;
             }
-            const result = Protocol.annResultDecode(res);
+            try {
+                JSON.parse(res);
+            } catch (e) {
+                console.log("failed to parse result from pool [" + res + "]");
+                return void again();
+            }
+            const result = (JSON.parse(res) /*:Protocol_AnnResult_t*/);
             if (result.payTo !== ctx.config.paymentAddr) {
                 console.log("WARNING: pool is paying [" + result.payTo + "] but configured " +
                     "payment address is [" + ctx.config.paymentAddr + "]");
             }
-            console.log("RESULT: [" + result.accepted + "] accepted, [" + result.invalid +
-                "] rejected invalid, [" + result.duplicates + "] rejected duplicates");
+            console.log("RESULT: [" + result.accepted + "] accepted, [" + result.inval +
+                "] rejected invalid, [" + result.dup + "] rejected duplicates, [" +
+                result.badHash + "] invalid content hash, [" + result.internalErr +
+                "] internal err");
+            if (ctx.config.content && result.accepted) {
+                console.log("Announcement was accepted by the pool, shutting down");
+                if (ctx.miner) { ctx.miner.kill(); }
+                process.exit(0);
+            }
             again();
         });
     };
@@ -224,7 +294,7 @@ const launch = (config /*:Config_Miner_t*/) => {
     const pool = Pool.create(config.poolUrl);
     nThen((w) => {
         Util.checkMkdir(config.dir, w());
-        pool.getMasterConf(Util.once(w()));
+        pool.getMasterConf(w());
     }).nThen((_w) => {
         const submitAnnUrls = pool.config.submitAnnUrls;
         const ctx = {
@@ -251,7 +321,15 @@ const launch = (config /*:Config_Miner_t*/) => {
         };
         minerOnClose();
 
-        pool.onWork((w) => { poolOnWork(ctx, w); });
+        pool.onWork((w) => {
+            if (config.old) {
+                pool.getWorkByNum(w.height - 3, (ww) => {
+                    poolOnWork(ctx, ww);
+                });
+            } else {
+                poolOnWork(ctx, w);
+            }
+        });
         checkResultLoop(ctx);
         refreshWorkLoop(ctx);
     });
@@ -273,11 +351,35 @@ const usage = () => {
         "                      # default is ./bin/pcann\n" +
         "        --dir         # the directory to use for storing temporary state\n" +
         "                      # default is ./datastore/annmine\n" +
+        "        --old         # if specified, the mined ann will be 3 blocks old\n" +
+        "        --contenttype # specify announcement content type\n" +
+        "        --content     # specify announcement content\n" +
+        "        --contentfile # specify announcement content in a file\n" +
         "    <poolurl>         # the URL of the mining pool to connect to\n" +
         "\n" +
         "    See https://github.com/cjdelisle/PacketCrypt/blob/master/docs/annmine.md\n" +
         "    for more information");
     return 100;
+};
+
+const parseContent = (args, then) => {
+    let t = 0;
+    if (args.contenttype) {
+        t = Number(args.contenttype);
+        if (isNaN(t) || t < 0 || t > 0xffffffff) {
+            throw new Error("Failed to parse content type [" + args.contenttype + "]");
+        }
+    }
+    if (args.contentfile) {
+        Fs.readFile(args.contentfile, (err, ret) => {
+            if (err) { throw err; }
+            then({ type: t, val: ret });
+        });
+    } else if (args.content) {
+        then({ type: t, val: Buffer.from(args.content, 'utf8') });
+    } else {
+        then();
+    }
 };
 
 const DEFAULT_PAYMENT_ADDR = "bc1q6hqsqhqdgqfd8t3xwgceulu7k9d9w5t2amath0qxyfjlvl3s3u4st4nj3u";
@@ -290,7 +392,7 @@ const main = (argv) => {
         threads: 1,
         minerId: Math.floor(Math.random()*(1<<30)*2)
     };
-    const a = Minimist(argv.slice(2));
+    const a = Minimist(argv.slice(2), { boolean: 'old' });
     if (!/http(s)?:\/\/.*/.test(a._[0])) { process.exit(usage()); }
     const conf = {
         corePath: a.corePath || defaultConf.corePath,
@@ -299,13 +401,17 @@ const main = (argv) => {
         poolUrl: a._[0],
         threads: a.threads || defaultConf.threads,
         minerId: a.minerId || defaultConf.minerId,
-        maxAnns: undefined // only used in blkmine
+        old: a.old === true,
+        content: undefined
     };
     if (!a.paymentAddr) {
         console.log("WARNING: You have not specified a paymentAddr\n" +
             "    as a default, " + DEFAULT_PAYMENT_ADDR + " will be used,\n" +
             "    cjd appreciates your generosity");
     }
-    launch(Object.freeze(conf));
+    parseContent(a, (content) => {
+        conf.content = content;
+        launch(Object.freeze(conf));
+    });
 };
 main(process.argv);

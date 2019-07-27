@@ -40,7 +40,7 @@ typedef struct {
     Buf32_t parentBlockHash;
 } Request_t;
 
-_Static_assert(sizeof(Request_t) == 56+32, "");
+_Static_assert(sizeof(Request_t) == 88+32, "");
 
 static void setTestVal(Request_t* req) {
     memset(req, 0, sizeof *req);

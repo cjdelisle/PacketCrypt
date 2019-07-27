@@ -36,6 +36,13 @@ export type Rpc_Transaction_t = {
     sigops: number,
     weight: number
 };
+export type Rpc_Share_t = {
+    sharetarget: number,
+    height: number,
+    hexblock: string,
+    coinbase: string,
+    merklebranch: Array<string>,
+};
 export type Rpc_BlockTemplate_t = {
     bits: string,
     curtime: number,
@@ -66,6 +73,8 @@ export type Rpc_Client_t = {
     getRawBlockTemplate: (Rpc_Client_Rpc_t<Protocol_RawBlockTemplate_t>)=>void,
     getBlockTemplateLongpoll: (longpollId: string, cb:Rpc_Client_Rpc_t<Rpc_BlockTemplate_t>)=>void,
     getBlockchainInfo: (Rpc_Client_Rpc_t<Rpc_BlockchainInfo_t>)=>void,
+    checkPcShare: (share: Rpc_Share_t, cb:Rpc_Client_Rpc_t<string>)=>void,
+    submitBlock: (blk: string, cb:Rpc_Client_Rpc_t<any>)=>void,
 
     batch: (()=>void, (err: ?Error, ret: ?Rpc_Client_Res_t<any>)=>void)=>void,
     batchedCalls: ?Rpc_Client_Request_t
@@ -103,6 +112,17 @@ module.exports.create = (cfg /*:Rpc_Config_t*/) /*:Rpc_Client_t*/ => {
                 id: "mantpool",
                 method: "getrawblocktemplate",
                 params: []
+            };
+        }, cb);
+    };
+
+    out.checkPcShare = (share, cb) => {
+        out.batch(() => {
+            out.batchedCalls = {
+                jsonrpc: "1.0",
+                id: "mantpool",
+                method: "checkpcshare",
+                params: [share]
             };
         }, cb);
     };

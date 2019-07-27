@@ -59,6 +59,17 @@ _Static_assert(sizeof(Buf64_t) == 64, "buf64 size");
         memcmp((dst), (src), Buf_SIZEOF(dst)); \
     })
 
+static inline int Buf_isZero(uint8_t* buf, int length) {
+    int ret = 1;
+    for (int i = 0; i < length; i++) { ret &= (buf[i] == 0); }
+    return ret;
+}
+
+#define Buf_IS_ZERO(thing) __extension__ ({ \
+        _Static_assert(Buf_SIZEOF(thing) != sizeof(char*), "sizeof thing is size of a pointer"); \
+        Buf_isZero((uint8_t*)thing, Buf_SIZEOF(thing)); \
+    })
+
 static __attribute__((unused)) inline void Buf_test() {
     struct {
         struct {
