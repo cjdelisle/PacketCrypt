@@ -25,8 +25,6 @@ type Context_t = {
     pool: PoolClient_t,
     masterConf: Protocol_PcConfigJson_t,
     shareFileMutex: Util_Mutex_t,
-    uploadReqs: Array<ClientRequest>,
-    resultQueue: Array<string>,
     handledShares: { [string]:boolean }
 };
 */
@@ -66,6 +64,9 @@ const downloadAnnFile = (
     const url = serverUrl + '/anns/anns_' + fileNo + '.bin';
     const fileSuffix = '_' + serverId + '_' + fileNo + '.bin';
     const annPath = wrkdir + '/anndir/anns' + fileSuffix;
+    let parentBlockNum;
+    let annBin;
+    let wrkPath;
     nThen((w) => {
         Fs.stat(annPath, w((err, st) => {
             if (err && err.code === 'ENOENT') { return; }
@@ -73,36 +74,44 @@ const downloadAnnFile = (
             w.abort();
             return void cb({ code: 'EEXIST', annPath: annPath });
         }));
-    }).nThen((_) => {
+    }).nThen((w) => {
         console.log("Get announcements [" + url + "] -> [" + annPath + "]");
-        let wrkPath;
-        Util.httpGetStream(url, (err, res) => {
+        Util.httpGetBin(url, w((err, res) => {
             if (!res) {
                 if (!err) { err = new Error("unknown error"); }
+                w.abort();
                 return cb(err);
             }
-            let parentBlockNum;
-            nThen((w) => {
-                res.pipe(Fs.createWriteStream(annPath)).on('finish', w());
-            }).nThen((w) => {
-                getAnnFileParentNum(annPath, w((err, pbn) => {
-                    if (typeof(pbn) === 'undefined') {
-                        // filesystem error, we probably want to bail out...
-                        throw err;
-                    }
-                    parentBlockNum = pbn;
-                }));
-            }).nThen((w) => {
-                wrkPath = wrkdir + '/wrkdir/anns_' + parentBlockNum + fileSuffix;
-                Fs.link(annPath, wrkPath, w((err) => {
-                    if (err) { throw err; }
-                }));
-            }).nThen((w) => {
-                cb(undefined, {
-                    annPath: annPath,
-                    wrkPath: wrkPath
-                });
-            });
+            annBin = res;
+        }));
+    }).nThen((w) => {
+        if (!annBin) { return; }
+        Fs.writeFile(annPath, annBin, w((err) => {
+            if (err) {
+                w.abort();
+                cb(err);
+            }
+        }));
+    }).nThen((w) => {
+        if (!annBin) { return; }
+        getAnnFileParentNum(annPath, w((err, pbn) => {
+            if (typeof(pbn) === 'undefined') {
+                // filesystem error, we probably want to bail out...
+                throw err;
+            }
+            parentBlockNum = pbn;
+        }));
+    }).nThen((w) => {
+        if (!annBin) { return; }
+        wrkPath = wrkdir + '/wrkdir/anns_' + parentBlockNum + fileSuffix;
+        Fs.link(annPath, wrkPath, w((err) => {
+            if (err) { throw err; }
+        }));
+    }).nThen((_) => {
+        if (!annBin) { return; }
+        cb(undefined, {
+            annPath: annPath,
+            wrkPath: wrkPath
         });
     });
 };
@@ -175,10 +184,6 @@ const deleteWorkAndShares = (config /*:Config_Miner_t*/, _cb) => {
 
 const onNewWork = (ctx /*:Context_t*/, work, done) => {
     nThen((w) => {
-        // Kill all uploads because they're all stale shares now
-        ctx.uploadReqs.forEach((req) => { req.abort(); });
-        ctx.uploadReqs.length = 0;
-
         // Delete share/work files because there is no chance of them being useful
         deleteWorkAndShares(ctx.config, w((err) => {
             if (err && err.code !== 'ENOENT') {
@@ -243,43 +248,6 @@ const splitShares = (buf /*:Buffer*/) /*:Array<Buffer>*/ => {
     return out;
 };
 
-const checkResultLoop = (ctx /*:Context_t*/) => {
-    const again = () => {
-        if (!ctx.resultQueue.length) { return void setTimeout(again, 5000); }
-        const url = ctx.resultQueue.shift();
-        Util.httpGetStr(url, (err, res) => {
-            if (!res) {
-                if (!err) {
-                    console.error("Empty result from pool, retrying");
-                    return true;
-                }
-                const e /*:any*/ = err;
-                // 404s are normal because we're polling waiting for the file to exist
-                if (typeof(e.statusCode) !== 'number' || e.statusCode !== 404) {
-                    console.error("Got error from pool [" + JSON.stringify(e) + "]");
-                }
-                return true;
-            }
-            try {
-                const obj = JSON.parse(res);
-                if (obj.result !== 'Output_ACCEPT') {
-                    console.log("SHARE REJECTED: [" + res + "]");
-                } else {
-                    console.log("SHARE: [" + res + "]");
-                    if (obj.payTo !== ctx.config.paymentAddr) {
-                        console.log("WARNING: pool is paying [" + obj.payTo + "] but configured " +
-                            "payment address is [" + ctx.config.paymentAddr + "]");
-                    }
-                }
-            } catch (e) {
-                console.log("WARNING: unable to parse json: [" + res + "]");
-            }
-            again();
-        });
-    };
-    again();
-};
-
 const httpRes = (ctx /*:Context_t*/, res /*:IncomingMessage*/) => {
     const data = [];
     res.on('data', (d) => { data.push(d.toString('utf8')); });
@@ -311,12 +279,7 @@ const httpRes = (ctx /*:Context_t*/, res /*:IncomingMessage*/) => {
             console.error("WARNING: Pool reply is invalid [" + d + "]");
             return;
         }
-        if (typeof(result) !== 'string') {
-            console.error("WARNING: Pool replied without a result [" + d + "]");
-            return;
-        }
-        console.error("Upload complete [" + data.join('') + "]");
-        ctx.resultQueue.push(result);
+        console.error("Pool responded [" + result + "]");
     });
 };
 
@@ -357,7 +320,6 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
             }, (res) => {
                 httpRes(ctx, res);
             });
-            ctx.uploadReqs.push(req);
             req.end(share);
             req.on('error', (err) => {
                 console.log("Failed to upload share [" + err + "]");
@@ -600,8 +562,6 @@ const launch = (config /*:Config_Miner_t*/) => {
             masterConf: masterConf,
             shareFileMutex: Util.createMutex(),
             work: undefined,
-            uploadReqs: [],
-            resultQueue: [],
             handledShares: {}
         };
         mkMiner(ctx);
@@ -613,7 +573,6 @@ const launch = (config /*:Config_Miner_t*/) => {
             deleteUselessAnns(config, work.height, ()=>{});
         });
         setInterval(() => { checkShares(ctx); }, 100);
-        checkResultLoop(ctx);
     });
 };
 
@@ -661,7 +620,8 @@ const main = (argv) => {
         poolUrl: a._[0],
         maxAnns: a.maxAnns || defaultConf.maxAnns,
         threads: a.threads || defaultConf.threads,
-        minerId: a.minerId || defaultConf.minerId
+        minerId: a.minerId || defaultConf.minerId,
+        old: false // just to please flow
     };
     if (!a.paymentAddr) {
         console.log("WARNING: You have not specified a paymentAddr\n" +

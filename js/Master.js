@@ -1,10 +1,8 @@
 /*@flow*/
-const Crypto = require('crypto');
 const Fs = require('fs');
 const Http = require('http');
 const nThen = require('nthen');
 const WriteFileAtomic = require('write-file-atomic');
-const Tweetnacl = require('tweetnacl');
 
 const Protocol = require('./Protocol.js');
 const Rpc = require('./Rpc.js');
@@ -200,74 +198,6 @@ const configReq = (ctx, height, _req, res) => {
     res.end(JSON.stringify(out, null, '\t'));
 };
 
-const COMMIT_PATTERN = Buffer.from(
-    "6a3009f91102fcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfc" +
-    "fcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfc", 'hex');
-
-const submitBlock = (ctx, req, res) => {
-    const data = [];
-    req.on('data', (d) => { data.push(d); });
-    req.on('end', () => {
-        if (!Buffer.isBuffer(data[0])) {
-            res.statusCode = 400;
-            res.end("Invalid post");
-            return;
-        }
-        const state = ctx.mut.state;
-        if (!state) {
-            res.statusCode = 500;
-            res.end("Server not ready (no block template to use)");
-            return;
-        }
-        const dataBuf = Buffer.concat(data);
-        //console.log(dataBuf.toString('hex'));
-        const shareFile = Protocol.shareFileDecode(dataBuf);
-
-        if (shareFile.work.height !== state.work.height) {
-            res.statusCode = 400;
-            res.end("Expected share with height [" + state.work.height + "] but " +
-                "share height was [" + shareFile.work.height + "]");
-            return;
-        }
-
-        let blockTemplate = Buffer.from(state.blockTemplate).slice(80);
-        // the block template is just the block except invalid.
-        // We need to replace the header, find the pattern and insert the
-        // coinbase commitment and then we can push the header and PCP
-        const offset = blockTemplate.indexOf(COMMIT_PATTERN);
-        if (offset === -1) {
-            res.statusCode = 400;
-            res.end("Could not find coinbase commitment");
-            return;
-        }
-        shareFile.share.coinbaseCommit.copy(blockTemplate, offset+2);
-
-        const blockStr = Buffer.concat([
-            shareFile.share.blockHeader,
-            shareFile.share.packetCryptProof,
-            blockTemplate
-        ]).toString('hex');
-        //console.log("(apparently) found a block");
-        //console.log(blockStr);
-        ctx.rpcClient.submitBlock(blockStr, (err, ret) => {
-            if (!err && ret) { err = ret.result; }
-            if (err) {
-                const serr = String(err);
-                if (serr.indexOf("rejected: already have block") === 0) {
-                    res.statusCode = 409;
-                } else {
-                    res.statusCode = 400;
-                }
-                res.end("Error submitting block [" + String(err) + "]");
-                console.log("error:");
-                console.log(err);
-            } else {
-                res.end("OK");
-            }
-        });
-    });
-};
-
 const onReq = (ctx /*:Context_t*/, req, res) => {
     if (!ctx.mut.state) {
         res.statusCode = 500;
@@ -277,10 +207,6 @@ const onReq = (ctx /*:Context_t*/, req, res) => {
     const state = ctx.mut.state;
     if (req.url.endsWith('/config.json')) {
         configReq(ctx, state.work.height, req, res);
-        return;
-    }
-    if (req.url === '/privileged/block') {
-        submitBlock(ctx, req, res);
         return;
     }
     let worknum = -1;

@@ -90,40 +90,6 @@ const MAX_FAST_RECONNECTS = 10;
 const FAST_RECONNECT_MS = 1000;
 const RECONNECT_MS = 10000;
 
-const httpGetStream = module.exports.httpGetStream = (
-    url /*:string*/,
-    cb /*:(?Error|{statusCode:number}, ?IncomingMessage)=>?bool*/
-) => {
-    let reconnects = 0;
-    const ee = new EventEmitter();
-    const again = () => {
-        const cb1 = once((err, res) => {
-            if (cb(err, res) === true) {
-                const reconnectMs = (reconnects > MAX_FAST_RECONNECTS) ?
-                RECONNECT_MS : FAST_RECONNECT_MS;
-                setTimeout(again, reconnectMs);
-                console.log("Reconnect to [" + url + "] in [" + reconnectMs + "]ms");
-                reconnects++;
-            }
-        });
-        const h = Http.get(url, (res) => {
-            if (res.statusCode !== 200) {
-                if (res.statusCode === 300 && res.headers['x-pc-longpoll'] === 'try-again') {
-                    return void again();
-                }
-                cb1({ statusCode: res.statusCode });
-            } else {
-                cb1(undefined, res);
-            }
-        });
-        h.on('error', (e) => { cb1(e); });
-        h.on('socket', (s) => {
-            s.on('connect', () => { ee.emit('connection'); });
-        });
-    };
-    again();
-};
-
 const httpGet = module.exports.httpGet = (
     url /*:string*/,
     cb /*:(?Error|{statusCode:number}, ?Buffer|string)=>?bool*/
@@ -131,7 +97,16 @@ const httpGet = module.exports.httpGet = (
     let reconnects = 0;
     const ee = new EventEmitter();
     const again = () => {
-        const cb1 = once((err, res) => {
+        let ended = false;
+        setTimeout(() => {
+            if (ended) { return; }
+            console.log("httpGet [" + url + "] has stalled, retrying...");
+            ended = true;
+            again();
+        }, 60000);
+        const cb1 = (err, res) => {
+            if (ended) { return; }
+            ended = true;
             if (cb(err, res) === true) {
                 const reconnectMs = (reconnects > MAX_FAST_RECONNECTS) ?
                 RECONNECT_MS : FAST_RECONNECT_MS;
@@ -139,10 +114,11 @@ const httpGet = module.exports.httpGet = (
                 console.log("Reconnect to [" + url + "] in [" + reconnectMs + "]ms");
                 reconnects++;
             }
-        });
+        };
         const h = Http.get(url, (res) => {
             if (res.statusCode !== 200) {
                 if (res.statusCode === 300 && res.headers['x-pc-longpoll'] === 'try-again') {
+                    ended = true;
                     return void again();
                 }
                 cb1({ statusCode: res.statusCode });
@@ -250,10 +226,12 @@ const httpPost = module.exports.httpPost = (
     cb /*:(IncomingMessage)=>void*/
 ) => {
     let hostname;
+    let port;
     let path;
-    url.replace(/http:\/\/([^\/]+)(\/.*)$/, (all, h, p) => {
+    url.replace(/http:\/\/([^:\/]+)(:[0-9]+)?(\/.*)$/, (_, h, po, pa) => {
         hostname = h;
-        path = p;
+        port = po ? Number(po.replace(':', '')) : undefined;
+        path = pa;
         return '';
     });
     if (hostname === undefined) {
@@ -262,6 +240,7 @@ const httpPost = module.exports.httpPost = (
     return Http.request({
         host: hostname,
         path: path,
+        port: port,
         method: 'POST',
         headers: headers
     }, cb);

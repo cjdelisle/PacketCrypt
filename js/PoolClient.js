@@ -77,17 +77,13 @@ const debugGotWork = (work) => {
 };
 
 const connectionChecker = (pool, first) => {
-    console.log(String(new Date()) + " Pool check connection");
     const to = setTimeout(() => {
         if (first) { return; }
         pool.connected = false;
-        console.log(String(new Date()) + " Pool connection lost - this is a bug - please restart");
-        process.exit(333);
         pool._ee.emit('disconnected');
     }, DISCONNECTED_MS);
 
     Util.httpGetStr(pool.url + '/config.json', (err, data) => {
-        console.log(String(new Date()) + ' http req returned');
         if (!data) {
             debug("Failed to get config.json [" + JSON.stringify(err || null) + "] retrying");
             return true;

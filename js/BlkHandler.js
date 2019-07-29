@@ -313,24 +313,23 @@ const onSubmit = (ctx, req, res) => {
             ctx.rpcClient.submitBlock(wholeBlock, w((err, ret) => {
                 if (!err && ret) { err = ret.result; }
                 if (err) {
-                    const serr = String(err);
-                    if (serr.indexOf("rejected: already have block") === 0) {
-                        res.statusCode = 409;
-                    } else {
-                        res.statusCode = 400;
-                    }
-                    res.end("Error submitting block [" + String(err) + "]");
                     console.log("error:");
                     console.log(err);
+                    const serr = String(err);
+                    if (serr.indexOf("rejected: already have block") === 0) {
+                        errorEnd(409, "already have block");
+                    } else {
+                        errorEnd(400, "error submitting block [" + serr + "]");
+                    }
                 } else {
                     console.log("Good share from [" + payTo + "]");
-                    res.end("OK");
+                    res.end(JSON.stringify({ result: 'OK', error: [], warn: [] }));
                 }
             }));
             return;
         } else if (submitRet === 'OK') {
             console.log("Good share from [" + payTo + "]");
-            res.end("OK");
+            res.end(JSON.stringify({ result: 'OK', error: [], warn: [] }));
             return;
         }
         console.log(submitRet);
