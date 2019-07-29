@@ -27,7 +27,21 @@ install the nodejs dependencies.
 
 ### Ubuntu
 
-    sudo apt install pkg-config libsodium-dev autoconf-archive
+Make sure you have the universe repository enabled
+
+    sudo add-apt-repository universe
+
+Install the required tools
+
+    sudo apt install pkg-config libsodium-dev autoconf-archive git libssl-dev
+
+Clone the source code
+
+    git clone https://github.com/cjdelisle/PacketCrypt
+
+Do the build process
+
+    cd PacketCrypt
     ./autogen.sh
     ./configure
     make
