@@ -26,7 +26,6 @@ type Context_t = {
     uploads: Array<{ url: string, req: ClientRequest }>,
     submitAnnUrls: Array<string>,
     config: Config_Miner_t,
-    resultQueue: Array<string>,
     timeOfLastRotate: number
 };
 */
@@ -62,11 +61,11 @@ const httpRes = (ctx, res /*:IncomingMessage*/) => {
             console.error("WARNING: Pool reply is invalid [" + d + "]");
             return;
         }
-        if (typeof(result) !== 'string') {
+        if (typeof(result) !== 'object') {
             console.error("WARNING: Pool replied without a result [" + d + "]");
             return;
         }
-        ctx.resultQueue.push(result);
+        console.log("RESULT: [" + JSON.stringify(result) + "]");
     });
 };
 
@@ -248,45 +247,6 @@ const mkMiner = (config, submitAnnUrls) => {
     });
 };
 
-const checkResultLoop = (ctx /*:Context_t*/) => {
-    const again = () => {
-        if (!ctx.resultQueue.length) { return void setTimeout(again, 5000); }
-        const url = ctx.resultQueue.shift();
-        Util.httpGetStr(url, (err, res) => {
-            if (!res) {
-                const e /*:any*/ = err;
-                // 404s are normal because we're polling waiting for the file to exist
-                if (typeof(e.statusCode) !== 'number' || e.statusCode !== 404) {
-                    console.error("Got error from pool [" + JSON.stringify(e) + "]");
-                }
-                return true;
-            }
-            try {
-                JSON.parse(res);
-            } catch (e) {
-                console.log("failed to parse result from pool [" + res + "]");
-                return void again();
-            }
-            const result = (JSON.parse(res) /*:Protocol_AnnResult_t*/);
-            if (result.payTo !== ctx.config.paymentAddr) {
-                console.log("WARNING: pool is paying [" + result.payTo + "] but configured " +
-                    "payment address is [" + ctx.config.paymentAddr + "]");
-            }
-            console.log("RESULT: [" + result.accepted + "] accepted, [" + result.inval +
-                "] rejected invalid, [" + result.dup + "] rejected duplicates, [" +
-                result.badHash + "] invalid content hash, [" + result.internalErr +
-                "] internal err");
-            if (ctx.config.content && result.accepted) {
-                console.log("Announcement was accepted by the pool, shutting down");
-                if (ctx.miner) { ctx.miner.kill(); }
-                process.exit(0);
-            }
-            again();
-        });
-    };
-    again();
-};
-
 const launch = (config /*:Config_Miner_t*/) => {
     if (config.paymentAddr.length > 64) {
         throw new Error("Illegal payment address (over 64 bytes long)");
@@ -305,7 +265,6 @@ const launch = (config /*:Config_Miner_t*/) => {
             currentWork: undefined,
             inMutex: Util.createMutex(),
             uploads: [],
-            resultQueue: [],
             timeOfLastRotate: +new Date()
         };
         const minerOnClose = () => {
@@ -330,7 +289,6 @@ const launch = (config /*:Config_Miner_t*/) => {
                 poolOnWork(ctx, w);
             }
         });
-        checkResultLoop(ctx);
         refreshWorkLoop(ctx);
     });
     pool.onDisconnected(() => {

@@ -254,9 +254,9 @@ const onSubmit = (ctx, req, res) => {
             const sigs = Buffer.concat(signatures);
             blockTopArr.push(Util.mkVarInt(sigs.length));
             blockTopArr.push(sigs);
-            console.log("Added " + sigs.length + " bytes of signatures");
+            //console.log("Added " + sigs.length + " bytes of signatures");
         } else {
-            console.log("no signatures");
+            //console.log("no signatures");
         }
         if (contentProofs.length > 0) {
             blockTopArr.push(Util.mkVarInt(CONTENTPROOFS_TYPE));

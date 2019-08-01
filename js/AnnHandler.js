@@ -24,42 +24,26 @@ export type AnnHandler_Config_t = {
     threads: number,
     root: Config_t
 };
+type PendingRequest_t = {
+    req: IncomingMessage,
+    res: ServerResponse
+};
 type Context_t = {
     workdir: string,
     poolClient: PoolClient_t,
+    pendingRequests: { [string]: PendingRequest_t },
     mut: {
         hashNum: number,
         hashMod: number,
 
         cfg: AnnHandler_Config_t,
         checkanns: void | ChildProcess,
-        outdirLongpoll: void|Util_LongPollServer_t,
         anndirLongpoll: void|Util_LongPollServer_t,
         highestAnnFile: number,
         ready: bool
     }
 };
 */
-
-// - grab the rules from the master, if we are not in the handler list then fail
-// - check-create the needed folders (including an upload-pad folder)
-// - clear upload-pad folder if it contains anything
-// - launch checkanns with folders specified
-// - start a pool client to stay up to date on work from the pool
-// - Allowed anns will have a parent hash of: height, height-1, all others are invalid.
-// onUpload:
-// - get the work number from the header
-//  open a new file in upload-pad, pad the beginning with 84 bytes of nulls
-//  begin streaming the upload to the file
-//  query the master for the job which was used to create these announcements
-//    If no job, kill the upload and send back a "stale work" failure
-//  hash the content
-//  fill in the rules in the first 84 bytes of the file (do we need to wait for the stream to complete ?)
-//  when the upload completes
-//    rename the file into the in folder
-//    watch for the file to appear in the out folder
-//    upon appearence, respond with the stats
-//    if it doesn't appear in 30 seconds, send back an error message
 
 const launchCheckanns = (ctx /*:Context_t*/) => {
     const args = [
@@ -87,29 +71,34 @@ const onSubmit = (ctx, req, res) => {
     if (Util.badMethod('POST', req, res)) { return; }
     const worknum = Number(req.headers['x-pc-worknum']);
     const payTo = req.headers['x-pc-payto'] || '';
+    let failed = false;
+    const errorEnd = (code, message) => {
+        failed = true;
+        res.statusCode = code;
+        res.end(JSON.stringify({ warn: [], error: [message], result: '' }));
+    };
     if (isNaN(worknum)) {
-        res.statusCode = 400;
-        return void res.end("x-pc-worknum missing or not a number");
+        return void errorEnd(400, "x-pc-worknum missing or not a number");
     }
     if (!ctx.poolClient.connected) {
-        res.statusCode = 500;
-        return void res.end("disconnected from pool master");
+        return void errorEnd(500, "disconnected from pool master");
     }
     const currentWork = ctx.poolClient.work;
     if (!currentWork) {
-        res.statusCode = 500;
-        return void res.end("currentWork is unknown");
+        return void errorEnd(500, "currentWork is unknown");
     }
     if (worknum > ctx.poolClient.currentHeight || worknum < ctx.poolClient.currentHeight-3) {
-        res.statusCode = 400;
-        return void res.end("x-pc-worknum out of range, range: [" +
+        return void errorEnd(400, "x-pc-worknum out of range, range: [" +
             (ctx.poolClient.currentHeight-3) + "] to [" + ctx.poolClient.currentHeight + "]");
     }
     const fileName = 'annshare_' + worknum + '_' + Crypto.randomBytes(16).toString('hex') + '.bin';
     const fileUploadPath = ctx.workdir + '/uploaddir/' + fileName;
     const fileInPath = ctx.workdir + '/indir/' + fileName;
     console.log("ann post [" + fileName + "] by [" + payTo + "]");
-    ctx.poolClient.getWorkByNum(worknum, (work) => {
+    let work;
+    nThen((w) => {
+        ctx.poolClient.getWorkByNum(worknum, w((w) => { work = w; }));
+    }).nThen((w) => {
         const stream = Fs.createWriteStream(fileUploadPath);
         const post = {
             hashNum: ctx.mut.hashNum,
@@ -122,46 +111,23 @@ const onSubmit = (ctx, req, res) => {
         };
         //console.log("Writing: ", post);
         stream.write(Protocol.annPostEncode(post));
-        req.pipe(stream).on('finish', () => {
+        req.pipe(stream).on('finish', w(() => {
             // $FlowFixMe stream.bytesWritten is real
             if (stream.bytesWritten < AnnPost_HEADER_SZ + 1024) {
-                return res.end(JSON.stringify({
-                    warn: [],
-                    error: ["Runt upload"],
-                    result: ''
-                }));
+                return errorEnd(400, "Runt upload");
             }
-            Fs.rename(fileUploadPath, fileInPath, (err) => {
-                const out = {
-                    warn: [],
-                    error: [],
-                    result: ''
-                };
-                if (err) {
-                    res.statusCode = 500;
-                    out.error.push("Failed to move file");
-                } else {
-                    out.result = ctx.mut.cfg.url + '/outdir/' + fileName;
-                    if (!Util.isValidPayTo(payTo)) {
-                        out.warn.push("invalid payto, cannot credit work");
-                    }
-                }
-                res.end(JSON.stringify(out));
-            });
-        });
+        }));
+    }).nThen((w) => {
+        if (failed) { return; }
+        Fs.rename(fileUploadPath, fileInPath, w((err) => {
+            if (err) { return errorEnd(500, "Failed to move file"); }
+            //result = ctx.mut.cfg.url + '/outdir/' + fileName;
+            ctx.pendingRequests[ctx.workdir + '/outdir/' + fileName] = {
+                req: req,
+                res: res
+            };
+        }));
     });
-};
-
-const getResult = (ctx, req, res) => {
-    if (Util.badMethod('GET', req, res)) { return; }
-    const fileName = req.url.split('/').pop();
-    if (!/^annshare_[0-9]+_[a-f0-9]+\.bin$/.test(fileName)) {
-        res.statusCode = 404;
-        return void res.end();
-    }
-    res.setHeader('Content-type', 'application/json');
-    if (!ctx.mut.outdirLongpoll) { throw new Error(); }
-    ctx.mut.outdirLongpoll.onReq(req, res);
 };
 
 const getAnns = (ctx, req, res) => {
@@ -231,7 +197,6 @@ const onReq = (ctx, req, res) => {
         return void res.end("server not ready");
     }
     if (req.url === '/submit') { return void onSubmit(ctx, req, res); }
-    if (req.url.startsWith('/outdir/')) { return void getResult(ctx, req, res); }
     if (req.url.startsWith('/anns/')) { return void getAnns(ctx, req, res); }
     if (req.url.startsWith('/ann/')) { return void getAnn(ctx, req, res); }
     res.statusCode = 404;
@@ -241,10 +206,10 @@ const onReq = (ctx, req, res) => {
 module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
     const ctx /*:Context_t*/ = Object.freeze({
         workdir: cfg.root.rootWorkdir + '/ann_' + cfg.port,
+        pendingRequests: {},
         mut: {
             cfg: cfg,
             checkanns: undefined,
-            outdirLongpoll: undefined,
             anndirLongpoll: undefined,
             highestAnnFile: -1,
             ready: false,
@@ -255,7 +220,15 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
         poolClient: PoolClient.create(cfg.root.masterUrl),
     });
     nThen((w) => {
-        ctx.poolClient.onWork(Util.once(w()));
+        ctx.poolClient.getMasterConf(w((conf) => {
+            if (conf.downloadAnnUrls.indexOf(cfg.url) === -1) {
+                console.error("ERROR: This node [" + cfg.url + "] is not authorized by the master");
+                console.error("shutting down");
+                process.exit(100);
+            }
+            ctx.mut.hashMod = conf.downloadAnnUrls.length;
+            ctx.mut.hashNum = conf.downloadAnnUrls.indexOf(cfg.url);
+        }));
         nThen((w) => {
             Util.checkMkdir(ctx.workdir + '/indir', w());
             Util.checkMkdir(ctx.workdir + '/outdir', w());
@@ -266,10 +239,50 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
             Util.checkMkdir(ctx.workdir + '/tmpdir', w());
             Util.checkMkdir(ctx.workdir + '/uploaddir', w());
         }).nThen((w) => {
+            Util.clearDir(ctx.workdir + '/outdir', w());
+        }).nThen((w) => {
             Util.clearDir(ctx.workdir + '/tmpdir', w());
             Util.clearDir(ctx.workdir + '/uploaddir', w());
 
-            ctx.mut.outdirLongpoll = Util.longPollServer(ctx.workdir + '/outdir');
+            Util.longPollServer(ctx.workdir + '/outdir/').onFileUpdate((file) => {
+                const path = ctx.workdir + '/outdir/' + file;
+                if (file.indexOf('annshare_') !== 0) {
+                    console.log("Stray file update [" + path + "] ignoring");
+                    return;
+                }
+                const pr = ctx.pendingRequests[path];
+                if (!pr) {
+                    // this happens when the file is deleted
+                    return;
+                }
+                Fs.readFile(path, 'utf8', (err, str) => {
+                    if (err) {
+                        if (err.code === 'ENOENT') { return; }
+                        console.error("Unable to read file [" + path + "] cause: [" + String(err) + "]");
+                        return;
+                    }
+                    let obj;
+                    try {
+                        obj = JSON.parse(str);
+                    } catch (e) {
+                        pr.res.statusCode = 500;
+                        pr.res.end(JSON.stringify({ warn: [], error: [
+                            "Failed to parse result from validator [" + str + "]"
+                        ], result: '' }));
+                        delete ctx.pendingRequests[path];
+                        return;
+                    }
+                    pr.res.end(JSON.stringify({ warn: [], error: [], result: obj }));
+                    delete ctx.pendingRequests[path];
+                    Fs.unlink(path, (err) => {
+                        if (err) {
+                            console.error("Unable to delete [" + path + "]");
+                            return;
+                        }
+                    });
+                });
+            });
+
             const lp = ctx.mut.anndirLongpoll = Util.longPollServer(ctx.workdir + '/anndir');
             Fs.readdir(ctx.workdir + '/anndir', w((err, files) => {
                 if (!files) { throw err; }
@@ -318,15 +331,6 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
         }).nThen((_w) => {
             launchCheckanns(ctx);
         }).nThen(w());
-        ctx.poolClient.getMasterConf(w((conf) => {
-            if (conf.downloadAnnUrls.indexOf(cfg.url) === -1) {
-                console.error("ERROR: This node [" + cfg.url + "] is not authorized by the master");
-                console.error("shutting down");
-                process.exit(100);
-            }
-            ctx.mut.hashMod = conf.downloadAnnUrls.length;
-            ctx.mut.hashNum = conf.downloadAnnUrls.indexOf(cfg.url);
-        }));
     }).nThen((_) => {
         ctx.mut.ready = true;
     });

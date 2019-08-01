@@ -32,7 +32,7 @@ export type Protocol_Work_t = {
 };
 */
 
-module.exports.VERSION = 1;
+module.exports.VERSION = 2;
 
 const bufferFromInt = (i) => {
     const b = Buffer.alloc(4);

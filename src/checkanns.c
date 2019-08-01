@@ -373,8 +373,8 @@ static bool processAnns1(Worker_t* w, Result_t* res, int fileNo) {
         uint64_t timeOfLastWrite = sao->timeOfLastWrite;
         if (w->lw.inBuf.parentBlockHeight != cph) {
             if (w->lw.inBuf.parentBlockHeight < cph) {
-                DEBUGF("File [%s] has parent block height [%d] which is too old\n",
-                    w->lw.inFile->name, w->lw.inBuf.parentBlockHeight);
+                DEBUGF("File [%s] has parent block height [%d] which is too old expecting [%d]\n",
+                    w->lw.inFile->name, w->lw.inBuf.parentBlockHeight, cph);
                 validCount = 0;
                 break;
             }
