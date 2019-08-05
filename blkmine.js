@@ -409,7 +409,18 @@ const mkLinks = (config, done) => {
                     config.dir + '/wrkdir/' + f,
                     w((err) =>
                 {
-                    if (err && err.code !== 'EEXIST') { throw err; }
+                    if (!err) {
+                        return;
+                    }
+                    if (err.code === 'EEXIST') {
+                        // ??
+                    }
+                    if (err.code === 'ENOENT') {
+                        // this is a race against deleteUselessAnns
+                        console.log("Failed to link [" + f + "] because file is missing");
+                        return;
+                    }
+                    throw err;
                 }));
             }).nThen;
         });
@@ -549,12 +560,11 @@ const launch = (config /*:Config_Miner_t*/) => {
         Util.clearDir(config.dir + '/wrkdir', w());
     }).nThen((w) => {
         mkLinks(config, w());
-        pool.onWork(Util.once(w((work) => {
-            deleteUselessAnns(config, work.height, w(()=>{}));
-        })));
+        if (!pool.work) { throw new Error(); }
+        deleteUselessAnns(config, pool.work.height, w());
     }).nThen((w) => {
         downloadOldAnns(config, masterConf, w());
-    }).nThen((_) => {
+    }).nThen((w) => {
         const ctx = {
             config: config,
             miner: undefined,
@@ -567,12 +577,16 @@ const launch = (config /*:Config_Miner_t*/) => {
         mkMiner(ctx);
         console.log("Got [" + masterConf.downloadAnnUrls.length + "] AnnHandlers");
         pollAnnHandlers(ctx);
-        pool.onWork((work) => {
-            ctx.work = work;
-            onNewWork(ctx, work, ()=>{});
-            deleteUselessAnns(config, work.height, ()=>{});
-        });
-        setInterval(() => { checkShares(ctx); }, 100);
+        // this is strictly to prevent us sighup'ing the miner too quickly
+        // before it has hooked up to listen for the event.
+        setTimeout(() => {
+            pool.onWork((work) => {
+                ctx.work = work;
+                onNewWork(ctx, work, ()=>{});
+                deleteUselessAnns(config, work.height, ()=>{});
+            });
+            setInterval(() => { checkShares(ctx); }, 100);
+        }, 1000);
     });
 };
 
@@ -624,7 +638,7 @@ const main = (argv) => {
         old: false // just to please flow
     };
     if (!a.paymentAddr) {
-        console.log("WARNING: You have not specified a paymentAddr\n" +
+        console.log("WARNING: You have not passed the --paymentAddr flag\n" +
             "    as a default, " + DEFAULT_PAYMENT_ADDR + " will be used,\n" +
             "    cjd appreciates your generosity");
     }

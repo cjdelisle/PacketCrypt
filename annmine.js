@@ -363,7 +363,7 @@ const main = (argv) => {
         content: undefined
     };
     if (!a.paymentAddr) {
-        console.log("WARNING: You have not specified a paymentAddr\n" +
+        console.log("WARNING: You have not passed the --paymentAddr flag\n" +
             "    as a default, " + DEFAULT_PAYMENT_ADDR + " will be used,\n" +
             "    cjd appreciates your generosity");
     }
