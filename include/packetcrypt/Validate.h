@@ -9,6 +9,9 @@ enum {
     Validate_checkAnn_INVAL_ITEM4 =         2,
     Validate_checkAnn_INSUF_POW =           3
 };
+
+char* Validate_checkAnn_outToString(int code);
+
 int Validate_checkAnn(
     uint8_t annHashOut[32],
     const PacketCrypt_Announce_t* pcAnn,

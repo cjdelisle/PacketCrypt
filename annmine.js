@@ -1,5 +1,6 @@
 /*@flow*/
 const Spawn = require('child_process').spawn;
+const Crypto = require('crypto');
 const Fs = require('fs');
 const nThen = require('nthen');
 const Minimist = require('minimist');
@@ -7,30 +8,29 @@ const Minimist = require('minimist');
 const Pool = require('./js/PoolClient.js');
 const Util = require('./js/Util.js');
 
+const MAX_RAND_CONTENT_SZ = 2048;
+const REBUILD_JOB_EVERY_MS = 10000;
+
 /*::
 import type { PoolClient_t } from './js/PoolClient.js'
 import type { Protocol_Work_t, Protocol_AnnResult_t } from './js/Protocol.js'
-import type { Config_Miner_t } from './js/Config.js'
+import type { Config_Miner_t, Config_Miner_Content_t } from './js/Config.js'
 import type { Util_Mutex_t } from './js/Util.js'
 import type { ChildProcess } from 'child_process'
 import type { ClientRequest, IncomingMessage } from 'http'
-type Work_t = {
-    request: Buffer,
-    protocolWork: Protocol_Work_t
-}
+
 type Context_t = {
     miner: void|ChildProcess,
     pool: PoolClient_t,
-    currentWork: Work_t|void,
     inMutex: Util_Mutex_t,
-    uploads: Array<{ url: string, req: ClientRequest }>,
+    uploads: Array<{ url: string, req: ClientRequest, reqNum: number }>,
     submitAnnUrls: Array<string>,
     config: Config_Miner_t,
-    timeOfLastRotate: number
+    reqNum: number
 };
 */
 
-const httpRes = (ctx, res /*:IncomingMessage*/) => {
+const httpRes = (ctx, res /*:IncomingMessage*/, reqNum) => {
     const data = [];
     res.on('data', (d) => { data.push(d.toString('utf8')); });
     res.on('end', () => {
@@ -39,7 +39,7 @@ const httpRes = (ctx, res /*:IncomingMessage*/) => {
             //     console.error("Pool replied with error 400 [" + data.join('') + "] stopping");
             //     process.exit(100);
             // }
-            console.error("WARNING: Pool replied with [" + res.statusMessage +
+            console.error("[" + reqNum + "] WARNING: Pool replied with [" + res.statusMessage +
                 "] [" + data.join('') + "]");
             return;
         }
@@ -49,32 +49,40 @@ const httpRes = (ctx, res /*:IncomingMessage*/) => {
             const o = JSON.parse(d);
             result = o.result;
             if (o.error.length > 0) {
-                console.error("WARNING: Pool error [" + JSON.stringify(o.error) + "]");
+                console.error("[" + reqNum +  "] WARNING: Pool error [" + JSON.stringify(o.error) + "]");
                 // we do not proceed
                 return;
             }
             if (o.warn.length > 0) {
-                console.error("WARNING: Pool is warning us [" + JSON.stringify(o.warn) + "]");
+                console.error("[" + reqNum +  "] WARNING: Pool is warning us [" + JSON.stringify(o.warn) + "]");
             }
             result = o.result;
         } catch (e) {
-            console.error("WARNING: Pool reply is invalid [" + d + "]");
+            console.error("[" + reqNum +  "] WARNING: Pool reply is invalid [" + d + "]");
             return;
         }
         if (typeof(result) !== 'object') {
-            console.error("WARNING: Pool replied without a result [" + d + "]");
+            console.error("[" + reqNum +  "] WARNING: Pool replied without a result [" + d + "]");
             return;
         }
-        console.log("RESULT: [" + JSON.stringify(result) + "]");
+        console.log("[" + reqNum +  "] RESULT: [" + JSON.stringify(result) + "]");
     });
 };
 
 const getFileName = (config, i) => (config.dir + '/anns_' + i + '.bin');
 
-const rotateAndUpload = (ctx /*:Context_t*/, lastWork /*:Work_t*/, done) => {
-    ctx.timeOfLastRotate = +new Date();
+const backtrace = () => { try { throw new Error(); } catch (e) { return e.stack; } };
+
+const messageMiner = (ctx, msg) => {
+    if (!ctx.miner) { return; }
+    //console.log("Signaling miner " + backtrace());
+    ctx.miner.stdin.write(msg);
+};
+
+const rotateAndUpload = (ctx /*:Context_t*/, done) => {
     const files = [];
     const fileContent = [];
+    let uploaded = false;
     nThen((w) => {
         ctx.submitAnnUrls.forEach((url, i) => {
             const file = getFileName(ctx.config, i);
@@ -82,9 +90,10 @@ const rotateAndUpload = (ctx /*:Context_t*/, lastWork /*:Work_t*/, done) => {
                 // we just received new work right after uploading, pcann hasn't yet made a new file.
                 if (err && err.code === 'ENOENT') { return; }
                 if (err) { throw err; }
+                if (ret.length === 0) { return; }
                 files[i] = file;
                 fileContent[i] = ret;
-
+                uploaded = true;
                 Fs.unlink(file, w((err) => {
                     if (!err) { return; }
                     console.error("Error deleting [" + file + "] [" + err.message + "]");
@@ -95,149 +104,102 @@ const rotateAndUpload = (ctx /*:Context_t*/, lastWork /*:Work_t*/, done) => {
         });
     }).nThen((w) => {
         ctx.submitAnnUrls.forEach((url, i) => {
-            if (!files[i] || !fileContent[i].length) { return; }
+            if (!files[i]) { return; }
+            const parentBlockHeight = fileContent[i].readUInt32LE(12) + 1;
+            const contentLen = fileContent[i].readUInt32LE(20);
+            const reqNum = ctx.reqNum++;
             const file = getFileName(ctx.config, i);
-            console.error("http post [" + url + "] worknum [" +
-                String(lastWork.protocolWork.height) + "] file [" + file + "]");
+            console.error("[" + String(reqNum) + "] post [" + url + "] worknum [" +
+                String(parentBlockHeight) + "] content length [" + contentLen + "]");
             const req = Util.httpPost(url, {
                 'Content-Type': 'application/octet-stream',
-                'x-pc-worknum': String(lastWork.protocolWork.height),
+                'x-pc-worknum': String(parentBlockHeight),
                 'x-pc-payto': ctx.config.paymentAddr
-            }, (res) => { httpRes(ctx, res); });
-
-            ctx.uploads.filter((r) => (r.url === url)).forEach((r) => {
-                r.req.abort();
-                Util.listRemove(ctx.uploads, r);
-            });
-            const r = { url: url, req: req };
-            ctx.uploads.push(r);
+            }, (res) => { httpRes(ctx, res, reqNum); });
             req.on('error', (err) => {
-                console.error("Failed http post to [" + url + "] [" + JSON.stringify(err) + "]");
-                Util.listRemove(ctx.uploads, r);
+                console.error("[" + reqNum + "] Failed http post to [" + url + "] [" +
+                    JSON.stringify(err) + "]");
             });
-            // If we specified file content then we're only going to do this once...
-            // and we're also going to only post the first announcement which the miner
-            // found.
-            if (ctx.config.content) {
-                const content = ctx.config.content;
-                req.write(fileContent[i].slice(0,1024));
-                if (content.val.length > 32) {
-                    req.write(content.val);
-                }
-                req.end();
-                // then we're going to drop any other anns
-                files.length = 0;
-            } else {
-                req.end(fileContent[i]);
-            }
+            req.end(fileContent[i]);
         });
     }).nThen((_w) => {
-        done();
+        done(uploaded);
     });
 };
 
-const messageMiner = (ctx, msg) => {
-    if (!ctx.miner) { return; }
-    ctx.miner.stdin.write(msg);
-};
+/*
+typedef struct AnnMiner_Request_s {
+    // the bitcoin format hash target which must be beaten in order to
+    // output the resulting announcement.
+    uint32_t workTarget;
 
-const refreshWorkLoop = (ctx) => {
-    // If content is specified then we want to check for a find once every half second
-    // and when there is one, we want to submit it as quickly as possible.
-    if (ctx.config.content) {
-        const to = setTimeout(() => { refreshWorkLoop(ctx); }, 500);
-        let hasFind = false;
-        ctx.inMutex((done) => {
-            nThen((w) => {
-                let nt = nThen;
-                ctx.submitAnnUrls.forEach((url, i) => {
-                    nt = nt((w) => {
-                        const file = getFileName(ctx.config, i);
-                        Fs.stat(file, w((err, st) => {
-                            if (err && err.code === 'ENOENT') { return; }
-                            if (err) { return void console.log(err); }
-                            if (st.size > 0) { hasFind = true; }
-                        }));
-                    }).nThen;
-                });
-                nt(w());
-            }).nThen((w) => {
-                if (!hasFind) { return; }
-                if (!ctx.currentWork) { return; }
-                const work = ctx.currentWork;
-                rotateAndUpload(ctx, work, w(() => {
-                    if (!ctx.currentWork) { throw new Error("currentWork disappeared"); }
-                    clearTimeout(to);
-                }));
-            }).nThen((_) => {
-                done();
-            });
-        });
-        return;
+    // the block number of the most recent block
+    uint32_t parentBlockHeight;
+
+    // the hash of the most recent block (for proving the time when the ann was created)
+    uint8_t parentBlockHash[32];
+
+    // a 32 byte pubkey, if all zeros then it is considered that the ann need not be signed
+    uint8_t signingKey[32];
+
+    // the type of the announcement content
+    uint32_t contentType;
+
+    // the length of the content
+    uint32_t contentLen;
+} AnnMiner_Request_t;
+*/
+const rebuildJob = (ctx /*Context_t*/, w /*:Protocol_Work_t*/) => {
+    let content = ctx.config.content;
+    if (!content && ctx.config.randContent) {
+        // output hex content so it is easily identifiable
+        const bytes = Crypto.randomBytes(Math.floor(Math.random() * MAX_RAND_CONTENT_SZ / 2));
+        const hexContent = Buffer.from(bytes.toString('hex'), 'utf8');
+        content = { type: 0, val: hexContent };
     }
 
-    setTimeout(() => { refreshWorkLoop(ctx); }, (Math.random() * 10000) + 5000);
+    const request = Buffer.alloc(80 + (content ? content.val.length : 0));
+    request.writeUInt32LE(w.annTarget, 0);
+    request.writeUInt32LE(w.height - 1, 4);
+    w.lastHash.copy(request, 8);
+    w.signingKey.copy(request, 40);
+
+    if (content) {
+        request.writeUInt32LE(content.type, 72);
+        request.writeUInt32LE(content.val.length, 76);
+        content.val.copy(request, 80);
+    }
+
+    messageMiner(ctx, request);
+    ctx.lastWorkRefresh = +new Date();
+};
+
+const doRefreshWork = (ctx) => {
     ctx.inMutex((done) => {
-        nThen((w) => {
-            if (!ctx.currentWork) { return; }
-            const work = ctx.currentWork;
-            if (ctx.timeOfLastRotate + 10000 > (+new Date())) { return; }
-            rotateAndUpload(ctx, work, w(() => {
-                if (!ctx.currentWork) { throw new Error("currentWork disappeared"); }
-                messageMiner(ctx, work.request);
-            }));
-        }).nThen((_) => {
+        rotateAndUpload(ctx, (didUpload) => {
+            const expired = (+new Date()) > (REBUILD_JOB_EVERY_MS + ctx.lastWorkRefresh);
+            if (!ctx.pool.work) {
+                console.log('no work');
+            } else if (didUpload || expired) {
+                rebuildJob(ctx, ctx.pool.work);
+            }
             done();
         });
     });
 };
 
-const poolOnWork = (ctx /*:Context_t*/, w) => {
-    ctx.inMutex((done) => {
-        // send a new request for the miner process
-        // we don't really get an acknoledgement back from this so we'll
-        // just fire-and-forget
-        const request = Buffer.alloc(88+32);
-        request.writeUInt32LE(w.annTarget, 8);
-        request.writeUInt32LE(w.height - 1, 12);
-        w.signingKey.copy(request, 56);
-        w.lastHash.copy(request, 88);
-
-        if (ctx.config.content) {
-            const content = ctx.config.content;
-            request.writeUInt32LE(content.type, 16);
-            request.writeUInt32LE(content.val.length, 20);
-            if (content.val.length <= 32) {
-                content.val.copy(request, 24);
-            } else {
-                Util.annComputeContentHash(content.val).copy(request, 24);
-            }
-        }
-
-        // set a random hard_nonce so that we won't collide with other miners
-        request.writeInt32LE(ctx.config.minerId, 4);
-
-        const newWork = {
-            request: request,
-            protocolWork: w
-        };
-
-        const done0 = () => {
-            messageMiner(ctx, request);
-            ctx.currentWork = newWork;
-            done();
-        };
-
-        if (ctx.currentWork) {
-            rotateAndUpload(ctx, ctx.currentWork, done0);
-        } else {
-            done0();
-        }
-    });
+const refreshWorkLoop2 = (ctx) => {
+    const delay = (ctx.config.content || ctx.config.randContent) ?
+        500 : ((Math.random() * 10000) + 5000);
+    setTimeout(() => { refreshWorkLoop2(ctx); }, delay);
+    doRefreshWork(ctx);
 };
 
 const mkMiner = (config, submitAnnUrls) => {
-    const args = [ '--threads', String(config.threads || 1) ];
+    const args = [
+        '--threads', String(config.threads || 1),
+        '--minerId', String(config.minerId)
+    ];
     submitAnnUrls.forEach((url, i) => {
         args.push('--out', getFileName(config, i));
     });
@@ -258,14 +220,14 @@ const launch = (config /*:Config_Miner_t*/) => {
     }).nThen((_w) => {
         const submitAnnUrls = pool.config.submitAnnUrls;
         const ctx = {
+            lastWorkRefresh: +new Date(),
             config: config,
             miner: mkMiner(config, submitAnnUrls),
             submitAnnUrls: submitAnnUrls,
             pool: pool,
-            currentWork: undefined,
             inMutex: Util.createMutex(),
             uploads: [],
-            timeOfLastRotate: +new Date()
+            reqNum: 0
         };
         const minerOnClose = () => {
             if (!ctx.miner) { throw new Error(); }
@@ -274,22 +236,17 @@ const launch = (config /*:Config_Miner_t*/) => {
                 ctx.miner = undefined;
                 setTimeout(() => {
                     ctx.miner = mkMiner(config, submitAnnUrls);
+                    pool.getWork((w) => { rebuildJob(ctx, w); });
                     minerOnClose();
                 }, 1000);
             });
         };
         minerOnClose();
 
-        pool.onWork((w) => {
-            if (config.old) {
-                pool.getWorkByNum(w.height - 3, (ww) => {
-                    poolOnWork(ctx, ww);
-                });
-            } else {
-                poolOnWork(ctx, w);
-            }
-        });
-        refreshWorkLoop(ctx);
+        pool.onWork((w) => { doRefreshWork(ctx); });
+        refreshWorkLoop2(ctx);
+        // kick it off
+        pool.getWork((w) => { rebuildJob(ctx, w); });
     });
     pool.onDisconnected(() => {
         console.error("Lost connection to pool");
@@ -309,10 +266,10 @@ const usage = () => {
         "                      # default is ./bin/pcann\n" +
         "        --dir         # the directory to use for storing temporary state\n" +
         "                      # default is ./datastore/annmine\n" +
-        "        --old         # if specified, the mined ann will be 3 blocks old\n" +
-        "        --contenttype # specify announcement content type\n" +
+        "        --contentType # specify announcement content type\n" +
         "        --content     # specify announcement content\n" +
-        "        --contentfile # specify announcement content in a file\n" +
+        "        --contentFile # specify announcement content in a file\n" +
+        "        --randContent # mine many announcements, each with random content\n" +
         "    <poolurl>         # the URL of the mining pool to connect to\n" +
         "\n" +
         "    See https://github.com/cjdelisle/PacketCrypt/blob/master/docs/annmine.md\n" +
@@ -322,14 +279,16 @@ const usage = () => {
 
 const parseContent = (args, then) => {
     let t = 0;
-    if (args.contenttype) {
-        t = Number(args.contenttype);
+    const ct = args.contentType || args.contenttype;
+    if (ct) {
+        t = Number(ct);
         if (isNaN(t) || t < 0 || t > 0xffffffff) {
-            throw new Error("Failed to parse content type [" + args.contenttype + "]");
+            throw new Error("Failed to parse content type [" + ct + "]");
         }
     }
-    if (args.contentfile) {
-        Fs.readFile(args.contentfile, (err, ret) => {
+    const cf = args.contentFile || args.contentfile;
+    if (cf) {
+        Fs.readFile(cf, (err, ret) => {
             if (err) { throw err; }
             then({ type: t, val: ret });
         });
@@ -350,7 +309,7 @@ const main = (argv) => {
         threads: 1,
         minerId: Math.floor(Math.random()*(1<<30)*2)
     };
-    const a = Minimist(argv.slice(2), { boolean: 'old' });
+    const a = Minimist(argv.slice(2), { boolean: ['randContent'] });
     if (!/http(s)?:\/\/.*/.test(a._[0])) { process.exit(usage()); }
     const conf = {
         corePath: a.corePath || defaultConf.corePath,
@@ -359,8 +318,8 @@ const main = (argv) => {
         poolUrl: a._[0],
         threads: a.threads || defaultConf.threads,
         minerId: a.minerId || defaultConf.minerId,
-        old: a.old === true,
-        content: undefined
+        content: undefined,
+        randContent: a.randContent || false,
     };
     if (!a.paymentAddr) {
         console.log("WARNING: You have not passed the --paymentAddr flag\n" +

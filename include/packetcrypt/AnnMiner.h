@@ -7,12 +7,43 @@ typedef struct AnnMiner_s AnnMiner_t;
 
 /**
  * Create a new announcement miner and allocate threads.
- * threads is the number of threads to use
- * outfiles is a list of output file descriptors
- * numOutfiles is the number of output file descriptors in outFiles
- * if sendPtr is non-zero, then write a PacketCrypt_Find_t, otherwise write the content
+ *
+ * @param minerId a number which will differentiate this announcement miner from others so
+ *     if they are mining announcements without content, they will not find the exact same
+ *     announcements.
+ * @param threads is the number of threads to use.
+ * @param outfiles is a list of output file descriptors.
+ * @param numOutfiles is the number of output file descriptors in outFiles.
+ * @param sendPtr if non-zero, then write a PacketCrypt_Find_t, otherwise write the content
  */
-AnnMiner_t* AnnMiner_create(int threads, int* outFiles, int numOutFiles, int sendPtr);
+AnnMiner_t* AnnMiner_create(
+    uint32_t minerId,
+    int threads,
+    int* outFiles,
+    int numOutFiles,
+    int sendPtr);
+
+typedef struct AnnMiner_Request_s {
+    // the bitcoin format hash target which must be beaten in order to
+    // output the resulting announcement.
+    uint32_t workTarget;
+
+    // the block number of the most recent block
+    uint32_t parentBlockHeight;
+
+    // the hash of the most recent block (for proving the time when the ann was created)
+    uint8_t parentBlockHash[32];
+
+    // a 32 byte pubkey, if all zeros then it is considered that the ann need not be signed
+    uint8_t signingKey[32];
+
+    // the type of the announcement content
+    uint32_t contentType;
+
+    // the length of the content
+    uint32_t contentLen;
+} AnnMiner_Request_t;
+_Static_assert(sizeof(AnnMiner_Request_t) == 80, "");
 
 /**
  * Begin mining announcements with a particular hash and content type.
@@ -20,15 +51,13 @@ AnnMiner_t* AnnMiner_create(int threads, int* outFiles, int numOutFiles, int sen
  * Every time an announcement is found, every time an announcement is found, it will
  * be written to fileNo
  *
- * @param ctx the annMiner,
- * @param headerTemplate a template for the announcement header, no part of this will
- *      be altered except for the softNonce (which will be completely overwritten) and
- *      the hardNonce which will be incremented
+ * @param ctx the annMiner.
+ * @param req a request for mining.
+ * @param content the announcement content. This is used in-place and must not be freed
+ *        until after you have called AnnMiner_stop() AnnMiner_Free() or AnnMiner_start()
+ *        again.
  */
-void AnnMiner_start(
-    AnnMiner_t* ctx,
-    PacketCrypt_AnnounceHdr_t* headerTemplate,
-    uint8_t parentBlockHash[32]);
+void AnnMiner_start(AnnMiner_t* ctx, AnnMiner_Request_t* req, uint8_t* content);
 
 /**
  * Stops the announcement miner.

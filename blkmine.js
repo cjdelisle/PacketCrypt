@@ -2,11 +2,12 @@
 const Spawn = require('child_process').spawn;
 const Fs = require('fs');
 const nThen = require('nthen');
-const Blake2b = require('blake2b');
 const Minimist = require('minimist');
+const MerkleTree = require('merkletreejs').MerkleTree;
 
 const Pool = require('./js/PoolClient.js');
 const Util = require('./js/Util.js');
+const Protocol = require('./js/Protocol.js');
 
 const DEFAULT_MAX_ANNS = 1024*1024;
 
@@ -84,6 +85,35 @@ const downloadAnnFile = (
             }
             annBin = res;
         }));
+    }).nThen((w) => {
+        let nt = nThen;
+        for (let i = 0; i < annBin.length; i += 1024) {
+            const annContentLen = annBin.readUInt32LE(i + 20);
+            if (annContentLen <= 32) { continue; }
+            const annContentHash = annBin.slice(i + 24, i + 56);
+            nt = nt((ww) => {
+                const cfname = 'ann_' + annContentHash.toString('hex') + '.bin';
+                const curl = serverUrl + '/content/' + cfname;
+                const cpath = wrkdir + '/contentdir/' + cfname;
+                console.log("Get announcement content [" + curl + "] -> [" + cpath + "]");
+                Util.httpGetBin(curl, ww((err, res) => {
+                    if (!res) {
+                        if (!err) { err = new Error("unknown error"); }
+                        ww.abort();
+                        w.abort();
+                        return cb(err);
+                    }
+                    Fs.writeFile(cpath, res, (err) => {
+                        if (err) {
+                            ww.abort();
+                            w.abort();
+                            cb(err);
+                        }
+                    });
+                }));
+            }).nThen;
+        }
+        nt(w());
     }).nThen((w) => {
         if (!annBin) { return; }
         Fs.writeFile(annPath, annBin, w((err) => {
@@ -248,6 +278,90 @@ const splitShares = (buf /*:Buffer*/) /*:Array<Buffer>*/ => {
     return out;
 };
 
+/*::
+type Share_t = {
+    contentProofIdx: number,
+    toSubmit: {
+        coinbase_commit: string,
+        header_and_proof: string,
+    }
+};
+*/
+
+const mkMerkleProof = (() => {
+    const split = (content, out) => {
+        out = out || [];
+        if (content.length <= 32) {
+            const b = Buffer.alloc(32);
+            content.copy(b);
+            out.push(b);
+            return out;
+        }
+        out.push(content.slice(0, 32));
+        split(content.slice(32), out);
+        return out;
+    };
+
+    const mkProof = (mt, arr, blockNum) => {
+        const p = mt.getProof(arr[blockNum]);
+        const proofList = p.map((x) => x.data);
+        proofList.unshift(arr[blockNum]);
+        return Buffer.concat(proofList);
+    };
+
+    const mkMerkleProof = (content /*:Buffer*/, ident /*:number*/) => {
+        if (content.length <= 32) { throw new Error("Content is too short to make a tree"); }
+        const arr = split(content);
+        const blocknum = ident % arr.length;
+        const mt = new MerkleTree(arr, Util.b2hash32);
+        return mkProof(mt, arr, blocknum);
+    };
+
+    return mkMerkleProof;
+})();
+
+// This converts the format of the share which is output from pcblk to the
+// format expected by BlkHandler
+const convertShare = (
+    buf /*:Buffer*/,
+    annContents /*:Array<Buffer>*/
+) /*:Share_t*/ => {
+    const coinbase = buf.slice(0, Protocol.COINBASE_COMMIT_LEN).toString('hex');
+    buf = buf.slice(Protocol.COINBASE_COMMIT_LEN);
+    const header = buf.slice(0, 80);
+    const proof = buf.slice(84);
+    const contentProofIdx = Util.getContentProofIdx(header, proof);
+    const contentProofs = [];
+    for (let i = 0; i < 4; i++) {
+        if (!annContents[i] || annContents[i].length <= 32) { continue; }
+        contentProofs.push(mkMerkleProof(annContents[i], contentProofIdx));
+    }
+
+    const submission = [
+        header,
+        Util.mkVarInt(Protocol.PC_PCP_TYPE),
+        Util.mkVarInt(proof.length),
+        proof,
+    ];
+
+    if (contentProofs.length) {
+        const cp = Buffer.concat(contentProofs);
+        submission.push(
+            Util.mkVarInt(Protocol.PC_CONTENTPROOFS_TYPE),
+            Util.mkVarInt(cp.length),
+            cp
+        );
+    }
+
+    return {
+        contentProofIdx: contentProofIdx,
+        toSubmit: {
+            coinbase_commit: coinbase,
+            header_and_proof: Buffer.concat(submission).toString('hex'),
+        }
+    };
+};
+
 const httpRes = (ctx /*:Context_t*/, res /*:IncomingMessage*/) => {
     const data = [];
     res.on('data', (d) => { data.push(d.toString('utf8')); });
@@ -283,6 +397,33 @@ const httpRes = (ctx /*:Context_t*/, res /*:IncomingMessage*/) => {
     });
 };
 
+const getAnnContent = (ctx, ann /*:Buffer*/, cb) => {
+    const length = ann.readUInt32LE(Protocol.ANN_CONTENT_LENGTH_OFFSET);
+    if (!length) { return void cb(); }
+    if (length <= 32) {
+        return void cb(undefined, ann.slice(Protocol.ANN_CONTENT_HASH_OFFSET,
+            Protocol.ANN_CONTENT_HASH_OFFSET + length));
+    }
+    const h = ann.slice(Protocol.ANN_CONTENT_HASH_OFFSET, Protocol.ANN_CONTENT_HASH_OFFSET + 32);
+    const file = ctx.config.dir + '/contentdir/ann_' + h.toString('hex') + '.bin';
+    Fs.readFile(file, (err, buf) => {
+        if (err) { return void cb(err); }
+        if (buf.length !== length) {
+            return void cb(new Error("Length of content file [" + file + "] is [" + buf.length +
+                "] but the announcement defined length is [" + length + "]"))
+        }
+        cb(undefined, buf);
+    });
+};
+
+const BLOCK_HEADER_OFFSET = 32+8+4+4;
+const PROOF_OFFSET = BLOCK_HEADER_OFFSET+80+4;
+const FIRST_ANN_OFFSET = PROOF_OFFSET+4;
+const getAnn = (share /*:Buffer*/, num /*:number*/) => {
+    const idx = FIRST_ANN_OFFSET + (num * 1024);
+    return share.slice(idx, idx + 1024);
+};
+
 const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) => {
     let fileBuf;
     nThen((w) => {
@@ -307,22 +448,37 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
         if (ctx.miner) { ctx.miner.kill('SIGHUP'); }
         ctx.handledShares[filePath] = true;
         splitShares(fileBuf).forEach((share, i) => {
-            // skip coinbase + bitcoinheader + _pad
-            const proof = share.slice(48 + 80 + 4);
-            const hash = Blake2b(32).update(proof).digest(Buffer.alloc(32));
-            const handlerNum = hash.readUInt16LE(0) % ctx.masterConf.submitBlockUrls.length;
-            const url = ctx.masterConf.submitBlockUrls[handlerNum];
-            //console.log(share.toString('hex'));
-            console.log("Uploading share [" + filePath + "] [" + i + "] to [" + url + "]");
-            const req = Util.httpPost(url, {
-                'Content-Type': 'application/octet-stream',
-                'x-pc-payto': ctx.config.paymentAddr
-            }, (res) => {
-                httpRes(ctx, res);
-            });
-            req.end(share);
-            req.on('error', (err) => {
-                console.log("Failed to upload share [" + err + "]");
+            const annContents = [];
+            let failed = false;
+            nThen((w) => {
+                [0,1,2,3].forEach((num) => {
+                    const ann = getAnn(share, num);
+                    getAnnContent(ctx, ann, w((err, buf) => {
+                        if (failed) { return; }
+                        if (!buf) {
+                            console.log("Unable to submit share");
+                            console.log(err);
+                            return;
+                        }
+                        annContents[num] = buf;
+                    }));
+                });
+            }).nThen((w) => {
+                if (failed) { return; }
+                const shr = convertShare(share, annContents);
+                const handlerNum = shr.contentProofIdx % ctx.masterConf.submitBlockUrls.length;
+                const url = ctx.masterConf.submitBlockUrls[handlerNum];
+                console.log("Uploading share [" + filePath + "] [" + i + "] to [" + url + "]");
+                const req = Util.httpPost(url, {
+                    'Content-Type': 'application/json',
+                    'x-pc-payto': ctx.config.paymentAddr
+                }, (res) => {
+                    httpRes(ctx, res);
+                });
+                req.end(JSON.stringify(shr.toSubmit));
+                req.on('error', (err) => {
+                    console.log("Failed to upload share [" + err + "]");
+                });
             });
         });
     }).nThen((w) => {
@@ -413,7 +569,7 @@ const mkLinks = (config, done) => {
                         return;
                     }
                     if (err.code === 'EEXIST') {
-                        // ??
+                        return;
                     }
                     if (err.code === 'ENOENT') {
                         // this is a race against deleteUselessAnns
@@ -435,7 +591,8 @@ const mkMiner = (ctx) => {
         '--threads', String(ctx.config.threads || 1),
         '--maxanns', String(ctx.config.maxAnns || 1024*1024),
         '--minerId', String(ctx.config.minerId),
-        ctx.config.dir + '/wrkdir'
+        ctx.config.dir + '/wrkdir',
+        ctx.config.dir + '/contentdir'
     ];
     console.log(ctx.config.corePath + ' ' + args.join(' '));
     const miner = Spawn(ctx.config.corePath, args, {
@@ -557,6 +714,7 @@ const launch = (config /*:Config_Miner_t*/) => {
         pool.getMasterConf(w((conf) => { masterConf = conf; }));
         Util.checkMkdir(config.dir + '/wrkdir', w());
         Util.checkMkdir(config.dir + '/anndir', w());
+        Util.checkMkdir(config.dir + '/contentdir', w());
         Util.clearDir(config.dir + '/wrkdir', w());
     }).nThen((w) => {
         mkLinks(config, w());
@@ -635,7 +793,9 @@ const main = (argv) => {
         maxAnns: a.maxAnns || defaultConf.maxAnns,
         threads: a.threads || defaultConf.threads,
         minerId: a.minerId || defaultConf.minerId,
-        old: false // just to please flow
+
+        // unused, just to please flow
+        randContent: false,
     };
     if (!a.paymentAddr) {
         console.log("WARNING: You have not passed the --paymentAddr flag\n" +

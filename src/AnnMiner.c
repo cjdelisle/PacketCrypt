@@ -12,6 +12,7 @@
 #include "Conf.h"
 #include "Util.h"
 #include "packetcrypt/Validate.h"
+#include "ContentMerkle.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -29,7 +30,6 @@ typedef struct {
     PacketCrypt_AnnounceHdr_t annHdr;
     Buf64_t hash;
 } HeaderAndHash_t;
-_Static_assert(sizeof(HeaderAndHash_t) == sizeof(PacketCrypt_AnnounceHdr_t)+64, "");
 
 typedef struct {
     CryptoCycle_Item_t table[Announce_TABLE_SZ];
@@ -39,6 +39,7 @@ typedef struct {
     Buf64_t annHash1; // hash(announce || merkleRoot)
 
     Buf32_t parentBlockHash;
+    char* content;
     HeaderAndHash_t hah;
 
     pthread_rwlock_t jobLock;
@@ -54,6 +55,7 @@ struct AnnMiner_s {
     HeaderAndHash_t hah;
 
     int sendPtr;
+    uint32_t minerId;
 
     int numOutFiles;
     int* outFiles;
@@ -176,11 +178,16 @@ static void search(Worker_t* restrict w)
         if (nonce > 0x00ffffff) { return; }
         if (Util_likely(!annHash(w, nonce++))) { continue; }
         // Found an ann!
-        assert(!Validate_checkAnn(
+        int res = Validate_checkAnn(
             NULL,
             (PacketCrypt_Announce_t*)&w->ann,
             w->activeJob->parentBlockHash.bytes,
-            &w->vctx));
+            &w->vctx);
+        if (res) {
+            fprintf(stderr, "Validate_checkAnn returned [%s]\n",
+                Validate_checkAnn_outToString(res));
+            assert(0 && "Internal error: Validate_checkAnn() failed");
+        }
 
         // Send the ann to an outfile segmented by it's hash so that if we are
         // submitting to a pool, the pool servers may insist that announcements
@@ -189,16 +196,27 @@ static void search(Worker_t* restrict w)
         Hash_COMPRESS32_OBJ(&hash, &w->ann);
         int outFile = w->ctx->outFiles[hash.longs[0] % w->ctx->numOutFiles];
 
-        if (w->ctx->sendPtr) {
-            uint8_t* ann = malloc(sizeof w->ann);
+        if (w->ctx->sendPtr || w->ann.hdr.contentLength > 32) {
+            ssize_t len = sizeof w->ann;
+            if (w->ann.hdr.contentLength > 32) {
+                len += w->ann.hdr.contentLength;
+            }
+            uint8_t* ann = malloc(len);
             assert(ann);
             memcpy(ann, &w->ann, sizeof w->ann);
-            PacketCrypt_Find_t f = {
-                .ptr = (uint64_t) ann,
-                .size = sizeof w->ann
-            };
-            ssize_t ret = write(outFile, &f, sizeof f);
-            assert(ret == sizeof f || ret == -1);
+            if (w->ann.hdr.contentLength > 32) {
+                assert(w->activeJob->content);
+                memcpy(&ann[1024], w->activeJob->content, w->ann.hdr.contentLength);
+            }
+            if (w->ctx->sendPtr) {
+                PacketCrypt_Find_t f = { .ptr = (uint64_t) ann, .size = sizeof w->ann };
+                ssize_t ret = write(outFile, &f, sizeof f);
+                assert(ret == sizeof f || ret == -1);
+            } else {
+                ssize_t ret = write(outFile, ann, len);
+                assert(ret == len || ret == -1);
+                free(ann);
+            }
         } else {
             ssize_t ret = write(outFile, &w->ann, sizeof w->ann);
             assert(ret == sizeof w->ann || ret == -1);
@@ -301,24 +319,36 @@ static void stopThreads(AnnMiner_t* ctx) {
     }
 }
 
-void AnnMiner_start(
-    AnnMiner_t* ctx,
-    PacketCrypt_AnnounceHdr_t* headerTemplate,
-    uint8_t parentBlockHash[32]
-) {
+void AnnMiner_start(AnnMiner_t* ctx, AnnMiner_Request_t* req, uint8_t* content) {
     stopThreads(ctx);
     while (!threadsStopped(ctx)) { Time_nsleep(100000); }
 
     HeaderAndHash_t hah;
     Buf_OBJSET(&hah, 0);
-    Buf_OBJCPY(&hah.annHdr, headerTemplate);
-    Buf_OBJCPY(&hah.hash.thirtytwos[0], (Buf32_t*)parentBlockHash);
+    hah.annHdr.hardNonce = ctx->minerId;
+    hah.annHdr.workBits = req->workTarget;
+    hah.annHdr.parentBlockHeight = req->parentBlockHeight;
+    hah.annHdr.contentType = req->contentType;
+    hah.annHdr.contentLength = req->contentLen;
+    Buf_OBJCPY(hah.annHdr.signingKey, req->signingKey);
+
+    Buf_OBJCPY(&hah.hash.thirtytwos[0], req->parentBlockHash);
+
+    if (req->contentLen) {
+        assert(content);
+        if (req->contentLen <= 32) {
+            memcpy(hah.annHdr.contentHash, content, req->contentLen);
+        } else {
+            ContentMerkle_compute((Buf32_t*)hah.annHdr.contentHash, content, req->contentLen);
+        }
+    }
 
     // if we're called with identical data, we should not reset the workers
     // because that will cause multiple searches of the same nonce space.
     if (Buf_OBJCMP(&ctx->hah, &hah) || !ctx->workers[0].activeJob) {
         Buf_OBJCPY(&ctx->hah, &hah);
-        makeNextJob(&hah, &ctx->jobs[0], headerTemplate->hardNonce);
+        makeNextJob(&hah, &ctx->jobs[0], hah.annHdr.hardNonce);
+        ctx->jobs[0].content = content;
         for (int i = 0; i < ctx->numWorkers; i++) {
             ctx->workers[i].activeJob = &ctx->jobs[0];
         }
@@ -332,7 +362,12 @@ void AnnMiner_start(
     return;
 }
 
-AnnMiner_t* AnnMiner_create(int threads, int* outFiles, int numOutFiles, int sendPtr)
+AnnMiner_t* AnnMiner_create(
+    uint32_t minerId,
+    int threads,
+    int* outFiles,
+    int numOutFiles,
+    int sendPtr)
 {
     assert(threads);
     AnnMiner_t* ctx = allocCtx(threads);
@@ -341,6 +376,7 @@ AnnMiner_t* AnnMiner_create(int threads, int* outFiles, int numOutFiles, int sen
     ctx->numOutFiles = numOutFiles;
     memcpy(ctx->outFiles, outFiles, sizeof(int) * numOutFiles);
     ctx->sendPtr = sendPtr;
+    ctx->minerId = minerId;
 
     int softNonceStep = 0x00ffffff / threads;
     for (int i = 0; i < threads; i++) {

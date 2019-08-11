@@ -28,7 +28,8 @@ export type Config_Miner_t = {
     threads: number,
     maxAnns?: number,
     minerId: number,
+
     content?: Config_Miner_Content_t,
-    old: bool
+    randContent: bool
 };
 */

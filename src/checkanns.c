@@ -43,7 +43,17 @@ typedef struct AnnEntry_s {
 } AnnEntry_t;
 _Static_assert(sizeof(AnnEntry_t) == 16, "");
 
-#define DEBUGF(...) fprintf(stderr, "checkanns: " __VA_ARGS__)
+static int tid() {
+    uint64_t t;
+    pthread_threadid_np(pthread_self(), &t);
+    return (int) t;
+}
+
+#define DEBUGF0(format) \
+    fprintf(stderr, "checkanns [%d]: " format, tid())
+
+#define DEBUGF(format, ...) \
+    fprintf(stderr, "checkanns [%d]: " format, tid(), __VA_ARGS__)
 
 static int usage() {
     fprintf(stderr, "Usage: ./checkanns <indir> <outdir> <anndir> <statedir> <tmpdir> "
@@ -404,7 +414,7 @@ static void processAnns(Worker_t* w, int fileNo) {
 
     Time t;
     Time_BEGIN(t);
-    DEBUGF("Processing ann file %s\n", w->lw.inFile->name);
+    //DEBUGF("Processing ann file %s\n", w->lw.inFile->name);
     for (;;) {
         uint8_t* contentBuf = NULL;
         uint32_t len = w->lw.inBuf.anns[0].hdr.contentLength;
@@ -432,29 +442,28 @@ static void processAnns(Worker_t* w, int fileNo) {
                 res.badContentHash++;
                 break;
             }
-        }
-        if (len > 0) {
-            Buf32_t headerHash;
-            Hash_COMPRESS32_OBJ(&headerHash, &w->lw.inBuf.anns[0]);
+
             uint8_t hash[65];
             for (int i = 0; i < 32; i++) {
-                sprintf(&hash[i*2], "%02x", headerHash.bytes[i]);
+                sprintf(&hash[i*2], "%02x", b.bytes[i]);
             }
             hash[64] = '\0';
             snprintf(w->lw.annContentFile.name, FilePath_NAME_SZ, "ann_%s.bin", hash);
             strncpy(w->lw.tmpFile.name, w->lw.annContentFile.name, FilePath_NAME_SZ);
+            // DEBUGF("writing content to temp file [%s] for content file [%s]\n",
+            //             w->lw.tmpFile.path, w->lw.annContentFile.path);
             int outFileNo = open(w->lw.tmpFile.path, O_CREAT | O_WRONLY, 0666);
             if (outFileNo < 0) {
                 DEBUGF("Unable to open output file [%s] [%s]\n",
                     w->lw.tmpFile.path, strerror(errno));
                 assert(0);
             }
-            checkedWrite(w->lw.tmpFile.path, outFileNo, &w->lw.inBuf.anns[0], 1024);
-            if (contentBuf) {
-                checkedWrite(w->lw.tmpFile.path, outFileNo, contentBuf, len);
-            }
+            checkedWrite(w->lw.tmpFile.path, outFileNo, contentBuf, len);
             close(outFileNo);
             if (processAnns1(w, &res, fileNo)) {
+                // We need to re-copy the filename over again because tmpFile might
+                // be used inside of processAnns1
+                strncpy(w->lw.tmpFile.name, w->lw.annContentFile.name, FilePath_NAME_SZ);
                 if (rename(w->lw.tmpFile.path, w->lw.annContentFile.path)) {
                     DEBUGF("error renaming temp file [%s] to content file [%s] [%s]\n",
                         w->lw.tmpFile.path, w->lw.annContentFile.path, strerror(errno));
@@ -518,9 +527,7 @@ static void processAnns(Worker_t* w, int fileNo) {
         assert(0);
     }
     Time_END(t);
-    DEBUGF("Done processing ann file [%s] in [%lu] ms  accept [%u] inval [%u] dup [%u]\n",
-        w->lw.inFile->name, (unsigned long)(Time_MICROS(t) / 1024),
-        res.accepted, res.invalid, res.duplicates);
+    printf("%s\n", buf);
 }
 
 void* workerLoop(void* vWorker) {
@@ -762,7 +769,7 @@ int main(int argc, const char** argv) {
             DEBUGF("Could not access state directory [%s] errno=[%s]", stateDir, strerror(errno));
             assert(0);
         }
-        DEBUGF("Loading state...\n");
+        DEBUGF0("Loading state...\n");
         loadState(mt, d);
         DEBUGF("Loaded [%d] dedup entries successfully, current parentBlockHeight [%u]\n",
             mt->g.dedup->dedupTableLen, mt->g.sao->state.hdr.parentBlockHeight);
@@ -782,13 +789,13 @@ int main(int argc, const char** argv) {
     while (!g_pleaseStop) {
         uint8_t discard[8];
         if (1 > read(STDIN_FILENO, discard, 8) && (EAGAIN != errno)) {
-            DEBUGF("Stdin is nolonger connected, exiting\n");
+            DEBUGF0("Stdin is nolonger connected, exiting\n");
             break;
         }
         if (WorkQueue_masterScan(mt->g.q)) { sleep(1); }
     }
 
-    DEBUGF("Got request to stop, stopping threads...\n");
+    DEBUGF0("Got request to stop, stopping threads...\n");
 
     WorkQueue_stop(mt->g.q);
 
@@ -802,5 +809,5 @@ int main(int argc, const char** argv) {
     assert(!pthread_mutex_unlock(&mt->g.deduplock));
 
     destroyMaster(mt);
-    DEBUGF("Graceful shutdown complete\n");
+    DEBUGF0("Graceful shutdown complete\n");
 }

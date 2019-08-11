@@ -175,11 +175,24 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
     return chk;
 }
 
+#define XX(x) case x: return #x;
+
+char* Validate_checkAnn_outToString(int code) {
+    switch (code) {
+        case Validate_checkAnn_OK: return NULL;
+        XX(Validate_checkAnn_INVAL)
+        XX(Validate_checkAnn_INVAL_ITEM4)
+        XX(Validate_checkAnn_INSUF_POW)
+        default:;
+    }
+    return "Validate_checkAnn_UNKNOWN_ERROR";
+}
+
 // Return a string form of the result of Validate_checkBlock()
 // if the result is Validate_checkBlock_OK (0) then NULL is returned.
 // any unrecognized code returns "Validate_checkBlock_UNKNOWN_ERROR"
 char* Validate_checkBlock_outToString(int code) {
-    #define XX(x) case x: return #x;
+
     #define XXX(x) case x ## _: { \
         switch ((code >> 8) & 0xff) { \
             case 0: return #x "(0)"; \
@@ -204,7 +217,7 @@ char* Validate_checkBlock_outToString(int code) {
         XX(Validate_checkBlock_BAD_COINBASE)
         default:;
     }
-    #undef XX
     #undef XXX
     return "Validate_checkBlock_UNKNOWN_ERROR";
 }
+#undef XX

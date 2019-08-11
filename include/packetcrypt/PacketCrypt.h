@@ -179,7 +179,7 @@ typedef struct {
     uint8_t merkleRoot[32];
     uint64_t numAnns;
 } PacketCrypt_Coinbase_t;
-_Static_assert(sizeof(PacketCrypt_Coinbase_t) == 32+8+4+4, "");
+_Static_assert(sizeof(PacketCrypt_Coinbase_t) == 48, "");
 
 typedef struct {
     uint64_t ptr;

@@ -1,27 +1,14 @@
 /*@flow*/
-const BLOCK_HEADER_OFFSET = 32+8+4+4;
-const PROOF_OFFSET = BLOCK_HEADER_OFFSET+80+4;
-const FIRST_ANN_OFFSET = PROOF_OFFSET+4;
-const ANN_CONTENT_LENGTH_OFFSET = 20;
-const ANN_PARENT_HEIGHT_OFFSET = 12;
-const ANN_SIGNING_KEY_OFFSET = 56;
-const SHARE_MIN_LENGTH = (32+8+4+4)+(80+4+4+(1024*4));
-const SHARE_MAX_LENGTH = SHARE_MIN_LENGTH * 4;
-
-const END_TYPE = 0;
-const PCP_TYPE = 1;
-const SIGNATURES_TYPE = 2;
-const CONTENTPROOFS_TYPE = 3;
-
 const nThen = require('nthen');
 const Http = require('http');
 const Tweetnacl = require('tweetnacl');
-const Blake2b = require('blake2b');
-const MerkleTree = require('merkletreejs').MerkleTree;
 
+const Protocol = require('./Protocol.js');
 const Util = require('./Util.js');
 const PoolClient = require('./PoolClient.js');
 const Rpc = require('./Rpc.js');
+
+const SHARE_MAX_LENGTH = 0xffff;
 
 /*::
 import type { Config_t } from './Config.js';
@@ -57,40 +44,6 @@ const parentNumInRange = (ctx, num) => {
     return num >= 0;
 };
 
-const b2hash = (content) => Blake2b(32).update(content).digest(Buffer.alloc(32));
-
-const mkMerkleProof = (() => {
-    const split = (content, out) => {
-        out = out || [];
-        if (content.length <= 32) {
-            const b = Buffer.alloc(32);
-            content.copy(b);
-            out.push(b);
-            return out;
-        }
-        out.push(content.slice(0, 32));
-        split(content.slice(32), out);
-        return out;
-    };
-
-    const mkProof = (mt, arr, blockNum) => {
-        const p = mt.getProof(arr[blockNum]);
-        const proofList = p.map((x) => x.data);
-        proofList.unshift(arr[blockNum]);
-        return Buffer.concat(proofList);
-    };
-
-    const mkMerkleProof = (content /*:Buffer*/, ident /*:number*/) => {
-        if (content.length <= 32) { throw new Error("Content is too short to make a tree"); }
-        const arr = split(content);
-        const blocknum = ident % arr.length;
-        const mt = new MerkleTree(arr, b2hash);
-        return mkProof(mt, arr, blocknum);
-    };
-
-    return mkMerkleProof;
-})();
-
 const COMMIT_PATTERN = Buffer.from(
     "6a3009f91102fcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfc"+
     "fcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfc", 'hex');
@@ -117,16 +70,16 @@ const onSubmit = (ctx, req, res) => {
 
     // Additional data which is needed with the pcp
     const signatures = [];
-    const contentProofs = [];
 
     const hashes = [];
-    let bytes;
+    let rawUpload;
     let blockTemplate;
     let currentWork;
     let hexblock;
     let submitRet;
-    let header;
+    let headerAndProof;
     let coinbase;
+    let coinbaseCommit;
     nThen((w) => {
         let len = 0;
         const data = [];
@@ -144,21 +97,30 @@ const onSubmit = (ctx, req, res) => {
                 errorEnd(400, 'no content');
             } else if (typeof(data[0]) === 'string') {
                 errorEnd(400, 'content not binary');
-            } else if (len < SHARE_MIN_LENGTH) {
-                errorEnd(400, 'runt content');
             } else {
-                bytes = Buffer.concat(data);
+                rawUpload = Buffer.concat(data);
             }
         }));
     }).nThen((w) => {
         if (failed) { return; }
 
-        const shareHash = b2hash(bytes.slice(PROOF_OFFSET));
-        const contentProofIdx = shareHash.readUInt32LE(0);
-        //console.log("Share proof idx " + contentProofIdx);
-        if (contentProofIdx % ctx.mut.hashMod !== ctx.mut.hashNum) {
-            return void errorEnd(400, "Share posted to wrong block handler");
+        try {
+            const shareObj = JSON.parse(rawUpload.toString('utf8'));
+            coinbaseCommit = Buffer.from(shareObj.coinbase_commit, 'hex');
+            headerAndProof = Buffer.from(shareObj.header_and_proof, 'hex');
+        } catch (e) {
+            return void errorEnd(400, "Upload is not parsable as json");
         }
+
+        const proofLen = Util.parseVarInt(headerAndProof.slice(81));
+        const proof = headerAndProof.slice(81 + proofLen[1], 81 + proofLen[1] + proofLen[0]);
+        do {
+            const cpi = Util.getContentProofIdx(headerAndProof.slice(0,80), proof);
+            //console.log("Share proof idx " + cpi);
+            if (cpi % ctx.mut.hashMod !== ctx.mut.hashNum) {
+                return void errorEnd(400, "Share posted to wrong block handler");
+            }
+        } while (0);
 
         currentWork = ctx.poolClient.work;
         if (!currentWork) {
@@ -167,7 +129,7 @@ const onSubmit = (ctx, req, res) => {
 
         // If the previous block hash doesn't match that of the current work, then the
         // share is for the wrong work (maybe it's too old?)
-        const sharePrevHash = bytes.slice(BLOCK_HEADER_OFFSET+4,BLOCK_HEADER_OFFSET+36);
+        const sharePrevHash = headerAndProof.slice(4,36);
         const currentWorkPrevHash = currentWork.header.slice(4,36);
         if (currentWorkPrevHash.compare(sharePrevHash)) {
             return void errorEnd(400, "Share is for wrong work, expecting previous hash [" +
@@ -175,11 +137,15 @@ const onSubmit = (ctx, req, res) => {
                 sharePrevHash.toString('hex') + ']');
         }
 
-        header = Buffer.from(currentWork.header);
-        const merkleRoot = bytes.slice(BLOCK_HEADER_OFFSET+36,BLOCK_HEADER_OFFSET+68);
-        merkleRoot.copy(header, 36);
-        const nonce = bytes.slice(BLOCK_HEADER_OFFSET+76,BLOCK_HEADER_OFFSET+80);
-        nonce.copy(header, 76);
+        // Swap the header from the current work over top of the header in the hap
+        do {
+            const header = Buffer.from(currentWork.header);
+            const merkleRoot = headerAndProof.slice(36,68);
+            merkleRoot.copy(header, 36);
+            const nonce = headerAndProof.slice(76,80);
+            nonce.copy(header, 76);
+            header.copy(headerAndProof);
+        } while (0);
 
         // Make sure we are able to get the block template, this is zero cost after the
         // first time it's tried...
@@ -191,12 +157,14 @@ const onSubmit = (ctx, req, res) => {
 
         let nt = nThen;
         [0,1,2,3].forEach((num) => {
-            const os = FIRST_ANN_OFFSET + (1024 * num);
-            const ann = bytes.slice(os, os + 1024);
+            if (failed) { return; }
+            const os = 4 + (1024 * num);
+            const ann = proof.slice(os, os + 1024);
 
-            const parentNum = ann.readUInt32LE(ANN_PARENT_HEIGHT_OFFSET);
-            const sigKey = ann.slice(ANN_SIGNING_KEY_OFFSET, ANN_SIGNING_KEY_OFFSET + 32);
-            const contentLen = ann.readUInt32LE(ANN_CONTENT_LENGTH_OFFSET);
+            const parentNum = ann.readUInt32LE(Protocol.ANN_PARENT_HEIGHT_OFFSET);
+            const sigKey = ann.slice(
+                Protocol.ANN_SIGNING_KEY_OFFSET,
+                Protocol.ANN_SIGNING_KEY_OFFSET + 32);
 
             // Verify the parent number is ok
             if (!parentNumInRange(ctx, parentNum)) {
@@ -216,22 +184,6 @@ const onSubmit = (ctx, req, res) => {
                 signatures.push(Tweetnacl.sign.detached(ann, keys.secretKey));
             }
 
-            // Get announcement content for each ann...
-            if (contentLen > 32) {
-                const annHash = Blake2b(32).update(ann).digest(Buffer.alloc(32));
-                nt = nt((w) => {
-                    ctx.poolClient.getAnn(annHash, w((err, content) => {
-                        if (err || !content) {
-                            errorEnd(400, 'announcement [' + num + '] content is not known');
-                            return;
-                        }
-                        content = content.slice(1024);
-                        //console.log('ann ' + annHash.toString('hex') + ' content length ' + content.length);
-                        contentProofs.push(mkMerkleProof(content, contentProofIdx));
-                    }));
-                }).nThen;
-            }
-
             // Block header hashes
             ctx.poolClient.getWorkByNum(parentNum + 1, w((work) => {
                 hashes[num] = work.lastHash;
@@ -241,16 +193,11 @@ const onSubmit = (ctx, req, res) => {
 
     }).nThen((w) => {
         if (failed) { return; }
-        // submit: header, length ( type, pcp ), length ( type, signatures ), length ( type, contentProofs )
-        const pcp = bytes.slice(PROOF_OFFSET);
         const blockTopArr = [
-            header,
-            Util.mkVarInt(PCP_TYPE),
-            Util.mkVarInt(pcp.length),
-            pcp
+            headerAndProof
         ];
         if (signatures.length > 0) {
-            blockTopArr.push(Util.mkVarInt(SIGNATURES_TYPE));
+            blockTopArr.push(Util.mkVarInt(Protocol.PC_SIGNATURES_TYPE));
             const sigs = Buffer.concat(signatures);
             blockTopArr.push(Util.mkVarInt(sigs.length));
             blockTopArr.push(sigs);
@@ -258,14 +205,8 @@ const onSubmit = (ctx, req, res) => {
         } else {
             //console.log("no signatures");
         }
-        if (contentProofs.length > 0) {
-            blockTopArr.push(Util.mkVarInt(CONTENTPROOFS_TYPE));
-            const proofs = Buffer.concat(contentProofs);
-            blockTopArr.push(Util.mkVarInt(proofs.length));
-            blockTopArr.push(proofs);
-        }
-        blockTopArr.push(Util.mkVarInt(END_TYPE), Util.mkVarInt(0));
-        const blockTop = Buffer.concat(blockTopArr);
+        blockTopArr.push(Util.mkVarInt(Protocol.PC_END_TYPE), Util.mkVarInt(0));
+        hexblock = Buffer.concat(blockTopArr).toString('hex');
 
         // just to please flow
         if (!currentWork) { throw new Error(); }
@@ -276,9 +217,8 @@ const onSubmit = (ctx, req, res) => {
         if (idx < 0) {
             return void errorEnd(500, "Commit pattern not present in blockTemplate");
         }
-        bytes.slice(0, BLOCK_HEADER_OFFSET).copy(coinbase, idx + COMMIT_PATTERN_OS);
+        coinbaseCommit.copy(coinbase, idx + COMMIT_PATTERN_OS);
 
-        hexblock = blockTop.toString('hex');
         const toSubmit = {
             height: currentWork.height,
             sharetarget: currentWork.shareTarget,

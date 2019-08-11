@@ -38,6 +38,7 @@ typedef struct AnnounceEffectiveWork_s AnnounceEffectiveWork_t;
 typedef struct Ann_s {
     PacketCrypt_Announce_t ann;
     AnnounceEffectiveWork_t* aewPtr;
+    uint8_t* content;
     uint64_t _treePosition;
 } Ann_t;
 
@@ -46,6 +47,7 @@ struct AnnounceEffectiveWork_s {
     uint32_t effectiveWork;
     uint32_t initialWork;
     uint32_t parentBlock;
+    char* _pad;
 };
 
 typedef struct NextAnnounceEffectiveWork_s {
@@ -53,6 +55,7 @@ typedef struct NextAnnounceEffectiveWork_s {
     uint32_t effectiveWork;
     uint32_t initialWork;
     uint32_t parentBlock;
+    uint8_t* content;
 } NextAnnounceEffectiveWork_t;
 
 // exists just in order to force same alignment
@@ -64,6 +67,7 @@ union AnnounceEffectiveWorkLike {
 typedef struct AnnounceList_s AnnounceList_t;
 struct AnnounceList_s {
     PacketCrypt_Announce_t* anns;
+    uint8_t** contents;
     uint64_t count;
     AnnounceList_t* next;
 };
@@ -228,7 +232,7 @@ static bool mine(Worker_t* w)
             for (int j = 0; j < 4; j++) {
                 uint64_t x = res.items[j] = CryptoCycle_getItemNo(&w->pcState) % w->bm->annCount;
                 CryptoCycle_Item_t* it = (CryptoCycle_Item_t*) &w->bm->anns[x].ann;
-                if (Util_unlikely(!CryptoCycle_update(&w->pcState, it, 0, NULL))) { continue; }
+                assert(CryptoCycle_update(&w->pcState, it, 0, NULL));
             }
             CryptoCycle_smul(&w->pcState);
             CryptoCycle_final(&w->pcState);
@@ -285,13 +289,12 @@ BlockMiner_t* BlockMiner_create(
     int fileNo,
     bool sendPtr)
 {
-    Ann_t* annBuf = malloc(sizeof(Ann_t) * maxAnns);
-    AnnounceEffectiveWork_t* aew = malloc(sizeof(AnnounceEffectiveWork_t) * maxAnns);
+    Ann_t* annBuf = calloc(sizeof(Ann_t), maxAnns);
+    AnnounceEffectiveWork_t* aew = calloc(sizeof(AnnounceEffectiveWork_t), maxAnns);
     Worker_t* workers = calloc(sizeof(Worker_t), threads);
     PacketCryptProof_Tree_t* tree = PacketCryptProof_allocTree(maxAnns);
-    BlockMiner_t* ctx = malloc(sizeof(BlockMiner_t));
+    BlockMiner_t* ctx = calloc(sizeof(BlockMiner_t), 1);
     assert(annBuf && aew && workers && tree && ctx);
-    Buf_OBJSET(ctx, 0);
 
     assert(!pthread_mutex_init(&ctx->lock, NULL));
     assert(!pthread_cond_init(&ctx->cond, NULL));
@@ -321,6 +324,14 @@ static void freeQueue(BlockMiner_t* ctx)
     AnnounceList_t* l = ctx->queue;
     while (l) {
         AnnounceList_t* ll = l->next;
+        // Do not free all of the contents themselves because they get pointer-copied into
+        // the Ann_t.
+        // for (int i = 0, j = 0; i < l->count; i++) {
+        //     if (l->anns[i].hdr.contentLength > 32) {
+        //         free(l->contents[j++]);
+        //     }
+        // }
+        free(l->contents);
         free(l->anns);
         free(l);
         l = ll;
@@ -357,6 +368,10 @@ void BlockMiner_free(BlockMiner_t* ctx)
     pthread_mutex_unlock(&ctx->lock);
     pthread_cond_broadcast(&ctx->cond);
     waitState(ctx, ThreadState_SHUTDOWN);
+
+    for (size_t i = 0; i < ctx->annCapacity; i++) {
+        free(ctx->anns[i].content);
+    }
 
     free(ctx->anns);
     freeQueue(ctx);
@@ -403,34 +418,58 @@ static void updateAew(
 static void prepareAnns(BlockMiner_t* bm, AnnounceList_t* list, uint32_t nextBlockHeight) {
     bm->nextAew = realloc(bm->nextAew, (bm->nextAewLen + list->count) * sizeof(bm->nextAew[0]));
     assert(bm->nextAew);
-    for (size_t i = 0, j = bm->nextAewLen; i < list->count; i++, j++) {
+    for (size_t i = 0, j = bm->nextAewLen, k = 0; i < list->count; i++, j++) {
         PacketCrypt_Announce_t* ann = &list->anns[i];
         NextAnnounceEffectiveWork_t* aew = &bm->nextAew[j];
         aew->initialWork = ann->hdr.workBits;
         aew->parentBlock = ann->hdr.parentBlockHeight;
         aew->ann = ann;
         aew->effectiveWork = 0xffffffff;
+        aew->content = (ann->hdr.contentLength > 32) ?
+            (aew->content = list->contents[k++]) : NULL;
     }
     updateAew(&bm->nextAew[bm->nextAewLen], list->count, nextBlockHeight);
     bm->nextAewLen += list->count;
 }
 
-int BlockMiner_addAnns(BlockMiner_t* bm, PacketCrypt_Announce_t* anns, uint64_t count, int noCopy)
+int BlockMiner_addAnns(
+    BlockMiner_t* bm,
+    PacketCrypt_Announce_t* anns,
+    uint8_t** contents,
+    uint64_t count,
+    int noCopy)
 {
     if (bm->state == State_LOCKED) { return BlockMiner_addAnns_LOCKED; }
     AnnounceList_t* l = calloc(sizeof(AnnounceList_t), 1);
     assert(l && anns);
     PacketCrypt_Announce_t* annsCpy = anns;
+    uint8_t** contentsCpy = contents;
     if (!noCopy) {
         annsCpy = malloc(sizeof(PacketCrypt_Announce_t) * count);
         assert(annsCpy);
         memcpy(annsCpy, anns, sizeof(PacketCrypt_Announce_t) * count);
+        if (contents) {
+            int contentCount = 0;
+            for (size_t i = 0; i < count; i++) {
+                contentCount += (anns[i].hdr.contentLength > 32);
+            }
+            contentsCpy = malloc(sizeof(char*) * contentCount);
+            assert(contentsCpy);
+            for (size_t i = 0, j = 0; i < count; i++) {
+                if (anns[i].hdr.contentLength <= 32) { continue; }
+                contentsCpy[j] = malloc(anns[i].hdr.contentLength);
+                assert(contentsCpy[j]);
+                memcpy(contentsCpy[j], contents[j], anns[i].hdr.contentLength);
+                j++;
+            }
+        }
     }
     for (size_t i = 0; i < count; i++) {
         // sanity
         assert(annsCpy[i].hdr.workBits);
     }
     l->anns = annsCpy;
+    l->contents = contentsCpy;
     l->count = count;
     l->next = bm->queue;
     bm->queue = l;
@@ -512,7 +551,7 @@ static void prepareNextBlock(BlockMiner_t* bm, uint32_t nextBlockHeight) {
 // so that start() can be called ASAP. This function runs after start or stop to clean
 // up the mess left behind.
 static void postLockCleanup(BlockMiner_t* bm) {
-    // free the queue and nextAem
+    // free the queue and nextAew
     freeQueue(bm);
 
     // We're going to clear readyForBlock because in theory the caller might be
@@ -603,6 +642,9 @@ int BlockMiner_lockForMining(
         // copy the ann into the table
         Buf_OBJCPY(&annTarget->ann, bm->nextAew[newAnnI].ann);
         Buf_OBJCPY(aewTarget, &bm->nextAew[newAnnI]);
+
+        free(annTarget->content);
+        annTarget->content = bm->nextAew[newAnnI].content;
 
         // assign pointers
         annTarget->aewPtr = aewTarget;

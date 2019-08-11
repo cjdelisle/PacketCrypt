@@ -62,7 +62,16 @@ const onBlock = (ctx /*:Context_t*/) => {
     nThen((w) => {
         // Make work entry
         ctx.rpcClient.getRawBlockTemplate(w((err, ret) => {
-            if (!ret) { throw new Error(err); }
+            if (err || !ret) {
+                console.log("Error getting block template, trying again in 10 seconds...");
+                console.log(err);
+                console.log(ret);
+                setTimeout(() => {
+                    onBlock(ctx);
+                }, 10000);
+                w.abort();
+                return;
+            }
             const keyPair = Util.getKeypair(ctx.mut.cfg.root, ret.result.height);
             let work = Protocol.workFromRawBlockTemplate(ret.result, keyPair.publicKey,
                 ctx.mut.cfg.shareMinWork, ctx.mut.cfg.annMinWork);

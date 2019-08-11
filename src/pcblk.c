@@ -25,7 +25,7 @@
 #define DEBUGF(...) fprintf(stderr, "pcblk: " __VA_ARGS__)
 
 static int usage() {
-    fprintf(stderr, "Usage: ./pcblk OPTIONS <wrkdir>\n"
+    fprintf(stderr, "Usage: ./pcblk OPTIONS <wrkdir> <contentdir>\n"
         "    OPTIONS:\n"
         "        --maxanns <n> # Maximum number of announcements to use when mining\n"
         "        --threads <n> # number of threads to use, default is 1\n"
@@ -33,6 +33,7 @@ static int usage() {
         "                      # exact same set of announcements, this ID will prevent them\n"
         "                      # from mining duplicate shares, default is 0\n"
         "    <wrkdir>          # a dir containing announcements grouped by parent block\n"
+        "    <contentdir>      # a dir containing any announcement content which is needed\n"
         "\n"
         "    See: https://github.com/cjdelisle/PacketCrypt/blob/master/docs/pcblk.md\n"
         "    for more information\n");
@@ -46,6 +47,7 @@ typedef struct Context_s {
     int64_t maxAnns;
 
     FilePath_t filepath;
+    FilePath_t contentpath;
     BlockMiner_t* bm;
 
     PoolProto_Work_t* currentWork;
@@ -97,6 +99,55 @@ static int loadFile(Context_t* ctx, const char* fileName) {
 
     close(fileno);
 
+    size_t numContents = 0;
+    for (size_t i = 0; i < numAnns; i++) {
+        numContents += (anns[i].hdr.contentLength > 32);
+    }
+
+    uint8_t** contents = NULL;
+    ssize_t bytes = st.st_size;
+    bool missingContent = false;
+
+    if (numContents) {
+        contents = calloc(sizeof(uint8_t*), numContents);
+        assert(contents);
+    }
+    for (size_t i = 0, c = 0; numContents && i < numAnns; i++) {
+        if (anns[i].hdr.contentLength <= 32) { continue; }
+        uint8_t* content = contents[c++] = malloc(anns[i].hdr.contentLength);
+        assert(content);
+        bytes += anns[i].hdr.contentLength;
+        uint8_t b[65];
+        for (int j = 0; j < 32; j++) {
+            sprintf(&b[j*2], "%02x", anns[i].hdr.contentHash[j]);
+        }
+        snprintf(ctx->contentpath.name, FilePath_NAME_SZ, "ann_%s.bin", b);
+        fileno = open(ctx->contentpath.path, O_RDONLY);
+        if (fileno < 0) {
+            if (errno == ENOENT) {
+                missingContent = true;
+                // we're going to fail the entire group of anns as one
+                DEBUGF("Content [%s] for announcement file [%s] idx [%d] is missing\n",
+                    ctx->contentpath.path, ctx->filepath.path, (int)i);
+                break;
+            } else {
+                DEBUGF("Failed to open announcement content [%s] for [%s] errno=[%s]\n",
+                    ctx->contentpath.path, ctx->filepath.path, strerror(errno));
+                free(anns);
+                return 0;
+            }
+        }
+        ssize_t ret = read(fileno, content, anns[i].hdr.contentLength);
+        if (ret == anns[i].hdr.contentLength) {
+            close(fileno);
+            continue;
+        }
+        DEBUGF("Failed to read announcement content [%s] for [%s] errno=[%s]\n",
+            ctx->contentpath.path, ctx->filepath.path, strerror(errno));
+        free(anns);
+        return 0;
+    }
+
     if (unlink(ctx->filepath.path)) {
         // make sure we can delete it before we add the announcements,
         // better to lose the announcements than to fill the miner to the moon with garbage.
@@ -105,9 +156,14 @@ static int loadFile(Context_t* ctx, const char* fileName) {
         return 0;
     }
 
+    if (missingContent) {
+        free(anns);
+        return 0;
+    }
+
     // DEBUGF("Loading [%llu] announcements from [%s]\n",
     //     (unsigned long long)numAnns, ctx->filepath.path);
-    int ret = BlockMiner_addAnns(ctx->bm, anns, numAnns, true);
+    int ret = BlockMiner_addAnns(ctx->bm, anns, contents, numAnns, true);
     if (ret) {
         if (ret == BlockMiner_addAnns_LOCKED) {
             DEBUGF("Could not add announcements, miner is locked\n");
@@ -266,6 +322,7 @@ int main(int argc, char** argv) {
     int threads = 1;
     int64_t minerId = 0;
     const char* wrkdirName = NULL;
+    const char* contentdirName = NULL;
     for (int i = 1; i < argc; i++) {
         if (maxAnns < 0) {
             maxAnns = strtoll(argv[i], NULL, 10);
@@ -293,13 +350,15 @@ int main(int argc, char** argv) {
             minerId = -1;
         } else if (!wrkdirName) {
             wrkdirName = argv[i];
+        } else if (!contentdirName) {
+            contentdirName = argv[i];
         } else {
             DEBUGF("I do not understand the argument %s\n", argv[i]);
             return usage();
         }
     }
 
-    if (!wrkdirName || maxAnns < 1 || threads < 1) { return usage(); }
+    if (!wrkdirName || !contentdirName || maxAnns < 1 || threads < 1) { return usage(); }
 
     // Setup before making any blocking calls to try to win races with the parent process.
     signal(SIGHUP, sighup);
@@ -328,6 +387,7 @@ int main(int argc, char** argv) {
 
     // for the specific numbered directories inside of the input dir
     FilePath_create(&ctx->filepath, wrkdirName);
+    FilePath_create(&ctx->contentpath, contentdirName);
 
     snprintf(ctx->filepath.name, FilePath_NAME_SZ, "shares_0.bin");
     int outfile = open(ctx->filepath.path, O_WRONLY | O_CREAT | O_EXCL, 0666);

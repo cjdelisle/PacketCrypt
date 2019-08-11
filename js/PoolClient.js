@@ -25,6 +25,7 @@ export type PoolClient_t = {
     config: Protocol_PcConfigJson_t,
     currentHeight: number,
     onWork: (f:(w:Protocol_Work_t)=>void)=>void,
+    getWork: (f:(w:Protocol_Work_t)=>void)=>void,
     onConnected: (f:()=>void)=>void,
     onDisconnected: (f:()=>void)=>void,
     getMasterConf: ((Protocol_PcConfigJson_t)=>void)=>void,

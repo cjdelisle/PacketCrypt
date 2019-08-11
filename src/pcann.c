@@ -21,12 +21,12 @@
 static int usage() {
     fprintf(stderr, "Usage: ./pcann OPTIONS\n"
         "    OPTIONS:\n"
-        "        --test        # testing, no input is needed, bogus anns will be made\n"
         "        --out <f>     # output file, will be reopened when there's new work\n"
         "                      # NOTE: If --out is passed more than once,\n"
         "                      # announcements will be sent to each file split up by the\n"
         "                      # numeric value of the first byte of the announcement hash\n"
         "        --threads <n> # specify number of threads to use (default: 1)\n"
+        "        --minerId <n> # set the number of the miner to dupe announcements\n"
         "\n"
         "    See: https://github.com/cjdelisle/PacketCrypt/blob/master/docs/pcann.md\n"
         "    for more information\n");
@@ -34,20 +34,6 @@ static int usage() {
 }
 
 #define DEBUGF(...) fprintf(stderr, "pcann: " __VA_ARGS__)
-
-typedef struct {
-    PacketCrypt_AnnounceHdr_t hdr;
-    Buf32_t parentBlockHash;
-} Request_t;
-
-_Static_assert(sizeof(Request_t) == 88+32, "");
-
-static void setTestVal(Request_t* req) {
-    memset(req, 0, sizeof *req);
-    req->hdr.parentBlockHeight = 122;
-    req->hdr.workBits = 0x20000fff;
-    Buf_OBJCPY(&req->parentBlockHash, "abcdefghijklmnopqrstuvwxyz01234");
-}
 
 struct Files {
     int count;
@@ -68,11 +54,12 @@ int main(int argc, const char** argv) {
     if (argc < 2) { return usage(); }
 
     struct Files files = { .count = 0 };
-    bool test = false;
     long threads = 1;
+    uint32_t minerId = 0;
     {
         bool out = false;
         bool t = false;
+        bool mid = false;
         for (int i = 1; i < argc; i++) {
             const char* arg = argv[i];
             if (out) {
@@ -86,12 +73,26 @@ int main(int argc, const char** argv) {
                     return usage();
                 }
                 t = false;
-            } else if (!strcmp(arg, "--test")) {
-                test = true;
+            } else if (mid) {
+                errno = 0;
+                long lminerId = strtol(arg, NULL, 10);
+                if (lminerId == 0 && errno != 0) {
+                    DEBUGF("--minerId parameter [%s] could not be parsed as a number\n", arg);
+                    return usage();
+                }
+                if (lminerId < 0 || lminerId > 0xffffffff) {
+                    DEBUGF("--minerId parameter [%s] is out of range\n", arg);
+                    DEBUGF("must be an integer between 0 and 4294967295\n");
+                    return usage();
+                }
+                minerId = lminerId;
+                mid = false;
             } else if (!strcmp(arg, "--out")) {
                 out = true;
             } else if (!strcmp(arg, "--threads")) {
                 t = true;
+            } else if (!strcmp(arg, "--minerId")) {
+                mid = true;
             } else {
                 DEBUGF("Invalid argument [%s]\n", arg);
                 return usage();
@@ -108,57 +109,68 @@ int main(int argc, const char** argv) {
         }
         files.fileNos[i] = outFileNo;
     }
-    AnnMiner_t* annMiner = AnnMiner_create(threads, files.fileNos, files.count, 0);
+    AnnMiner_t* annMiner = AnnMiner_create(minerId, threads, files.fileNos, files.count, 0);
 
-    Request_t req;
-    if (test) { setTestVal(&req); }
-    bool newData = true;
+    AnnMiner_Request_t req;
+    char* content = NULL;
+    char* pleaseFree = NULL;
     for (;;) {
-        if (!test) {
-            for (;;) {
-                ssize_t ret = fread(&req, sizeof req, 1, stdin);
-                if (!ret) {
-                    if (errno == 0) {
-                        // EOF, parent died
-                        DEBUGF("Parent dead, shutting down\n");
-                        return 0;
-                    }
-                    DEBUGF("Failed read of stdin [%d] [%s]\n", errno, strerror(errno));
-                    sleep(1);
-                    continue;
+        for (;;) {
+            //DEBUGF("Read input\n");
+            ssize_t ret = fread(&req, sizeof req, 1, stdin);
+            //DEBUGF("Read input complete\n");
+            if (!ret) {
+                if (errno == 0) {
+                    // EOF, parent died
+                    DEBUGF("Parent dead, shutting down\n");
+                    return 0;
                 }
-                assert(ret == 1);
-                break;
+                DEBUGF("Failed read of stdin [%d] [%s]\n", errno, strerror(errno));
+                sleep(1);
+                continue;
             }
-            newData = true;
-        }
-        if (newData) {
-            if (files.count) {
-                AnnMiner_stop(annMiner);
-                for (int i = 0; i < files.count; i++) {
-                    int newOutFileNo = open(files.names[i], O_WRONLY | O_CREAT | O_APPEND, 0666);
-                    if (newOutFileNo < 0) {
-                        DEBUGF("Error: unable to re-open outfile [%s] [%s]\n",
-                            files.names[i], strerror(errno));
-                        return 100;
-                    }
-                    if (dup2(newOutFileNo, files.fileNos[i]) < 0) {
-                        DEBUGF("Error: unable to dup2() outfile [%s]\n",
-                            strerror(errno));
-                        return 100;
-                    }
-                    close(newOutFileNo);
+            assert(ret == 1);
+            if (req.contentLen) {
+                assert(req.contentLen < 0xffff);
+                pleaseFree = content;
+                content = malloc(req.contentLen);
+                assert(content);
+                //DEBUGF("Read content [%d]\n", req.contentLen);
+                if (fread(content, req.contentLen, 1, stdin) != 1) {
+                    DEBUGF("Unable to read ann data [%d] [%s], stopping\n",
+                        errno, strerror(errno));
+                    return 100;
                 }
+                //DEBUGF("Read content complete\n");
             }
-            DEBUGF("Starting job with work target %08x\n", req.hdr.workBits);
-            AnnMiner_start(annMiner, &req.hdr, req.parentBlockHash.bytes);
-            newData = false;
+            break;
         }
+        if (files.count) {
+            AnnMiner_stop(annMiner);
+            for (int i = 0; i < files.count; i++) {
+                //DEBUGF("Re-opening file [%s]\n", files.names[i]);
+                int newOutFileNo = open(files.names[i], O_WRONLY | O_CREAT | O_APPEND, 0666);
+                if (newOutFileNo < 0) {
+                    DEBUGF("Error: unable to re-open outfile [%s] [%s]\n",
+                        files.names[i], strerror(errno));
+                    return 100;
+                }
+                if (dup2(newOutFileNo, files.fileNos[i]) < 0) {
+                    DEBUGF("Error: unable to dup2() outfile [%s]\n",
+                        strerror(errno));
+                    return 100;
+                }
+                close(newOutFileNo);
+            }
+        }
+        DEBUGF("Starting job with work target [%08x] and content length [%d]\n",
+            req.workTarget, req.contentLen);
+        AnnMiner_start(annMiner, &req, content);
+        free(pleaseFree);
+        pleaseFree = NULL;
 
         int64_t hps = AnnMiner_getHashesPerSecond(annMiner);
         if (hps) { DEBUGF("%lu hashes per second\n", (unsigned long)hps); }
-
-        if (test) { sleep(1); }
     }
 
     AnnMiner_free(annMiner);

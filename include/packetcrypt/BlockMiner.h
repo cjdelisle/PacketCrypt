@@ -76,7 +76,12 @@ void BlockMiner_free(BlockMiner_t* bm);
  * You cannot add announcements while the miner is locked but you can once it begins mining.
  */
 #define BlockMiner_addAnns_LOCKED 1
-int BlockMiner_addAnns(BlockMiner_t* bm, PacketCrypt_Announce_t* anns, uint64_t count, int noCopy);
+int BlockMiner_addAnns(
+    BlockMiner_t* bm,
+    PacketCrypt_Announce_t* anns,
+    uint8_t** contents,
+    uint64_t count,
+    int noCopy);
 
 /**
  * Prepare the miner for mining a block, this call outputs a coinbase commitment to your location

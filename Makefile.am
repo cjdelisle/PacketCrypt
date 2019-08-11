@@ -33,6 +33,7 @@ libpacketcrypt_a_SOURCES = Makefile\
     src/Announce.c              src/Announce.h \
                                 src/Buf.h \
                                 src/Conf.h \
+    src/ContentMerkle.c         src/ContentMerkle.h \
     src/CryptoCycle.c           src/CryptoCycle.h \
                                 src/DecodeInsn.h \
     src/Difficulty.c            src/Difficulty.h \

@@ -198,7 +198,7 @@ const onReq = (ctx, req, res) => {
     }
     if (req.url === '/submit') { return void onSubmit(ctx, req, res); }
     if (req.url.startsWith('/anns/')) { return void getAnns(ctx, req, res); }
-    if (req.url.startsWith('/ann/')) { return void getAnn(ctx, req, res); }
+    if (req.url.startsWith('/content/')) { return void getAnn(ctx, req, res); }
     res.statusCode = 404;
     return void res.end(JSON.stringify({ error: "not found" }));
 };
@@ -272,6 +272,11 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
                         delete ctx.pendingRequests[path];
                         return;
                     }
+                    const content = JSON.stringify({ warn: [], error: [], result: obj });
+                    pr.res.writeHead(200, {
+                        'Content-Type': 'application/json',
+                        'Content-Length': String(content.length)
+                    });
                     pr.res.end(JSON.stringify({ warn: [], error: [], result: obj }));
                     delete ctx.pendingRequests[path];
                     Fs.unlink(path, (err) => {

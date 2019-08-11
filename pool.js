@@ -12,25 +12,26 @@ import type { Config_t } from './js/Config.js'
 
 const config = {};
 config.privateSeed = 'controls who can mine with your announcements, you should change it';
-config.masterUrl = 'http://pool.cjdns.fr/ng_master';
+//config.masterUrl = 'http://pool.cjdns.fr/ng_master';
+config.masterUrl = 'http://localhost:8080';
 config.rootWorkdir = './datastore/pool';
 config.checkannsPath = './bin/checkanns';
 config.checksharesPath = './bin/checkshares';
 config.rpc = {
     protocol: 'https',
-    user: '/j/N4iV5SgMzSH6U3t6gkrs04Lg=',
-    pass: 'yqHQLrkt/EKUHIGrn7t33O6sDLg=',
+    user: '4reKpdVkygRyWv+2luJ2aWRWBKc=',
+    pass: 'SHhCYQQTb9LSo6lVtx35gdmLEmg=',
     host: '127.0.0.1',
-    port: 18334,
+    port: 18335,
     rejectUnauthorized: false
 };
 config.annHandlers = [
-    { url: 'http://pool.cjdns.fr/ng_ann0', port: 8081, threads: 4, root: config },
-    //{ url: 'http://localhost:8082', port: 8082, threads: 4, root: config },
+    //{ url: 'http://pool.cjdns.fr/ng_ann0', port: 8081, threads: 4, root: config },
+    { url: 'http://localhost:8081', port: 8081, threads: 4, root: config },
 ];
 config.blkHandlers = [
-    { url: 'http://pool.cjdns.fr/ng_blk0', port: 8083, threads: 4, root: config },
-    //{ url: 'http://localhost:8084', port: 8084, threads: 4, root: config },
+    //{ url: 'http://pool.cjdns.fr/ng_blk0', port: 8083, threads: 4, root: config },
+    { url: 'http://localhost:8082', port: 8082, threads: 4, root: config },
 ];
 config.master = {
     port: 8080,
