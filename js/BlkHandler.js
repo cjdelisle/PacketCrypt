@@ -266,7 +266,7 @@ const onSubmit = (ctx, req, res) => {
                         result: {
                             payTo: payTo,
                             ok: true,
-                            block: false
+                            block: true
                         },
                         error: [],
                         warn: []
@@ -281,7 +281,7 @@ const onSubmit = (ctx, req, res) => {
                 result: {
                     payTo: payTo,
                     ok: true,
-                    block: true
+                    block: false
                 },
                 error: [],
                 warn: []
