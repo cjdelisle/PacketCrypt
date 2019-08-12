@@ -431,8 +431,10 @@ static void prepareAnns(BlockMiner_t* bm, AnnounceList_t* list, uint32_t nextBlo
         aew->parentBlock = ann->hdr.parentBlockHeight;
         aew->ann = ann;
         aew->effectiveWork = 0xffffffff;
-        aew->content = (ann->hdr.contentLength > 32) ?
-            (aew->content = list->contents[k++]) : NULL;
+        aew->content = NULL;
+        if (ann->hdr.contentLength > 32) {
+            aew->content = list->contents[k++];
+        }
     }
     updateAew(&bm->nextAew[bm->nextAewLen], list->count, nextBlockHeight);
     bm->nextAewLen += list->count;

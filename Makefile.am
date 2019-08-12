@@ -5,6 +5,7 @@ CFLAGS = \
     -Wextra \
     -Wno-pointer-sign \
     -Wno-unused-parameter \
+    -Wno-stringop-truncation \
     -std=c11 \
     -g \
     -O3 -march=native -Werror
