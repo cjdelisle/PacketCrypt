@@ -43,17 +43,11 @@ typedef struct AnnEntry_s {
 } AnnEntry_t;
 _Static_assert(sizeof(AnnEntry_t) == 16, "");
 
-static int tid() {
-    uint64_t t;
-    pthread_threadid_np(pthread_self(), &t);
-    return (int) t;
-}
-
 #define DEBUGF0(format) \
-    fprintf(stderr, "checkanns [%d]: " format, tid())
+    fprintf(stderr, "checkanns: " format)
 
 #define DEBUGF(format, ...) \
-    fprintf(stderr, "checkanns [%d]: " format, tid(), __VA_ARGS__)
+    fprintf(stderr, "checkanns: " format, __VA_ARGS__)
 
 static int usage() {
     fprintf(stderr, "Usage: ./checkanns <indir> <outdir> <anndir> <statedir> <tmpdir> "
