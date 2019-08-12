@@ -65,7 +65,7 @@ const httpRes = (ctx, res /*:IncomingMessage*/, reqNum) => {
             console.error("[" + reqNum +  "] WARNING: Pool replied without a result [" + d + "]");
             return;
         }
-        console.log("[" + reqNum +  "] RESULT: [" + JSON.stringify(result) + "]");
+        console.error("[" + reqNum +  "] RESULT: [" + JSON.stringify(result) + "]");
     });
 };
 
@@ -75,7 +75,7 @@ const backtrace = () => { try { throw new Error(); } catch (e) { return e.stack;
 
 const messageMiner = (ctx, msg) => {
     if (!ctx.miner) { return; }
-    //console.log("Signaling miner " + backtrace());
+    //console.error("Signaling miner " + backtrace());
     ctx.miner.stdin.write(msg);
 };
 
@@ -179,7 +179,7 @@ const doRefreshWork = (ctx) => {
         rotateAndUpload(ctx, (didUpload) => {
             const expired = (+new Date()) > (REBUILD_JOB_EVERY_MS + ctx.lastWorkRefresh);
             if (!ctx.pool.work) {
-                console.log('no work');
+                console.error('no work');
             } else if (didUpload || expired) {
                 rebuildJob(ctx, ctx.pool.work);
             }
@@ -203,7 +203,7 @@ const mkMiner = (config, submitAnnUrls) => {
     submitAnnUrls.forEach((url, i) => {
         args.push('--out', getFileName(config, i));
     });
-    console.log(config.corePath + ' ' + args.join(' '));
+    console.error(config.corePath + ' ' + args.join(' '));
     return Spawn(config.corePath, args, {
         stdio: [ 'pipe', 1, 2 ]
     });
@@ -322,7 +322,7 @@ const main = (argv) => {
         randContent: a.randContent || false,
     };
     if (!a.paymentAddr) {
-        console.log("WARNING: You have not passed the --paymentAddr flag\n" +
+        console.error("WARNING: You have not passed the --paymentAddr flag\n" +
             "    as a default, " + DEFAULT_PAYMENT_ADDR + " will be used,\n" +
             "    cjd appreciates your generosity");
     }

@@ -37,6 +37,11 @@ export type PoolClient_t = {
 
 const debug = (msg) => { console.error("PoolClient: " + msg); };
 
+const debugGotWork = (work) => {
+    debug("Got work - " + work.height + ' ' + work.lastHash.toString('hex') +
+        ' - ' + work.annTarget.toString(16) + ' - ' + work.shareTarget.toString(16));
+};
+
 const workUrl2 = (pool /*:PoolClient_t*/, height /*:number*/) => {
     return pool.config.masterUrl + '/work_' + height + '.bin';
 };
@@ -65,22 +70,18 @@ const startLongPoll2 = (pool /*:PoolClient_t*/) => {
         if (work.height >= pool.currentHeight) {
             pool.currentHeight = work.height;
             pool.work = work;
-            debug("New work - " + work.height + ' ' + work.lastHash.toString('hex'));
+            debugGotWork(work);
             pool._ee.emit('work', work);
         }
         startLongPoll2(pool);
     });
 };
 
-const debugGotWork = (work) => {
-    debug("Got work - " + work.height + ' ' + work.lastHash.toString('hex') +
-        ' - ' + work.annTarget.toString(16) + ' - ' + work.shareTarget.toString(16));
-};
-
 const connectionChecker = (pool, first) => {
     const to = setTimeout(() => {
         if (first) { return; }
         pool.connected = false;
+        debug("Disconnected");
         pool._ee.emit('disconnected');
     }, DISCONNECTED_MS);
 

@@ -39,7 +39,7 @@ const getAnnFileParentNum = (filePath, _cb) => {
         const buf = Buffer.concat(data);
         if (buf.length < 16) { return void cb(new Error("Could not read file [" + filePath + "]")); }
         const blockNo = buf.readUInt32LE(12);
-        //console.log("Got announcements with parent block number [" + blockNo + "]");
+        //console.error("Got announcements with parent block number [" + blockNo + "]");
         cb(undefined, blockNo);
     });
     stream.on('error', (err) => {
@@ -76,7 +76,7 @@ const downloadAnnFile = (
             return void cb({ code: 'EEXIST', annPath: annPath });
         }));
     }).nThen((w) => {
-        console.log("Get announcements [" + url + "] -> [" + annPath + "]");
+        console.error("Get announcements [" + url + "] -> [" + annPath + "]");
         Util.httpGetBin(url, w((err, res) => {
             if (!res) {
                 if (!err) { err = new Error("unknown error"); }
@@ -95,7 +95,7 @@ const downloadAnnFile = (
                 const cfname = 'ann_' + annContentHash.toString('hex') + '.bin';
                 const curl = serverUrl + '/content/' + cfname;
                 const cpath = wrkdir + '/contentdir/' + cfname;
-                console.log("Get announcement content [" + curl + "] -> [" + cpath + "]");
+                //console.error("Get announcement content [" + curl + "] -> [" + cpath + "]");
                 Util.httpGetBin(curl, ww((err, res) => {
                     if (!res) {
                         if (!err) { err = new Error("unknown error"); }
@@ -148,10 +148,10 @@ const downloadAnnFile = (
 
 /*
 if (searchBackward && err.statusCode === 404) {
-    console.log("Backward search on server [" + server + "] complete");
+    console.error("Backward search on server [" + server + "] complete");
     return;
 }
-console.log("Unable to get ann file at [" + url + "] [" + String(err) + "]");
+console.error("Unable to get ann file at [" + url + "] [" + String(err) + "]");
 return true;
 */
 
@@ -162,7 +162,7 @@ const getAnnFileNum = (
     const url = server + '/anns/index.json';
     Util.httpGetStr(url, (err, res) => {
         if (!res) {
-            console.log("Unable to contact AnnHandler at [" + url + "] [" + String(err) + "]");
+            console.error("Unable to contact AnnHandler at [" + url + "] [" + String(err) + "]");
             return true;
         }
         let num = NaN;
@@ -171,11 +171,11 @@ const getAnnFileNum = (
             num = Number(obj.highestAnnFile);
         } catch (e) { }
         if (isNaN(num)) {
-            console.log("in response from [" + url + "] could not parse [" + res + "]");
+            console.error("in response from [" + url + "] could not parse [" + res + "]");
             return true;
         }
         if (num < 0) {
-            console.log("Ann server doesn't have any anns yet, trying again in 10 seconds");
+            console.error("Ann server doesn't have any anns yet, trying again in 10 seconds");
             return void setTimeout(() => { getAnnFileNum(server, then); }, 10000);
         }
         then(num);
@@ -221,7 +221,7 @@ const onNewWork = (ctx /*:Context_t*/, work, done) => {
             }
         }));
     }).nThen((w) => {
-        //console.log("Writing work.bin");
+        //console.error("Writing work.bin");
         Fs.writeFile(ctx.config.dir + '/wrkdir/_work.bin', work.binary, w((err) => {
             if (err) { throw err; }
             Fs.rename(
@@ -427,19 +427,19 @@ const getAnn = (share /*:Buffer*/, num /*:number*/) => {
 const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) => {
     let fileBuf;
     nThen((w) => {
-        //console.log("uploadShares2 " + filePath);
+        //console.error("uploadShares2 " + filePath);
         Fs.readFile(filePath, w((err, ret) => {
             if (err) {
                 // could be ENOENT if the file was deleted in the mean time because
                 // new work arrived.
                 if (err.code === 'ENOENT') {
-                    console.log("Shares [" + filePath + "] disappeared");
+                    console.error("Shares [" + filePath + "] disappeared");
                     return;
                 }
                 throw err;
             }
             if (ret.length > 0) {
-                //console.log("Uploading shares [" + filePath + "]");
+                //console.error("Uploading shares [" + filePath + "]");
                 fileBuf = ret;
             }
         }));
@@ -456,8 +456,8 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
                     getAnnContent(ctx, ann, w((err, buf) => {
                         if (failed) { return; }
                         if (!buf) {
-                            console.log("Unable to submit share");
-                            console.log(err);
+                            console.error("Unable to submit share");
+                            console.error(err);
                             return;
                         }
                         annContents[num] = buf;
@@ -468,7 +468,7 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
                 const shr = convertShare(share, annContents);
                 const handlerNum = shr.contentProofIdx % ctx.masterConf.submitBlockUrls.length;
                 const url = ctx.masterConf.submitBlockUrls[handlerNum];
-                console.log("Uploading share [" + filePath + "] [" + i + "] to [" + url + "]");
+                console.error("Uploading share [" + filePath + "] [" + i + "] to [" + url + "]");
                 const req = Util.httpPost(url, {
                     'Content-Type': 'application/json',
                     'x-pc-payto': ctx.config.paymentAddr
@@ -477,7 +477,7 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
                 });
                 req.end(JSON.stringify(shr.toSubmit));
                 req.on('error', (err) => {
-                    console.log("Failed to upload share [" + err + "]");
+                    console.error("Failed to upload share [" + err + "]");
                 });
             });
         });
@@ -513,7 +513,7 @@ const checkShares = (ctx /*:Context_t*/) => {
                     if (i > 0 && ctx.handledShares[filePath]) {
                         Fs.unlink(filePath, w((err) => {
                             if (err && err.code !== 'ENOENT') {
-                                console.log("WARNING: failed to delete file [" + filePath + "]");
+                                console.error("WARNING: failed to delete file [" + filePath + "]");
                                 return;
                             }
                             delete ctx.handledShares[filePath];
@@ -544,12 +544,12 @@ const checkShares = (ctx /*:Context_t*/) => {
 
 const deleteUselessAnns = (config, height, done) => {
     Util.deleteUselessAnns(config.dir + '/anndir', height, (f, done2) => {
-        console.log("Deleted expired announcements [" + f + "]");
+        console.error("Deleted expired announcements [" + f + "]");
         const path = config.dir + '/anndir/' + f;
         Fs.unlink(path, (err) => {
             done2();
             if (!err) { return; }
-            console.log("Failed to delete [" + path + "] [" + err.message + "]");
+            console.error("Failed to delete [" + path + "] [" + err.message + "]");
         });
     }, done);
 };
@@ -573,7 +573,7 @@ const mkLinks = (config, done) => {
                     }
                     if (err.code === 'ENOENT') {
                         // this is a race against deleteUselessAnns
-                        console.log("Failed to link [" + f + "] because file is missing");
+                        console.error("Failed to link [" + f + "] because file is missing");
                         return;
                     }
                     throw err;
@@ -594,12 +594,12 @@ const mkMiner = (ctx) => {
         ctx.config.dir + '/wrkdir',
         ctx.config.dir + '/contentdir'
     ];
-    console.log(ctx.config.corePath + ' ' + args.join(' '));
+    console.error(ctx.config.corePath + ' ' + args.join(' '));
     const miner = Spawn(ctx.config.corePath, args, {
         stdio: [ 'pipe', 1, 2 ]
     });
     miner.on('close', (num, sig) => {
-        console.log("pcblk died [" + num + "] [" + sig + "], restarting in 5 seconds");
+        console.error("pcblk died [" + num + "] [" + sig + "], restarting in 5 seconds");
         nThen((w) => {
             setTimeout(w(), 5000);
         }).nThen((w) => {
@@ -616,7 +616,7 @@ const mkMiner = (ctx) => {
 
 const downloadOldAnns = (config, masterConf, done) => {
     let nt = nThen;
-    console.log("Downloading announcements to fill memory");
+    console.error("Downloading announcements to fill memory");
 
     const serverCurrentNum = [];
     masterConf.downloadAnnUrls.forEach((server, i) => {
@@ -639,11 +639,11 @@ const downloadOldAnns = (config, masterConf, done) => {
     let activeServers;
     const again = (i) => {
         if (!activeServers) {
-            console.log("No more announcements available on any server, done");
+            console.error("No more announcements available on any server, done");
             return void done();
         }
         if (totalLen >= maxLen) {
-            console.log("Downloaded enough announcements to fill available memory, done");
+            console.error("Downloaded enough announcements to fill available memory, done");
             return void done();
         }
         if (i > serverCurrentNum.length) { i = 0; }
@@ -664,12 +664,12 @@ const downloadOldAnns = (config, masterConf, done) => {
                 return void again(i + 1);
             }
             if (err && err.statusCode === 404) {
-                console.log("Reached the end of useful announcements on [" + as.server + "]");
+                console.error("Reached the end of useful announcements on [" + as.server + "]");
                 serverCurrentNum[i] = undefined;
                 activeServers--;
                 return void again(i + 1);
             }
-            console.log("Requesting ann file [" + as.currentAnnNum + "] from [" + as.server + "]" +
+            console.error("Requesting ann file [" + as.currentAnnNum + "] from [" + as.server + "]" +
                 "got [" + JSON.stringify(err || null) + "] retrying...");
             return true;
         });
@@ -694,7 +694,7 @@ const pollAnnHandlers = (ctx) => {
                 // throw new Error("Failed to download ann file to [" + path +
                 //     "] file already exists, please delete it and restart");
             }
-            console.log("Requesting ann file [" + num + "] from [" + server + "]" +
+            console.error("Requesting ann file [" + num + "] from [" + server + "]" +
                 "got [" + JSON.stringify(err || null) + "] retrying...");
             return true;
         });
@@ -733,7 +733,7 @@ const launch = (config /*:Config_Miner_t*/) => {
             handledShares: {}
         };
         mkMiner(ctx);
-        console.log("Got [" + masterConf.downloadAnnUrls.length + "] AnnHandlers");
+        console.error("Got [" + masterConf.downloadAnnUrls.length + "] AnnHandlers");
         pollAnnHandlers(ctx);
         // this is strictly to prevent us sighup'ing the miner too quickly
         // before it has hooked up to listen for the event.
@@ -798,7 +798,7 @@ const main = (argv) => {
         randContent: false,
     };
     if (!a.paymentAddr) {
-        console.log("WARNING: You have not passed the --paymentAddr flag\n" +
+        console.error("WARNING: You have not passed the --paymentAddr flag\n" +
             "    as a default, " + DEFAULT_PAYMENT_ADDR + " will be used,\n" +
             "    cjd appreciates your generosity");
     }

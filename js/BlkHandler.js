@@ -116,7 +116,7 @@ const onSubmit = (ctx, req, res) => {
         const proof = headerAndProof.slice(81 + proofLen[1], 81 + proofLen[1] + proofLen[0]);
         do {
             const cpi = Util.getContentProofIdx(headerAndProof.slice(0,80), proof);
-            //console.log("Share proof idx " + cpi);
+            //console.error("Share proof idx " + cpi);
             if (cpi % ctx.mut.hashMod !== ctx.mut.hashNum) {
                 return void errorEnd(400, "Share posted to wrong block handler");
             }
@@ -201,9 +201,9 @@ const onSubmit = (ctx, req, res) => {
             const sigs = Buffer.concat(signatures);
             blockTopArr.push(Util.mkVarInt(sigs.length));
             blockTopArr.push(sigs);
-            //console.log("Added " + sigs.length + " bytes of signatures");
+            //console.error("Added " + sigs.length + " bytes of signatures");
         } else {
-            //console.log("no signatures");
+            //console.error("no signatures");
         }
         blockTopArr.push(Util.mkVarInt(Protocol.PC_END_TYPE), Util.mkVarInt(0));
         hexblock = Buffer.concat(blockTopArr).toString('hex');
@@ -227,11 +227,11 @@ const onSubmit = (ctx, req, res) => {
             merklebranch: currentWork.proof.map((x) => x.toString('hex'))
         };
 
-        //console.log(toSubmit);
+        //console.error(toSubmit);
 
         ctx.rpcClient.checkPcShare(toSubmit, w((err, ret) => {
             if (err) {
-                console.log(err);
+                console.error(err);
                 return void errorEnd(400, "Failed validation of share [" + JSON.stringify(err) + "]");
             }
             if (!ret) {
@@ -253,8 +253,8 @@ const onSubmit = (ctx, req, res) => {
             ctx.rpcClient.submitBlock(wholeBlock, w((err, ret) => {
                 if (!err && ret) { err = ret.result; }
                 if (err) {
-                    console.log("error:");
-                    console.log(err);
+                    console.error("error:");
+                    console.error(err);
                     const serr = String(err);
                     if (serr.indexOf("rejected: already have block") === 0) {
                         errorEnd(409, "already have block");
@@ -262,18 +262,36 @@ const onSubmit = (ctx, req, res) => {
                         errorEnd(400, "error submitting block [" + serr + "]");
                     }
                 } else {
-                    console.log("Good share from [" + payTo + "]");
-                    res.end(JSON.stringify({ result: 'OK', error: [], warn: [] }));
+                    const result = JSON.stringify({
+                        result: {
+                            payTo: payTo,
+                            ok: true,
+                            block: false
+                        },
+                        error: [],
+                        warn: []
+                    });
+                    console.log(result);
+                    res.end(result);
                 }
             }));
             return;
         } else if (submitRet === 'OK') {
-            console.log("Good share from [" + payTo + "]");
-            res.end(JSON.stringify({ result: 'OK', error: [], warn: [] }));
+            const result = JSON.stringify({
+                result: {
+                    payTo: payTo,
+                    ok: true,
+                    block: true
+                },
+                error: [],
+                warn: []
+            });
+            console.log(result);
+            res.end(result);
             return;
         }
-        console.log(submitRet);
-        return void errorEnd(500, "Unexpected result from mantled [" + String(submitRet) + "]");
+        console.error(submitRet);
+        return void errorEnd(500, "Unexpected result from btcd [" + String(submitRet) + "]");
     });
 };
 

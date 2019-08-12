@@ -63,9 +63,9 @@ const onBlock = (ctx /*:Context_t*/) => {
         // Make work entry
         ctx.rpcClient.getRawBlockTemplate(w((err, ret) => {
             if (err || !ret) {
-                console.log("Error getting block template, trying again in 10 seconds...");
-                console.log(err);
-                console.log(ret);
+                console.error("Error getting block template, trying again in 10 seconds...");
+                console.error(err);
+                console.error(ret);
                 setTimeout(() => {
                     onBlock(ctx);
                 }, 10000);
@@ -106,7 +106,7 @@ const onBlock = (ctx /*:Context_t*/) => {
             }));
         }).nThen((w) => {
             if (work && blockTemplate) {
-                console.log("Using an existing block template for block [" +
+                console.error("Using an existing block template for block [" +
                     newState.work.height + "]");
                 state = Object.freeze({
                     work: work,
@@ -148,13 +148,13 @@ const onBlock = (ctx /*:Context_t*/) => {
     }).nThen((w) => {
         ctx.mut.state = state;
         const work = state.work;
-        console.log("Block " + (work.height-1) + " " + work.lastHash.toString('hex'));
+        console.error("Block " + work.height + " " + work.lastHash.toString('hex'));
         let retrying = false;
         const again = () => {
             if (!ctx.mut.longPollId) {
                 ctx.rpcClient.getBlockTemplate(w((err, ret) => {
                     if (err || !ret || !ret.result) {
-                        console.log(err);
+                        console.error(err);
                         setTimeout(w(again), 1000);
                         return;
                     }
@@ -167,7 +167,7 @@ const onBlock = (ctx /*:Context_t*/) => {
                 if (err || !ret) {
                     // couldn't make the block for whatever reason, try again
                     if (!retrying) {
-                        console.log(err);
+                        console.error(err);
                         retrying = true;
                     }
                     setTimeout(w(again), 100);
@@ -279,11 +279,11 @@ module.exports.create = (cfg /*:Master_Config_t*/) => {
             }
         });
     }).nThen((w) => {
-        console.log("This pool master is configured to run with the following workers:");
-        cfg.root.annHandlers.forEach((h) => { console.log(" - AnnHandler: " + h.url); });
-        cfg.root.blkHandlers.forEach((h) => { console.log(" - BlkHandler: " + h.url); });
-        console.log("It will tell miners to send their work to those urls.");
-        console.log();
+        console.error("This pool master is configured to run with the following workers:");
+        cfg.root.annHandlers.forEach((h) => { console.error(" - AnnHandler: " + h.url); });
+        cfg.root.blkHandlers.forEach((h) => { console.error(" - BlkHandler: " + h.url); });
+        console.error("It will tell miners to send their work to those urls.");
+        console.error();
         onBlock(ctx);
     });
     Http.createServer((req, res) => {
