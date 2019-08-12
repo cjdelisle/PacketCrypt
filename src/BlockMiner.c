@@ -9,6 +9,7 @@
 #include "Work.h"
 #include "Util.h"
 #include "Conf.h"
+#include "ContentMerkle.h"
 
 #include <stdlib.h>
 #include <assert.h>
@@ -228,11 +229,16 @@ static bool mine(Worker_t* w)
 
         for (int i = 0; i < HASHES_PER_CYCLE; i++) {
             CryptoCycle_init(&w->pcState, &hdrHash, ++lowNonce);
+            uint32_t proofIdx = hdrHash.ints[0] ^ lowNonce;
             MineResult_t res;
             for (int j = 0; j < 4; j++) {
                 uint64_t x = res.items[j] = CryptoCycle_getItemNo(&w->pcState) % w->bm->annCount;
                 CryptoCycle_Item_t* it = (CryptoCycle_Item_t*) &w->bm->anns[x].ann;
-                assert(CryptoCycle_update(&w->pcState, it, 0, NULL));
+                Buf32_t contentProofBuf;
+                const uint8_t* contentProof = ContentMerkle_getProofBlock(
+                    proofIdx, &contentProofBuf, w->bm->anns[x].content,
+                    w->bm->anns[x].ann.hdr.contentLength);
+                assert(CryptoCycle_update(&w->pcState, it, contentProof, 0, NULL));
             }
             CryptoCycle_smul(&w->pcState);
             CryptoCycle_final(&w->pcState);

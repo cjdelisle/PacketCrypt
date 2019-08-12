@@ -466,13 +466,8 @@ const b2hash32 = module.exports.b2hash32 = (content /*:Buffer*/) => {
     return Blake2b(32).update(content).digest(Buffer.alloc(32));
 };
 
-module.exports.getContentProofIdx = (_header /*:Buffer*/, proof /*:Buffer*/) /*:number*/ => {
-    const hash = b2hash32(proof);
-    return hash.readUInt32LE(0);
-};
-
-module.exports.getContentProofIdx2 = (header /*:Buffer*/, proof /*:Buffer*/) /*:number*/ => {
-    return b2hash32(header).readUInt32LE(0) ^ proof.readUInt32LE(0);
+module.exports.getContentProofIdx = (header /*:Buffer*/, proof /*:Buffer*/) /*:number*/ => {
+    return (b2hash32(header).readUInt32LE(0) ^ proof.readUInt32LE(0)) >>> 0;
 };
 
 

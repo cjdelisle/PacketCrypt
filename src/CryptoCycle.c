@@ -93,6 +93,7 @@ void CryptoCycle_init(
 bool CryptoCycle_update(
     CryptoCycle_State_t* restrict state,
     CryptoCycle_Item_t* restrict item,
+    const uint8_t* restrict contentProof,
     int randHashCycles,
     uint32_t progbuf[Conf_RandGen_MAX_INSNS])
 {
@@ -109,6 +110,9 @@ bool CryptoCycle_update(
     }
 
     memcpy(state->sixteens[2].bytes, item, sizeof *item);
+    if (contentProof) {
+        memcpy(&state->bytes[32 + sizeof *item], contentProof, 32);
+    }
     CryptoCycle_makeFuzzable(&state->hdr);
     CryptoCycle_crypt(&state->hdr);
     assert(!CryptoCycle_isFailed(&state->hdr));

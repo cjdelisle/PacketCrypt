@@ -25,3 +25,23 @@ void ContentMerkle_compute(Buf32_t* outBuf, uint8_t* buf, uint32_t length)
     computeCycle(outBuf, buf, length, 1 << Util_log2ceil(length));
 }
 
+const uint8_t* ContentMerkle_getProofBlock(
+    uint32_t proofIdx,
+    Buf32_t* buf,
+    const uint8_t* content,
+    uint32_t contentLen
+) {
+    if (contentLen <= 32) { return NULL; }
+    assert(content);
+    uint32_t totalBlocks = contentLen / 32;
+    if (totalBlocks*32 < contentLen) { totalBlocks++; }
+    uint32_t idx = (proofIdx % totalBlocks) * 32;
+    if ((idx + 32) > contentLen) {
+        int len = contentLen - idx;
+        Buf_OBJSET(buf, 0);
+        memcpy(buf->bytes, &content[idx], len);
+        return buf->bytes;
+    } else {
+        return &content[idx];
+    }
+}

@@ -147,7 +147,7 @@ static int annHash(Worker_t* restrict w, uint32_t nonce) {
         itemNo = (CryptoCycle_getItemNo(&w->state) % Announce_TABLE_SZ);
         CryptoCycle_Item_t* restrict it = &w->activeJob->table[itemNo];
         if (Util_unlikely(!CryptoCycle_update(
-            &w->state, it, Conf_AnnHash_RANDHASH_CYCLES, w->vctx.progbuf)))
+            &w->state, it, NULL, Conf_AnnHash_RANDHASH_CYCLES, w->vctx.progbuf)))
         {
             return 0;
         }

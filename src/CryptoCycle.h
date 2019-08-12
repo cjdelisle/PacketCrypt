@@ -2,6 +2,7 @@
 #define CRYPTOCYCLE_H
 
 #include "Buf.h"
+#include "Conf.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -208,8 +209,9 @@ void CryptoCycle_init(CryptoCycle_State_t* state, const Buf32_t* seed, uint64_t 
 bool CryptoCycle_update(
     CryptoCycle_State_t* restrict state,
     CryptoCycle_Item_t* restrict item,
+    const uint8_t* restrict contentProof,
     int randHashCycles,
-    uint32_t progbuf[2048]);
+    uint32_t progbuf[Conf_RandGen_MAX_INSNS]);
 
 void CryptoCycle_smul(CryptoCycle_State_t* state);
 void CryptoCycle_final(CryptoCycle_State_t* state);
