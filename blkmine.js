@@ -393,7 +393,7 @@ const httpRes = (ctx /*:Context_t*/, res /*:IncomingMessage*/) => {
             console.error("WARNING: Pool reply is invalid [" + d + "]");
             return;
         }
-        console.error("Pool responded [" + result + "]");
+        console.error("Pool responded [" + JSON.stringify(result) + "]");
     });
 };
 
@@ -453,11 +453,14 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
             nThen((w) => {
                 [0,1,2,3].forEach((num) => {
                     const ann = getAnn(share, num);
+                    const length = ann.readUInt32LE(Protocol.ANN_CONTENT_LENGTH_OFFSET);
+                    if (length <= 32) { return; }
                     getAnnContent(ctx, ann, w((err, buf) => {
                         if (failed) { return; }
                         if (!buf) {
                             console.error("Unable to submit share");
                             console.error(err);
+                            failed = true;
                             return;
                         }
                         annContents[num] = buf;
