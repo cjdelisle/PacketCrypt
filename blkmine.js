@@ -772,7 +772,7 @@ const usage = () => {
     return 100;
 };
 
-const DEFAULT_PAYMENT_ADDR = "bc1q6hqsqhqdgqfd8t3xwgceulu7k9d9w5t2amath0qxyfjlvl3s3u4st4nj3u";
+const DEFAULT_PAYMENT_ADDR = "pkt1q6hqsqhqdgqfd8t3xwgceulu7k9d9w5t2amath0qxyfjlvl3s3u4sjza2g2";
 
 const main = (argv) => {
     const defaultConf = {
