@@ -464,6 +464,7 @@ static void processAnns(Worker_t* w, int fileNo) {
                     assert(0);
                 }
             } else {
+                strncpy(w->lw.tmpFile.name, w->lw.annContentFile.name, FilePath_NAME_SZ);
                 if (unlink(w->lw.tmpFile.path)) {
                     DEBUGF("error deleting temp file [%s] [%s]\n",
                         w->lw.tmpFile.path, strerror(errno));
