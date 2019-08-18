@@ -220,9 +220,9 @@ static bool mine(Worker_t* w)
     uint32_t lowNonce = w->lowNonce;
 
     for (;;) {
-        if (hdr.timeSeconds != t.tv0.tv_sec && !w->bm->beDeterministic) {
+        if (hdr.timeSeconds != (uint32_t) t.tv0.tv_sec && !w->bm->beDeterministic) {
             lowNonce = 0;
-            hdr.timeSeconds = t.tv0.tv_sec;
+            hdr.timeSeconds = (uint32_t) t.tv0.tv_sec;
         }
         Buf32_t hdrHash;
         Hash_COMPRESS32_OBJ(&hdrHash, &hdr);
@@ -696,7 +696,8 @@ int BlockMiner_lockForMining(
                         fprintf(stderr, "%08x\n", bm->aew[i].effectiveWork);
                     }
                     fprintf(stderr, "wtf2 %ld %ld %ld %ld %08x %08x %08x\n",
-                        (long)i, (long)mainAnnI, endOfOld, newAnnI, bm->aew[i].effectiveWork, worstOldAnn, worstNewAnn);
+                        (long)i, (long)mainAnnI, (long)endOfOld, (long)newAnnI,
+                        bm->aew[i].effectiveWork, worstOldAnn, worstNewAnn);
                     assert(0);
                 }
                 continue;
@@ -706,7 +707,8 @@ int BlockMiner_lockForMining(
                     fprintf(stderr, "%08x\n", bm->aew[i].effectiveWork);
                 }
                 fprintf(stderr, "wtf %ld %ld %ld %ld %08x %08x %08x\n",
-                    (long)i, (long)mainAnnI, endOfOld, newAnnI, bm->aew[i].effectiveWork, worstOldAnn, worstNewAnn);
+                    (long)i, (long)mainAnnI, (long)endOfOld, (long)newAnnI,
+                    bm->aew[i].effectiveWork, worstOldAnn, worstNewAnn);
             }
             assert(bm->aew[i].effectiveWork <= worstEffectiveWork);
         }
