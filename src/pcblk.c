@@ -138,7 +138,7 @@ static int loadFile(Context_t* ctx, const char* fileName) {
             }
         }
         ssize_t ret = read(fileno, content, anns[i].hdr.contentLength);
-        if (ret == anns[i].hdr.contentLength) {
+        if (ret == (ssize_t)anns[i].hdr.contentLength) {
             close(fileno);
             continue;
         }
