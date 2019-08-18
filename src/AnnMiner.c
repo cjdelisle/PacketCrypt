@@ -209,7 +209,10 @@ static void search(Worker_t* restrict w)
                 memcpy(&ann[1024], w->activeJob->content, w->ann.hdr.contentLength);
             }
             if (w->ctx->sendPtr) {
-                PacketCrypt_Find_t f = { .ptr = (uint64_t) ann, .size = sizeof w->ann };
+                PacketCrypt_Find_t f = {
+                    .ptr = (uint64_t) (uintptr_t) ann,
+                    .size = sizeof w->ann
+                };
                 ssize_t ret = write(outFile, &f, sizeof f);
                 assert(ret == sizeof f || ret == -1);
             } else {

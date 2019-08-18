@@ -183,7 +183,7 @@ static void found(MineResult_t* res, PacketCrypt_BlockHeader_t* hdr, Worker_t* w
     if (w->bm->sendPtr) {
         // we are writing the pointer, not the content
         PacketCrypt_Find_t x = {
-            .ptr = (uint64_t) output,
+            .ptr = (uint64_t) (uintptr_t) output,
             .size = (uint64_t) outputSize
         };
         assert(write(w->bm->fileNo, &x, sizeof x) == sizeof x);
