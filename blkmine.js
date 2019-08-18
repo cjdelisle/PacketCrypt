@@ -126,6 +126,7 @@ const downloadAnnFile = (
         if (!annBin) { return; }
         getAnnFileParentNum(annPath, w((err, pbn) => {
             if (typeof(pbn) === 'undefined') {
+                console.error('getAnnFileParentNum() error ' + err);
                 // filesystem error, we probably want to bail out...
                 throw err;
             }

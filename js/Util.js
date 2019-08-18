@@ -340,6 +340,15 @@ module.exports.deleteUselessAnns = (
                 const rs = Fs.createReadStream(file);
                 const data = [];
                 let len = 0;
+                rs.on('error', (e) => {
+                    if (e.code === 'ENOENT') {
+                        console.error("File [" + file + "] disappeared while accessing");
+                        w.abort();
+                        return;
+                    }
+                    console.error('Error in deleteUselessAnns ' + e);
+                    throw e;
+                })
                 rs.on('data', (d) => {
                     if (len > 16) {
                         rs.destroy();
