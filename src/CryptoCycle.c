@@ -95,15 +95,16 @@ bool CryptoCycle_update(
     CryptoCycle_Item_t* restrict item,
     const uint8_t* restrict contentProof,
     int randHashCycles,
-    uint32_t progbuf[Conf_RandGen_MAX_INSNS])
+    PacketCrypt_ValidateCtx_t* ctx)
 {
     if (randHashCycles) {
         #ifdef NO_RANDHASH
             assert(0);
         #else
-        int ret = RandGen_generate(progbuf, &item->thirtytwos[31]);
+        assert(ctx);
+        int ret = RandGen_generate(ctx->progbuf, &item->thirtytwos[31]);
         if (ret < 0) { return false; }
-        if (RandHash_interpret(progbuf, state, item->ints, ret, sizeof *item, randHashCycles)) {
+        if (RandHash_interpret(ctx->progbuf, state, item->ints, ret, sizeof *item, randHashCycles)) {
             return false;
         }
         #endif

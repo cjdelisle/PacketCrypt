@@ -211,7 +211,7 @@ bool CryptoCycle_update(
     CryptoCycle_Item_t* restrict item,
     const uint8_t* restrict contentProof,
     int randHashCycles,
-    uint32_t progbuf[Conf_RandGen_MAX_INSNS]);
+    PacketCrypt_ValidateCtx_t* ctx);
 
 void CryptoCycle_smul(CryptoCycle_State_t* state);
 void CryptoCycle_final(CryptoCycle_State_t* state);

@@ -1,6 +1,8 @@
 #ifndef CONF_H
 #define CONF_H
 
+#include "packetcrypt/PacketCrypt.h"
+
 // parentBlockHeight -> x -> y -> valid
 //         0            1    2      3
 #define Conf_PacketCrypt_ANN_WAIT_PERIOD 3
@@ -36,6 +38,7 @@
 // MAX_INSNS are deemed invalid and the hash attempt is failed.
 #define Conf_RandGen_MIN_INSNS            0
 #define Conf_RandGen_MAX_INSNS         2048
+_Static_assert(sizeof(PacketCrypt_ValidateCtx_t) >= Conf_RandGen_MAX_INSNS*4, "");
 
 // Some operations are more complicated than normal and have particular costs.
 #define Conf_RandGen_MEMORY_COST         20

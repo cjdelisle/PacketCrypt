@@ -45,7 +45,7 @@ int Validate_checkAnn(
         itemNo = (CryptoCycle_getItemNo(&state) % Announce_TABLE_SZ);
         // only 32 bytes of the seed is used
         Announce_mkitem(itemNo, &item, annHash0.bytes);
-        if (!CryptoCycle_update(&state, &item, NULL, Conf_AnnHash_RANDHASH_CYCLES, vctx->progbuf)) {
+        if (!CryptoCycle_update(&state, &item, NULL, Conf_AnnHash_RANDHASH_CYCLES, vctx)) {
             return Validate_checkAnn_INVAL;
         }
     }
