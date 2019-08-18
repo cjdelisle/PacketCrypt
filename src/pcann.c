@@ -80,7 +80,7 @@ int main(int argc, const char** argv) {
                     DEBUGF("--minerId parameter [%s] could not be parsed as a number\n", arg);
                     return usage();
                 }
-                if (lminerId < 0 || lminerId > 0xffffffff) {
+                if (lminerId < 0 || (long long)lminerId > 0xffffffffll) {
                     DEBUGF("--minerId parameter [%s] is out of range\n", arg);
                     DEBUGF("must be an integer between 0 and 4294967295\n");
                     return usage();
