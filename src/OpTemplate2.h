@@ -50,9 +50,9 @@
     #define CLZ64_IMPL(a) ((a) ? __builtin_clzl(a) : 64)
     #define CTZ64_IMPL(a) ((a) ? __builtin_clzl(a) : 64)
 #elif __SIZEOF_LONG_LONG__ == 8
-    #define POPCOUNT_IMPL(a) __builtin_popcountll(a)
-    #define CLZ_IMPL(a) ((a) ? __builtin_clzll(a) : 64)
-    #define CTZ_IMPL(a) ((a) ? __builtin_ctzll(a) : 64)
+    #define POPCOUNT64_IMPL(a) __builtin_popcountll(a)
+    #define CLZ64_IMPL(a) ((a) ? __builtin_clzll(a) : 64)
+    #define CTZ64_IMPL(a) ((a) ? __builtin_ctzll(a) : 64)
 #else
     #error "unknown size of 64 bit register"
 #endif
