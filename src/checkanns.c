@@ -422,7 +422,7 @@ static void processAnns(Worker_t* w, int fileNo) {
                 DEBUGF("Error reading file content, errno=[%s]\n", strerror(errno));
                 res.internalError++;
                 break;
-            } else if (len2 < len) {
+            } else if (((size_t)len2) < len) {
                 DEBUGF("Runt announcement file [%s], content partially read\n",
                     w->lw.inFile->name);
                 res.runt++;

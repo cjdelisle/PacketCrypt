@@ -75,12 +75,12 @@ int main(int argc, const char** argv) {
                 t = false;
             } else if (mid) {
                 errno = 0;
-                long lminerId = strtol(arg, NULL, 10);
+                long long lminerId = strtoll(arg, NULL, 10);
                 if (lminerId == 0 && errno != 0) {
                     DEBUGF("--minerId parameter [%s] could not be parsed as a number\n", arg);
                     return usage();
                 }
-                if (lminerId < 0 || (long long)lminerId > 0xfffffffell) {
+                if (lminerId < 0 || lminerId > 0xffffffffll) {
                     DEBUGF("--minerId parameter [%s] is out of range\n", arg);
                     DEBUGF("must be an integer between 0 and 4294967295\n");
                     return usage();
