@@ -55,7 +55,7 @@ const launchCheckanns = (ctx /*:Context_t*/) => {
         ctx.workdir + '/tmpdir',
         ctx.workdir + '/contentdir',
     ];
-    console.log(ctx.mut.cfg.root.checkannsPath + ' ' + args.join(' '));
+    console.error(ctx.mut.cfg.root.checkannsPath + ' ' + args.join(' '));
     const checkanns = ctx.mut.checkanns = Spawn(ctx.mut.cfg.root.checkannsPath, args, {
         stdio: ['pipe', 1, 2]
     });
@@ -94,7 +94,7 @@ const onSubmit = (ctx, req, res) => {
     const fileName = 'annshare_' + worknum + '_' + Crypto.randomBytes(16).toString('hex') + '.bin';
     const fileUploadPath = ctx.workdir + '/uploaddir/' + fileName;
     const fileInPath = ctx.workdir + '/indir/' + fileName;
-    console.log("ann post [" + fileName + "] by [" + payTo + "]");
+    console.error("ann post [" + fileName + "] by [" + payTo + "]");
     let work;
     nThen((w) => {
         ctx.poolClient.getWorkByNum(worknum, w((w) => { work = w; }));
@@ -109,7 +109,7 @@ const onSubmit = (ctx, req, res) => {
             mostRecentBlock: worknum - 1,
             payTo: payTo
         };
-        //console.log("Writing: ", post);
+        //console.error("Writing: ", post);
         stream.write(Protocol.annPostEncode(post));
         req.pipe(stream).on('finish', w(() => {
             // $FlowFixMe stream.bytesWritten is real
@@ -157,7 +157,7 @@ const getAnns = (ctx, req, res) => {
                 res.statusCode = 404;
                 return void res.end();
             } else if (err) {
-                console.log("Error reading file [" + JSON.stringify(err) + "]");
+                console.error("Error reading file [" + JSON.stringify(err) + "]");
                 res.statusCode = 500;
                 return void res.end();
             }
@@ -183,7 +183,7 @@ const getAnn = (ctx, req, res) => {
             res.statusCode = 404;
             return void res.end();
         } else if (err) {
-            console.log("Error reading file [" + JSON.stringify(err) + "]");
+            console.error("Error reading file [" + JSON.stringify(err) + "]");
             res.statusCode = 500;
             return void res.end();
         }
@@ -247,7 +247,7 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
             Util.longPollServer(ctx.workdir + '/outdir/').onFileUpdate((file) => {
                 const path = ctx.workdir + '/outdir/' + file;
                 if (file.indexOf('annshare_') !== 0) {
-                    console.log("Stray file update [" + path + "] ignoring");
+                    console.error("Stray file update [" + path + "] ignoring");
                     return;
                 }
                 const pr = ctx.pendingRequests[path];
@@ -314,13 +314,13 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
                     work.height - 10,
                     /annshare_([0-9]*)_[0-9a-f]*\.bin/);
                 Util.deleteUselessAnns(ctx.workdir + '/anndir', work.height, (f, done) => {
-                    console.log("Deleted expired announcements [" + f + "]");
+                    console.error("Deleted expired announcements [" + f + "]");
                     let failed = false;
                     nThen((w) => {
                         const path = ctx.workdir + '/anndir/' + f;
                         Fs.unlink(path, w((err) => {
                             if (!err) { return; }
-                            console.log("Failed to delete [" + path + "] [" + err.message + "]");
+                            console.error("Failed to delete [" + path + "] [" + err.message + "]");
                             failed = true;
                         }));
                     }).nThen((w) => {
@@ -328,7 +328,7 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
                         if (failed) { return; }
                         Fs.unlink(path, w((err) => {
                             if (!err) { return; }
-                            console.log("Failed to delete [" + path + "] [" + err.message + "]");
+                            console.error("Failed to delete [" + path + "] [" + err.message + "]");
                         }));
                     }).nThen(done);
                 }, ()=>{});
