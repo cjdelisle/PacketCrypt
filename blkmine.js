@@ -603,9 +603,9 @@ const mkMiner = (ctx) => {
         stdio: [ 'pipe', 1, 2 ]
     });
     miner.on('close', (num, sig) => {
-        console.error("pcblk died [" + num + "] [" + sig + "], restarting in 5 seconds");
+        console.error("pcblk died [" + num + "] [" + sig + "], restarting in 1 second");
         nThen((w) => {
-            setTimeout(w(), 5000);
+            setTimeout(w(), 1000);
         }).nThen((w) => {
             deleteWorkAndShares(ctx.config, w());
         }).nThen((w) => {
