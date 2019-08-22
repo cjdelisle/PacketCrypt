@@ -23,6 +23,7 @@
     "merkletreejs": "^0.1.6",
     "minimist": "^1.2.0",
     "nthen": "^0.1.8",
+    "saferphore": "0.0.1",
     "tweetnacl": "^1.0.1",
     "write-file-atomic": "^2.4.2"
   },

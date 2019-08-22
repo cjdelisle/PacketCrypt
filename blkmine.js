@@ -4,6 +4,7 @@ const Fs = require('fs');
 const nThen = require('nthen');
 const Minimist = require('minimist');
 const MerkleTree = require('merkletreejs').MerkleTree;
+const Saferphore = require('saferphore');
 
 const Pool = require('./js/PoolClient.js');
 const Util = require('./js/Util.js');
@@ -20,12 +21,14 @@ import type { Protocol_PcConfigJson_t } from './js/Protocol.js';
 import type { Util_Mutex_t } from './js/Util.js';
 import type { Config_Miner_t } from './js/Config.js'
 
+type Saferphore_t = typeof Saferphore.create(1)
+
 type Context_t = {
     config: Config_Miner_t,
     miner: void|ChildProcess,
     pool: PoolClient_t,
     masterConf: Protocol_PcConfigJson_t,
-    shareFileMutex: Util_Mutex_t,
+    lock: Saferphore_t,
     handledShares: { [string]:boolean }
 };
 */
@@ -446,8 +449,15 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
         }));
     }).nThen((w) => {
         if (!fileBuf) { return; }
-        if (ctx.miner) { ctx.miner.kill('SIGHUP'); }
-        ctx.handledShares[filePath] = true;
+        Fs.unlink(filePath, w((err) => {
+            if (err) {
+                console.error("WARNING: failed to delete file [" + filePath + "] [" +
+                    err.code + "]");
+                return;
+            }
+        }));
+    }).nThen((w) => {
+        if (!fileBuf) { return; }
         splitShares(fileBuf).forEach((share, i) => {
             const annContents = [];
             let failed = false;
@@ -490,59 +500,63 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
     });
 };
 
-const checkShares = (ctx /*:Context_t*/) => {
-    ctx.shareFileMutex((done) => {
-        let files;
-        let nums;
-        nThen((w) => {
-            Fs.readdir(ctx.config.dir + '/wrkdir', w((err, f) => {
-                if (err) { throw err; }
-                files = f;
-            }));
-        }).nThen((w) => {
-            nums = files.map((f) => {
-                let num = NaN;
-                f.replace(/^shares_([0-9]+)\.bin$/, (all, n) => {
-                    num = Number(n);
-                    return '';
-                });
-                return num;
-            }).filter((n) => (!isNaN(n)));
-            nums.sort((x,y) => ( (x > y) ? -1 : (x === y) ? 0 : 1 ));
+const checkShares = (ctx /*:Context_t*/, done) => {
+    let files;
+    let nums;
+    nThen((w) => {
+        Fs.readdir(ctx.config.dir + '/wrkdir', w((err, f) => {
+            if (err) { throw err; }
+            files = f;
+        }));
+    }).nThen((w) => {
+        nums = files.map((f) => {
+            let num = NaN;
+            f.replace(/^shares_([0-9]+)\.bin$/, (all, n) => {
+                num = Number(n);
+                return '';
+            });
+            return num;
+        }).filter((n) => (!isNaN(n)));
+        // Put the list into decending order, biggest number first
+        nums.sort((x,y) => ( (x > y) ? -1 : (x === y) ? 0 : 1 ));
 
-            let nt = nThen;
-            nums.forEach((n, i) => {
-                const filePath = ctx.config.dir + '/wrkdir/shares_' + n + '.bin';
-                nt = nt((w) => {
-                    if (i > 0 && ctx.handledShares[filePath]) {
+        let nt = nThen;
+        nums.forEach((n, i) => {
+            const filePath = ctx.config.dir + '/wrkdir/shares_' + n + '.bin';
+            nt = nt((w) => {
+                Fs.stat(filePath, w((err, ret) => {
+                    // file was deleted, new work
+                    if (err && err.code === 'ENOENT') { return; }
+                    if (err) { throw err; }
+                    if (i === 0) {
+                        if (ret.size > 0) {
+                            // The most recent file has content so lets just sig the
+                            // miner so that it will make a new file and then we'll
+                            // submit the content of this one on the next go around.
+                            console.error('signaling the miner');
+                            ctx.miner.kill('SIGHUP');
+                        }
+                    } else if (ret.size > 0) {
+                        // we have content in a file which we can upload now
+                        uploadFile(ctx, filePath, w());
+                    } else {
+                        // Size of the file is zero and it's not the biggest number
+                        // file in the list, this means it's a stray share which stopped
+                        // being used when the miner was signaled because there was new
+                        // work, delete it.
                         Fs.unlink(filePath, w((err) => {
                             if (err && err.code !== 'ENOENT') {
                                 console.error("WARNING: failed to delete file [" + filePath + "]");
                                 return;
                             }
-                            delete ctx.handledShares[filePath];
                         }));
-                        return;
                     }
-                    Fs.stat(filePath, w((err, ret) => {
-                        // file was deleted, new work
-                        if (err && err.code === 'ENOENT') { return; }
-                        if (err) { throw err; }
-                        if ((ret.mode & 0600) !== 0600) {
-                            // If the file is non-readable, this indicates that we're
-                            // in a race window between an open and a dup2
-                        } else if (ret.size > 0) {
-                            uploadFile(ctx, filePath, w());
-                        } else if (i > 0) {
-                            ctx.handledShares[filePath] = true;
-                        }
-                    }));
-                }).nThen;
-            });
-            nt(w());
-        }).nThen((_) => {
-            done();
+                }));
+            }).nThen;
         });
+        nt(w());
+    }).nThen((_) => {
+        done();
     });
 };
 
@@ -595,25 +609,35 @@ const mkMiner = (ctx) => {
         '--threads', String(ctx.config.threads || 1),
         '--maxanns', String(ctx.config.maxAnns || 1024*1024),
         '--minerId', String(ctx.config.minerId),
+    ];
+    if (ctx.config.slowStart) {
+        args.push('--slowStart');
+    }
+    args.push(
         ctx.config.dir + '/wrkdir',
         ctx.config.dir + '/contentdir'
-    ];
+    );
     console.error(ctx.config.corePath + ' ' + args.join(' '));
     const miner = Spawn(ctx.config.corePath, args, {
         stdio: [ 'pipe', 1, 2 ]
     });
     miner.on('close', (num, sig) => {
         console.error("pcblk died [" + num + "] [" + sig + "], restarting in 1 second");
-        nThen((w) => {
-            setTimeout(w(), 1000);
-        }).nThen((w) => {
-            deleteWorkAndShares(ctx.config, w());
-        }).nThen((w) => {
-            mkLinks(ctx.config, w());
-            if (ctx.work && ctx.pool.connected) { onNewWork(ctx, ctx.work, w()); }
-        }).nThen((w) => {
-            mkMiner(ctx);
-        });
+        setTimeout(() => {
+            ctx.lock.take((returnAfter) => {
+                //console.error("Enter pkblk died");
+                nThen((w) => {
+                    deleteWorkAndShares(ctx.config, w());
+                }).nThen((w) => {
+                    mkLinks(ctx.config, w());
+                    if (ctx.work && ctx.pool.connected) { onNewWork(ctx, ctx.work, w()); }
+                }).nThen((w) => {
+                    mkMiner(ctx);
+                    //console.error("Exit pkblk died");
+                    returnAfter()();
+                });
+            });
+        }, 1000);
     });
     ctx.miner = miner;
 };
@@ -732,7 +756,7 @@ const launch = (config /*:Config_Miner_t*/) => {
             miner: undefined,
             pool: pool,
             masterConf: masterConf,
-            shareFileMutex: Util.createMutex(),
+            lock: Saferphore.create(1),
             work: undefined,
             handledShares: {}
         };
@@ -744,10 +768,26 @@ const launch = (config /*:Config_Miner_t*/) => {
         setTimeout(() => {
             pool.onWork((work) => {
                 ctx.work = work;
-                onNewWork(ctx, work, ()=>{});
-                deleteUselessAnns(config, work.height, ()=>{});
+                ctx.lock.take((returnAfter) => {
+                    //console.error("Enter pool.onWork");
+                    nThen((w) => {
+                        onNewWork(ctx, work, w());
+                    }).nThen((w) => {
+                        deleteUselessAnns(config, work.height, w());
+                    }).nThen((w) => {
+                        //console.error("Exit pool.onWork")
+                        returnAfter()();
+                    })
+                });
             });
-            setInterval(() => { checkShares(ctx); }, 100);
+            setInterval(() => {
+                ctx.lock.take((returnAfter) => {
+                    //console.error("Enter checkShares");
+                    checkShares(ctx, returnAfter(() => {
+                        //console.error("Exit checkShares");
+                    }));
+                })
+            }, 100);
         }, 1000);
     });
 };
@@ -769,6 +809,8 @@ const usage = () => {
         "                      # default is ./bin/pcblk\n" +
         "        --dir         # the directory to use for storing announcements and state\n" +
         "                      # default is ./datastore/blkmine\n" +
+        "        --slowStart   # wait 10 seconds when starting pcblk to allow time for gdb\n" +
+        "                      # to be attached.\n" +
         "    <poolurl>         # the URL of the mining pool to connect to\n" +
         "\n" +
         "    See https://github.com/cjdelisle/PacketCrypt/blob/master/docs/blkmine.md\n" +
@@ -785,9 +827,10 @@ const main = (argv) => {
         paymentAddr: DEFAULT_PAYMENT_ADDR,
         maxAnns: DEFAULT_MAX_ANNS,
         threads: 1,
-        minerId: Math.floor(Math.random()*(1<<30)*2)
+        minerId: Math.floor(Math.random()*(1<<30)*2),
+        slowStart: false
     };
-    const a = Minimist(argv.slice(2));
+    const a = Minimist(argv.slice(2), { boolean: [ 'slowStart' ] });
     if (!/http(s)?:\/\/.*/.test(a._[0])) { process.exit(usage()); }
     const conf = {
         corePath: a.corePath || defaultConf.corePath,
@@ -797,6 +840,7 @@ const main = (argv) => {
         maxAnns: a.maxAnns || defaultConf.maxAnns,
         threads: a.threads || defaultConf.threads,
         minerId: a.minerId || defaultConf.minerId,
+        slowStart: a.slowStart === true || defaultConf.slowStart,
 
         // unused, just to please flow
         randContent: false,
