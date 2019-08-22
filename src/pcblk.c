@@ -32,6 +32,7 @@ static int usage() {
         "        --minerId <n> # Numeric ID of the miner, if you have multiple miners with the\n"
         "                      # exact same set of announcements, this ID will prevent them\n"
         "                      # from mining duplicate shares, default is 0\n"
+        "        --slowStart   # sleep for 10 seconds when starting up (time to attach gdb)\n"
         "    <wrkdir>          # a dir containing announcements grouped by parent block\n"
         "    <contentdir>      # a dir containing any announcement content which is needed\n"
         "\n"
@@ -254,19 +255,15 @@ static void loadWork(Context_t* ctx) {
 static void beginMining(Context_t* ctx)
 {
     assert(ctx->currentWork);
-    BlockMiner_Stats_t stats;
     ctx->coinbaseCommit->annLeastWorkTarget = 0xffffffff;
-    int res = BlockMiner_lockForMining(ctx->bm, &stats, ctx->coinbaseCommit,
+    int res = BlockMiner_lockForMining(ctx->bm, ctx->coinbaseCommit,
         ctx->currentWork->height, ctx->currentWork->shareTarget);
     uint64_t hrm = Difficulty_getHashRateMultiplier(
-        ctx->coinbaseCommit->annLeastWorkTarget, stats.finalCount);
-    DEBUGF("BlockMiner_lockForMining(): ng: %ld ne: %ld nne: %ld "
-        "og: %ld oe: %ld or: %ld finalCount: %ld minTarget: %08x hashrateMultiplier: %ld\n",
-        (long)stats.newGood, (long)stats.newExpired, (long)stats.newNotEnough,
-        (long)stats.oldGood, (long)stats.oldExpired, (long)stats.oldReplaced,
-        (long)stats.finalCount, ctx->coinbaseCommit->annLeastWorkTarget,
+        ctx->coinbaseCommit->annLeastWorkTarget,
+        ctx->coinbaseCommit->numAnns);
+    DEBUGF("BlockMiner_lockForMining(): count: %ld minTarget: %08x hashrateMultiplier: %ld\n",
+        (long)ctx->coinbaseCommit->numAnns, ctx->coinbaseCommit->annLeastWorkTarget,
         (long)hrm);
-
 
     // Even if it failed, we can safely begin allocating announcements again
     // because all of the to-be-added announcements were freed, or will be when
@@ -321,6 +318,7 @@ int main(int argc, char** argv) {
     long long maxAnns = 1024*1024;
     int threads = 1;
     int64_t minerId = 0;
+    bool slowStart = false;
     const char* wrkdirName = NULL;
     const char* contentdirName = NULL;
     for (int i = 1; i < argc; i++) {
@@ -348,6 +346,8 @@ int main(int argc, char** argv) {
             threads = -1;
         } else if (!strcmp(argv[i], "--minerId")) {
             minerId = -1;
+        } else if (!strcmp(argv[i], "--slowStart")) {
+            slowStart = true;
         } else if (!wrkdirName) {
             wrkdirName = argv[i];
         } else if (!contentdirName) {
@@ -362,6 +362,12 @@ int main(int argc, char** argv) {
 
     // Setup before making any blocking calls to try to win races with the parent process.
     signal(SIGHUP, sighup);
+
+    if (slowStart) {
+        for (int i = 0; i < 10; i++) {
+            sleep(1);
+        }
+    }
 
     // reasonably cross-platform way to check if the parent is dead
     // read from stdin and if it's an eof then exit.

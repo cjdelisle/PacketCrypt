@@ -8,29 +8,6 @@
 
 typedef struct BlockMiner_s BlockMiner_t;
 
-typedef struct BlockMiner_Stats_s {
-    // Announcements which were in the miner from the previous cycle and seem to still be valid.
-    uint64_t oldGood;
-
-    // Announcements which were dropped because they are nolonger valid.
-    uint64_t oldExpired;
-
-    // Announcements which were replaced because there are new ones with more effective work.
-    uint64_t oldReplaced;
-
-    // New announcements which seem to be good.
-    uint64_t newGood;
-
-    // New announcements which are not valid (either expired or not yet mature)
-    uint64_t newExpired;
-
-    // New announcements which were not added because they are not better than existing ones.
-    uint64_t newNotEnough;
-
-    // Number of announcements finally computed after deduplication.
-    uint64_t finalCount;
-} BlockMiner_Stats_t;
-
 // This is the result which is written out to the file descriptor.
 typedef struct BlockMiner_Share_s {
     uint32_t length;
@@ -114,7 +91,6 @@ int BlockMiner_addAnns(
 #define BlockMiner_lockForMining_NO_ANNS 1
 int BlockMiner_lockForMining(
     BlockMiner_t* bm,
-    BlockMiner_Stats_t* statsOut,
     PacketCrypt_Coinbase_t* commitOut,
     uint32_t nextBlockHeight,
     uint32_t nextBlockTarget);

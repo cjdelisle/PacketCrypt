@@ -513,37 +513,6 @@ static void prepareNextBlock(BlockMiner_t* bm, uint32_t nextBlockHeight) {
         bm->aew[i].ann->aewPtr = &bm->aew[i];
     }
 
-    size_t top = bm->annCount;
-    bool trash;
-    for (int cycle = 0; cycle < 10; cycle++) {
-        trash = false;
-        size_t nextTop = top;
-        for (size_t i = 1; i < top; i++) {
-            // if adding the rest of the announcements with the effective work of the next
-            // ann would make the result *worse* than leaving them out, then we will flip
-            // a switch and begin marking them as useless so that they will be replaced.
-            if (!trash) {
-                uint32_t work = bm->aew[i].effectiveWork;
-                uint32_t lastWork = bm->aew[i-1].effectiveWork;
-                if (work == 0xffffffff) {
-                    // already trashed, ignore it
-                } else if (work > lastWork) {
-                    uint64_t last = Difficulty_getHashRateMultiplier(lastWork, i);
-                    uint64_t next = Difficulty_getHashRateMultiplier(work, top);
-                    if (last > next) {
-                        trash = true;
-                        nextTop = i;
-                    }
-                }
-            }
-            if (trash) {
-                bm->aew[i].effectiveWork = 0xffffffff;
-            }
-        }
-        if (!trash) { break; }
-        top = nextTop;
-    }
-
     // This will be non-empty when prepareNextBlock gets called by lockForMining because
     // until lockForMining, the height of the next block was unknown.
     AnnounceList_t* l = bm->queue;
@@ -570,7 +539,6 @@ static void postLockCleanup(BlockMiner_t* bm) {
 
 int BlockMiner_lockForMining(
     BlockMiner_t* bm,
-    BlockMiner_Stats_t* statsOut,
     PacketCrypt_Coinbase_t* commitOut,
     uint32_t nextBlockHeight,
     uint32_t nextBlockTarget)
@@ -586,13 +554,10 @@ int BlockMiner_lockForMining(
     // threshold because if one appears in a block, it's an invalid block.
     // We also have zero or more AnnounceList_t which also have aew entries as well.
 
-    BlockMiner_Stats_t stats; Buf_OBJSET(&stats, 0);
-
 
     // 1. find the last valid entry in the nextAew list and set nextAewLen down to that
     //
     while (bm->nextAewLen > 0 && bm->nextAew[bm->nextAewLen - 1].effectiveWork == 0xffffffff) {
-        stats.newExpired++;
         bm->nextAewLen--;
     }
 
@@ -601,13 +566,9 @@ int BlockMiner_lockForMining(
     //    next announcement (searching backward) has a better effectiveWork than the first
     //    announcement in the list to be added.
     //
-    // Note1: This is an approximation, the exact algorithm would need to sort the existing
-    //     announcements and the new ones, but since this is a time-critical function we'll
-    //     stick with using 2 presorted lists and finding the intersection point and copying.
-    //
-    // Note2: Even if endOfOld-1 is *invalid*, we still prefer to append announcements to the
-    //        list and then strike endOfOld-1 in step 4, this is because we have to sort the
-    //        announcements anyway, and appending is cheaper than replacing.
+    // Note: Even if endOfOld-1 is *invalid*, we still prefer to append announcements to the
+    //       list and then strike endOfOld-1 in step 4, this is because we have to sort the
+    //       announcements anyway, and appending is cheaper than replacing.
     //
     size_t endOfOld = bm->annCount;
     for (;; endOfOld--) {
@@ -620,9 +581,6 @@ int BlockMiner_lockForMining(
         // the first announcement to add is not better than one we already have
         // with a target, > means less work.
         if (bm->nextAew[0].effectiveWork > bm->aew[endOfOld - 1].effectiveWork) { break; }
-
-        stats.oldExpired += (bm->aew[endOfOld - 1].effectiveWork == 0xffffffff);
-        stats.oldReplaced += (bm->aew[endOfOld - 1].effectiveWork < 0xffffffff);
     }
 
     // 3. Append/replace announcements starting one after the announcement found in 2.
@@ -655,70 +613,40 @@ int BlockMiner_lockForMining(
         annTarget->content = bm->nextAew[newAnnI].content;
 
         // assign pointers
-        annTarget->aewPtr = aewTarget;
         aewTarget->ann = annTarget;
+        // We are NOT setting the aewPtr (reverse) because they're all
+        // going to become incorrect as soon as we sort the aew list.
 
         // put the hash in the tree
         Hash_COMPRESS32_OBJ(&treeEntryTarget->hash, &annTarget->ann);
     }
 
-    stats.newGood = newAnnI;
-    stats.newNotEnough = bm->nextAewLen - newAnnI;
-
-    // 4. We need to go back down the list and strike any announcements which are
-    //    invalid so that they will be sorted out of the tree.
+    // 4. Sort the aew table from best to worst and then iterate through it searching
+    //    for the best subset of announcements out of the table.
     //
-    for (; endOfOld > 0; endOfOld--) {
-        if (bm->aew[endOfOld - 1].effectiveWork < 0xffffffff) { break; }
-        // Hashes starting with 0 are forbidden so it's a convenient way to strike an entry.
-        uint64_t tp = bm->aew[endOfOld - 1].ann->_treePosition;
-        bm->tree->entries[tp].hash.longs[0] = 0;
-        stats.oldExpired++;
+    qsort(bm->aew, mainAnnI, sizeof bm->aew[0], ewComp);
+    uint64_t bestHrm = 0;
+    uint32_t bestI = 0;
+    if (mainAnnI > 0) { bm->aew[0].ann->aewPtr = &bm->aew[0]; }
+    for (size_t i = 1; i < mainAnnI; i++) {
+        // While we're here, we need to fix up the pointers because we just sorted...
+        bm->aew[i].ann->aewPtr = &bm->aew[i];
+        uint32_t work = bm->aew[i].effectiveWork;
+        if (work == 0xffffffff) { break; }
+        uint64_t hrm = Difficulty_getHashRateMultiplier(work, i);
+        if (hrm <= bestHrm) { continue; }
+        bestHrm = hrm;
+        bestI = i;
     }
 
-    stats.oldGood = endOfOld;
+    // Truncate the list to only the best subset
+    mainAnnI = bestI + 1;
 
-    // 5. The worst announcement will be found in one of two places, either at the
-    //    end of the newly added announcements (mainAnnI - 1) or at the end of the
-    //    old announcements, endOfOld.
-    uint32_t worstEffectiveWork;
-    {
-        uint32_t worstOldAnn = (endOfOld > 0) ? bm->aew[endOfOld - 1].effectiveWork : 0;
-        uint32_t worstNewAnn = (newAnnI > 0) ? bm->aew[newAnnI - 1].effectiveWork : 0;
-        worstEffectiveWork = (worstOldAnn > worstNewAnn) ? worstOldAnn : worstNewAnn;
+    // Worst effective work should be the last entry in the list because it's sorted
+    uint32_t worstEffectiveWork = bm->aew[bestI].effectiveWork;
 
-        // sanity check
-        for (uint64_t i = 0; i < mainAnnI; i++) {
-            if (bm->aew[i].effectiveWork == 0xffffffff) {
-                uint64_t tp = bm->aew[i].ann->_treePosition;
-                if (bm->tree->entries[tp].hash.longs[0] != 0) {
-                    for (size_t i = 0; i < mainAnnI; i++) {
-                        fprintf(stderr, "%08x\n", bm->aew[i].effectiveWork);
-                    }
-                    fprintf(stderr, "wtf2 %ld %ld %ld %ld %08x %08x %08x\n",
-                        (long)i, (long)mainAnnI, (long)endOfOld, (long)newAnnI,
-                        bm->aew[i].effectiveWork, worstOldAnn, worstNewAnn);
-                    assert(0);
-                }
-                continue;
-            }
-            if (bm->aew[i].effectiveWork > worstEffectiveWork) {
-                for (size_t i = 0; i < mainAnnI; i++) {
-                    fprintf(stderr, "%08x\n", bm->aew[i].effectiveWork);
-                }
-                fprintf(stderr, "wtf %ld %ld %ld %ld %08x %08x %08x\n",
-                    (long)i, (long)mainAnnI, (long)endOfOld, (long)newAnnI,
-                    bm->aew[i].effectiveWork, worstOldAnn, worstNewAnn);
-            }
-            assert(bm->aew[i].effectiveWork <= worstEffectiveWork);
-        }
-    }
-
-    // 6. Make PcP sort the tree and drop all of the entries which are invalid.
     bm->tree->totalAnnsZeroIncluded = mainAnnI + 1;
     uint64_t nextCount = PacketCryptProof_prepareTree(bm->tree);
-
-    stats.finalCount = nextCount;
 
     // the entries which were to be dropped should have been sorted to the end so we can
     // just decrease the length to remove them.
@@ -726,22 +654,22 @@ int BlockMiner_lockForMining(
 
     // 6. Reorder the announcements by their position in the tree, start by flagging each
     //    announcement with it's proper tree position, then iterate over the tree from
-    //    begginning to end, swapping announcements as we go to put them in the right
+    //    beginning to end, swapping announcements as we go to put them in the right
     //    order.
     // Note: When we swap 2 announcements, two tree entry nolonger have the right index so
     //    we need to fix up at least one of them (the other we will never visit again).
-    for (uint64_t i = 0; i < mainAnnI; i++) {
+    for (size_t i = 0; i < mainAnnI; i++) {
         bm->anns[i]._treePosition = UINT64_MAX;
     }
-    for (uint64_t i = 0; i < nextCount; i++) {
+    for (size_t i = 0; i < nextCount; i++) {
         bm->anns[bm->tree->entries[i].start]._treePosition = i;
     }
-    for (uint64_t i = 0; i < nextCount; i++) {
+    for (size_t i = 0; i < nextCount; i++) {
         //fprintf(stderr, "i = %ld  tp = %ld\n", (long)i, (long)bm->anns[i]._treePosition);
         assert(bm->anns[i]._treePosition >= i);
         if (bm->anns[i]._treePosition == i) { continue; }
         Ann_t ann;
-        uint64_t b = bm->tree->entries[i].start;
+        size_t b = bm->tree->entries[i].start;
         //fprintf(stderr, "    ix = %ld tpx = %ld\n", (long)b, (long)bm->anns[b]._treePosition);
         assert(bm->anns[b]._treePosition == i);
         Buf_OBJCPY(&ann, &bm->anns[i]);
@@ -753,8 +681,6 @@ int BlockMiner_lockForMining(
         // fixup the pointer in the aew
         bm->anns[i].aewPtr->ann = &bm->anns[i];
     }
-
-    if (statsOut) { Buf_OBJCPY(statsOut, &stats); }
 
     if (!nextCount) {
         // we're not transitioning into locked state so we need to clean up our mess
