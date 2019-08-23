@@ -9,6 +9,7 @@
 #include "ContentMerkle.h"
 
 #include "sodium/core.h"
+#include "sodium/randombytes.h"
 
 #include <stdio.h>
 #include <sys/types.h>
@@ -507,12 +508,29 @@ static void processAnns(Worker_t* w, int fileNo) {
             res.payTo[i] = '_';
         }
     }
+
+    // make an eventId
+    uint8_t eventBuf[16];
+    randombytes_buf(eventBuf, 16);
+    char eventId[33];
+    for (int i = 0; i < 16; i++) {
+        snprintf(&eventId[i*2], 3, "%02x", eventBuf[i]);
+    }
+
+    // Get the time
+    struct timeval tv;
+    assert(!gettimeofday(&tv, NULL));
+    unsigned long long timeMs = tv.tv_sec;
+    timeMs *= 1000;
+    timeMs += tv.tv_usec / 1000;
+
     // Align with Protocol.js Protocol_AnnResult_t
-    uint8_t buf[256];
-    snprintf(buf, 256, "{\"accepted\":%d,\"dup\":%d,\"inval\":%d,"
-        "\"badHash\":%d,\"runt\":%d,\"internalErr\":%d,\"payTo\":\"%s\"}",
+    char buf[1024];
+    snprintf(buf, 1024, "{\"accepted\":%d,\"dup\":%d,\"inval\":%d,"
+        "\"badHash\":%d,\"runt\":%d,\"internalErr\":%d,\"payTo\":\"%s\","
+        "\"time\":%llu,\"eventId\":\"%s\"}",
         res.accepted, res.duplicates, res.invalid, res.badContentHash, res.runt,
-        res.internalError, res.payTo);
+        res.internalError, res.payTo, timeMs, eventId);
     checkedWrite(w->lw.tmpFile.path, outFileNo, buf, strlen(buf));
     close(outFileNo);
     strncpy(w->lw.outFile.name, w->lw.inFile->name, FilePath_NAME_SZ);

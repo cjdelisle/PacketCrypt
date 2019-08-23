@@ -475,8 +475,10 @@ const b2hash32 = module.exports.b2hash32 = (content /*:Buffer*/) => {
     return Blake2b(32).update(content).digest(Buffer.alloc(32));
 };
 
-module.exports.getContentProofIdx = (header /*:Buffer*/, proof /*:Buffer*/) /*:number*/ => {
-    return (b2hash32(header).readUInt32LE(0) ^ proof.readUInt32LE(0)) >>> 0;
+module.exports.getShareId = (header /*:Buffer*/, proof /*:Buffer*/) /*:Buffer*/ => {
+    const hh = b2hash32(header);
+    hh.writeUint32LE((hh.readUInt32LE(0) ^ proof.readUInt32LE(0)) >>> 0, 0);
+    return hh.slice(0,16);
 };
 
 

@@ -19,10 +19,10 @@ config.checkannsPath = './bin/checkanns';
 config.checksharesPath = './bin/checkshares';
 config.rpc = {
     protocol: 'https',
-    user: '4reKpdVkygRyWv+2luJ2aWRWBKc=',
-    pass: 'SHhCYQQTb9LSo6lVtx35gdmLEmg=',
+    user: 'x',
+    pass: 'x',
     host: '127.0.0.1',
-    port: 18335,
+    port: 64765,
     rejectUnauthorized: false
 };
 config.annHandlers = [

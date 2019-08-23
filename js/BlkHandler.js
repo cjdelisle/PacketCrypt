@@ -80,6 +80,7 @@ const onSubmit = (ctx, req, res) => {
     let headerAndProof;
     let coinbase;
     let coinbaseCommit;
+    let shareId;
     nThen((w) => {
         let len = 0;
         const data = [];
@@ -112,15 +113,16 @@ const onSubmit = (ctx, req, res) => {
             return void errorEnd(400, "Upload is not parsable as json");
         }
 
+        const proofMarker = Util.parseVarInt(headerAndProof.slice(80));
+        if (proofMarker[0] !== Protocol.PC_PCP_TYPE) {
+            return void errorEnd(400, "First element after header must be Pcp");
+        }
         const proofLen = Util.parseVarInt(headerAndProof.slice(81));
         const proof = headerAndProof.slice(81 + proofLen[1], 81 + proofLen[1] + proofLen[0]);
-        do {
-            const cpi = Util.getContentProofIdx(headerAndProof.slice(0,80), proof);
-            //console.error("Share proof idx " + cpi);
-            if (cpi % ctx.mut.hashMod !== ctx.mut.hashNum) {
-                return void errorEnd(400, "Share posted to wrong block handler");
-            }
-        } while (0);
+        shareId = Util.getShareId(header, proof).readUInt32LE(0);
+        if (shareId.readUInt32LE(0) % ctx.mut.hashMod !== ctx.mut.hashNum) {
+            return void errorEnd(400, "Share posted to wrong block handler");
+        }
 
         currentWork = ctx.poolClient.work;
         if (!currentWork) {
@@ -265,13 +267,14 @@ const onSubmit = (ctx, req, res) => {
                     const result = JSON.stringify({
                         result: {
                             payTo: payTo,
-                            ok: true,
-                            block: true
+                            block: true,
+                            time: +new Date(),
+                            eventId: shareId.toString('hex')
                         },
                         error: [],
                         warn: []
                     });
-                    console.log(result);
+                    console.log(result.result);
                     res.end(result);
                 }
             }));
@@ -280,8 +283,9 @@ const onSubmit = (ctx, req, res) => {
             const result = JSON.stringify({
                 result: {
                     payTo: payTo,
-                    ok: true,
-                    block: false
+                    block: false,
+                    time: +new Date(),
+                    eventId: shareId.toString('hex')
                 },
                 error: [],
                 warn: []
@@ -311,6 +315,7 @@ module.exports.create = (cfg /*:BlkHandler_Config_t*/) => {
         mut: {
             cfg: cfg,
             ready: false,
+            lastBlockHash: undefined,
 
             hashNum: -1,
             hashMod: -1
@@ -331,6 +336,42 @@ module.exports.create = (cfg /*:BlkHandler_Config_t*/) => {
         }));
     }).nThen((_) => {
         ctx.mut.ready = true;
+    });
+    ctx.poolClient.onWork((w) => {
+        const hash = w.lastHash.reverse().toString('hex');
+        if (!ctx.lastBlockHash) {
+            // first start
+            ctx.lastBlockHash = hash;
+            return;
+        }
+        if (ctx.lastBlockHash === hash) {
+            // dupe
+            return;
+        }
+        ctx.rpcClient.getBlock(hash, (err, ret) => {
+            if (!err && ret.error) { err = ret.error; }
+            if (err) {
+                return void console.error("onWork unable to call getBlock [" + String(err) + "]");
+            }
+            if (!ret.result) {
+                return void console.error("onWork result missing in ret [" + JSON.stringify(ret) + "]");
+            }
+            const height = ret.result.height;
+            const diff = ret.result.difficulty;
+            if (!height) {
+                return void console.error("onWork missing height");
+            }
+            if (!diff) {
+                return void console.error("onWork missing difficulty");
+            }
+            console.log(JSON.stringify({
+                hash: hash,
+                height: height,
+                difficulty: diff,
+                time: +new Date(),
+                eventId: hash.slice(0,32)
+            }));
+        });
     });
 
     Http.createServer((req, res) => {
