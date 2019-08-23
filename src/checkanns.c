@@ -533,7 +533,7 @@ static void processAnns(Worker_t* w, int fileNo) {
     char buf[2048];
     snprintf(buf, 2048, "{\"accepted\":%u,\"dup\":%u,\"inval\":%u,"
         "\"badHash\":%u,\"runt\":%u,\"internalErr\":%u,\"payTo\":\"%s\","
-        "\"unsigned\":%u,\"totalLen\":%u"
+        "\"unsigned\":%u,\"totalLen\":%u,"
         "\"time\":%llu,\"eventId\":\"%s\"}",
         res.accepted, res.duplicates, res.invalid, res.badContentHash, res.runt,
         res.internalError, res.payTo, res.unsignedCount, res.totalContentLength,
