@@ -127,6 +127,8 @@ typedef struct Result_s {
     uint32_t badContentHash;
     uint32_t runt;
     uint32_t internalError;
+    uint32_t unsignedCount;
+    uint32_t totalContentLength;
     uint8_t payTo[64];
 } Result_t;
 
@@ -187,11 +189,12 @@ static void mkDedupes(AnnEntry_t* dedupsOut, const PacketCrypt_Announce_t* annsI
 }
 
 // This marks entries in dedupsIn to be start = 0 in order to make them invalid
-static int validateAnns(LocalWorker_t* lw, int annCount) {
+static int validateAnns(LocalWorker_t* lw, int annCount, Result_t* res) {
     int goodCount = 0;
     int modulo = (lw->inBuf.hashMod > 0) ? lw->inBuf.hashMod : 1;
     for (int i = 0; i < annCount; i++) {
-        if (Buf_OBJCMP(&lw->inBuf.signingKey, &lw->inBuf.anns[i].hdr.signingKey)) {
+        bool isUnsigned = Buf_IS_ZERO(lw->inBuf.anns[i].hdr.signingKey);
+        if (!isUnsigned && Buf_OBJCMP(&lw->inBuf.signingKey, &lw->inBuf.anns[i].hdr.signingKey)) {
             // wrong signing key (probably a race condition in the miner mixing different anns)
         } else if (lw->inBuf.parentBlockHeight != lw->inBuf.anns[i].hdr.parentBlockHeight) {
             // wrong parent block height
@@ -205,6 +208,8 @@ static int validateAnns(LocalWorker_t* lw, int annCount) {
             // doesn't check out
         } else {
             goodCount++;
+            res->unsignedCount += isUnsigned;
+            res->totalContentLength += lw->inBuf.anns[i].hdr.contentLength;
             continue;
         }
         // Flag it as no-good, 0 is invalid by definition anyway
@@ -365,7 +370,7 @@ static bool processAnns1(Worker_t* w, Result_t* res, int fileNo) {
     int annCount = 1;
 
     mkDedupes(w->lw.dedupsIn, w->lw.inBuf.anns, annCount);
-    int validCount = validateAnns(&w->lw, annCount);
+    int validCount = validateAnns(&w->lw, annCount, res);
 
     uint64_t now = nowSeconds();
     int goodCount = 0;
@@ -525,12 +530,14 @@ static void processAnns(Worker_t* w, int fileNo) {
     timeMs += tv.tv_usec / 1000;
 
     // Align with Protocol.js Protocol_AnnResult_t
-    char buf[1024];
-    snprintf(buf, 1024, "{\"accepted\":%d,\"dup\":%d,\"inval\":%d,"
-        "\"badHash\":%d,\"runt\":%d,\"internalErr\":%d,\"payTo\":\"%s\","
+    char buf[2048];
+    snprintf(buf, 2048, "{\"accepted\":%u,\"dup\":%u,\"inval\":%u,"
+        "\"badHash\":%u,\"runt\":%u,\"internalErr\":%u,\"payTo\":\"%s\","
+        "\"unsigned\":%u,\"totalLen\":%u"
         "\"time\":%llu,\"eventId\":\"%s\"}",
         res.accepted, res.duplicates, res.invalid, res.badContentHash, res.runt,
-        res.internalError, res.payTo, timeMs, eventId);
+        res.internalError, res.payTo, res.unsignedCount, res.totalContentLength,
+        timeMs, eventId);
     checkedWrite(w->lw.tmpFile.path, outFileNo, buf, strlen(buf));
     close(outFileNo);
     strncpy(w->lw.outFile.name, w->lw.inFile->name, FilePath_NAME_SZ);
