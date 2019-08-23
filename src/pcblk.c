@@ -194,23 +194,23 @@ static const char* COMMIT_PATTERN =
 static const int COMMIT_PATTERN_SZ = 50;
 static const int COMMIT_PATTERN_OS = 2;
 
-static void loadWork(Context_t* ctx) {
+static bool loadWork(Context_t* ctx) {
     snprintf(ctx->filepath.name, FilePath_NAME_SZ, "work.bin");
 
     int workfileno = open(ctx->filepath.path, O_RDONLY);
     if (workfileno < 0) {
-        if (errno == ENOENT) { return; }
+        if (errno == ENOENT) { return false; }
         DEBUGF("Could not open [%s] for reading errno=[%s]\n",
             ctx->filepath.path, strerror(errno));
         // we won't crash but it's just going to loop and try again...
-        return;
+        return false;
     }
 
     struct stat st;
     if (fstat(workfileno, &st)) {
         DEBUGF("Could not stat [%s] errno=[%s]\n", ctx->filepath.path, strerror(errno));
         close(workfileno);
-        return;
+        return false;
     }
 
     PoolProto_Work_t* work = malloc(st.st_size);
@@ -219,7 +219,7 @@ static void loadWork(Context_t* ctx) {
         DEBUGF("Invalid read of [%s] errno=[%s]\n", ctx->filepath.path, strerror(errno));
         close(workfileno);
         free(work);
-        return;
+        return false;
     }
     close(workfileno);
 
@@ -227,14 +227,14 @@ static void loadWork(Context_t* ctx) {
     if (proofSz < 0 || proofSz % 32) {
         DEBUGF("coinbaseLen [%d] of work.bin size [%d] is insane\n", proofSz, (int)st.st_size);
         free(work);
-        return;
+        return false;
     }
 
     // make sure we can delete work.bin because otherwise we might get in a busy loop
     if (unlink(ctx->filepath.path)) {
         DEBUGF("Failed to unlink [%s] errno=[%s]\n", ctx->filepath.path, strerror(errno));
         free(work);
-        return;
+        return false;
     }
 
     uint8_t* ptr = FileUtil_memmem(work->coinbaseAndMerkles, work->coinbaseLen,
@@ -242,7 +242,7 @@ static void loadWork(Context_t* ctx) {
     if (!ptr) {
         DEBUGF("Coinbase doesn't contain commit pattern\n");
         free(work);
-        return;
+        return false;
     }
 
     free(ctx->currentWork);
@@ -250,6 +250,7 @@ static void loadWork(Context_t* ctx) {
     ctx->currentWorkProofSz = proofSz;
     ctx->coinbaseCommit = (PacketCrypt_Coinbase_t*) (&ptr[COMMIT_PATTERN_OS]);
     ctx->mining = false;
+    return true;
 }
 
 static void beginMining(Context_t* ctx)
@@ -433,7 +434,12 @@ int main(int argc, char** argv) {
         }
 
         // Check if there's a work.bin file for us
-        loadWork(ctx);
+        if (!loadWork(ctx)) {
+            // no new work, we potentially swapped files because of a signal but we
+            // need not restart the miner.
+            sleep(1);
+            continue;
+        }
 
         // Only applicable before we receive our first work, we can't really load
         // any anns because we don't know which ones might be useful.

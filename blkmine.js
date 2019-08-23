@@ -29,7 +29,7 @@ type Context_t = {
     pool: PoolClient_t,
     masterConf: Protocol_PcConfigJson_t,
     lock: Saferphore_t,
-    handledShares: { [string]:boolean }
+    minerLastSignaled: number
 };
 */
 
@@ -216,6 +216,14 @@ const deleteWorkAndShares = (config /*:Config_Miner_t*/, _cb) => {
     });
 };
 
+const sigMiner = (ctx /*:Context_t*/) => {
+    const now = +new Date();
+    const diff = now - ctx.minerLastSignaled;
+    if (diff < 1000) { return false; }
+    ctx.miner.kill('SIGHUP');
+    return true;
+}
+
 const onNewWork = (ctx /*:Context_t*/, work, done) => {
     nThen((w) => {
         // Delete share/work files because there is no chance of them being useful
@@ -236,9 +244,14 @@ const onNewWork = (ctx /*:Context_t*/, work, done) => {
                 if (err) { throw err; }
             }));
         }));
-    }).nThen((_w) => {
+    }).nThen((w) => {
         if (!ctx.miner) { return; }
-        ctx.miner.kill('SIGHUP');
+        // It's important that if there's new work, the miner does get signaled...
+        const s = () => {
+            if (!sigMiner(ctx)) { setTimeout(w(s), 50); }
+        };
+        s();
+    }).nThen((_) => {
         done();
     });
 };
@@ -533,8 +546,7 @@ const checkShares = (ctx /*:Context_t*/, done) => {
                             // The most recent file has content so lets just sig the
                             // miner so that it will make a new file and then we'll
                             // submit the content of this one on the next go around.
-                            console.error('signaling the miner');
-                            ctx.miner.kill('SIGHUP');
+                            sigMiner(ctx);
                         }
                     } else if (ret.size > 0) {
                         // we have content in a file which we can upload now
@@ -758,37 +770,33 @@ const launch = (config /*:Config_Miner_t*/) => {
             masterConf: masterConf,
             lock: Saferphore.create(1),
             work: undefined,
-            handledShares: {}
+            minerLastSignaled: +new Date()
         };
         mkMiner(ctx);
         console.error("Got [" + masterConf.downloadAnnUrls.length + "] AnnHandlers");
         pollAnnHandlers(ctx);
-        // this is strictly to prevent us sighup'ing the miner too quickly
-        // before it has hooked up to listen for the event.
-        setTimeout(() => {
-            pool.onWork((work) => {
-                ctx.work = work;
-                ctx.lock.take((returnAfter) => {
-                    //console.error("Enter pool.onWork");
-                    nThen((w) => {
-                        onNewWork(ctx, work, w());
-                    }).nThen((w) => {
-                        deleteUselessAnns(config, work.height, w());
-                    }).nThen((w) => {
-                        //console.error("Exit pool.onWork")
-                        returnAfter()();
-                    })
-                });
-            });
-            setInterval(() => {
-                ctx.lock.take((returnAfter) => {
-                    //console.error("Enter checkShares");
-                    checkShares(ctx, returnAfter(() => {
-                        //console.error("Exit checkShares");
-                    }));
+        pool.onWork((work) => {
+            ctx.work = work;
+            ctx.lock.take((returnAfter) => {
+                //console.error("Enter pool.onWork");
+                nThen((w) => {
+                    onNewWork(ctx, work, w());
+                }).nThen((w) => {
+                    deleteUselessAnns(config, work.height, w());
+                }).nThen((w) => {
+                    //console.error("Exit pool.onWork")
+                    returnAfter()();
                 })
-            }, 100);
-        }, 1000);
+            });
+        });
+        setInterval(() => {
+            ctx.lock.take((returnAfter) => {
+                //console.error("Enter checkShares");
+                checkShares(ctx, returnAfter(() => {
+                    //console.error("Exit checkShares");
+                }));
+            })
+        }, 500);
     });
 };
 
