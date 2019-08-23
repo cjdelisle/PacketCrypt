@@ -477,7 +477,7 @@ const b2hash32 = module.exports.b2hash32 = (content /*:Buffer*/) => {
 
 module.exports.getShareId = (header /*:Buffer*/, proof /*:Buffer*/) /*:Buffer*/ => {
     const hh = b2hash32(header);
-    hh.writeUint32LE((hh.readUInt32LE(0) ^ proof.readUInt32LE(0)) >>> 0, 0);
+    hh.writeUInt32LE((hh.readUInt32LE(0) ^ proof.readUInt32LE(0)) >>> 0, 0);
     return hh.slice(0,16);
 };
 
