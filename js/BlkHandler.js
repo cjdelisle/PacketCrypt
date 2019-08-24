@@ -338,7 +338,7 @@ module.exports.create = (cfg /*:BlkHandler_Config_t*/) => {
         ctx.mut.ready = true;
     });
     ctx.poolClient.onWork((w) => {
-        const hash = w.lastHash.reverse().toString('hex');
+        const hash = Buffer.from(w.lastHash).reverse().toString('hex');
         if (!ctx.lastBlockHash) {
             // first start
             ctx.lastBlockHash = hash;
