@@ -152,8 +152,6 @@ const onSubmit = (ctx, req, res) => {
             header.copy(headerAndProof);
         } while (0);
 
-        headerHash = Crypto.createHash('sha256').update(headerAndProof.slice(0,80)).digest('hex');
-
         // Make sure we are able to get the block template, this is zero cost after the
         // first time it's tried...
         // If we're not able to get it then we cannot submit a block.
@@ -269,6 +267,9 @@ const onSubmit = (ctx, req, res) => {
                         errorEnd(400, "error submitting block [" + serr + "]");
                     }
                 } else {
+                    const headerHash = Crypto.createHash('sha256').update(
+                        Crypto.createHash('sha256').update(headerAndProof.slice(0,80)).digest()
+                    ).digest().reverse().toString('hex');
                     const result = {
                         result: {
                             payTo: payTo,
@@ -291,8 +292,7 @@ const onSubmit = (ctx, req, res) => {
                     payTo: payTo,
                     block: false,
                     time: +new Date(),
-                    eventId: shareId.toString('hex'),
-                    headerHash: headerHash
+                    eventId: shareId.toString('hex')
                 },
                 error: [],
                 warn: []
