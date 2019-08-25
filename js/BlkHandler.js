@@ -346,15 +346,16 @@ module.exports.create = (cfg /*:BlkHandler_Config_t*/) => {
     });
     ctx.poolClient.onWork((w) => {
         const hash = Buffer.from(w.lastHash).reverse().toString('hex');
-        if (!ctx.lastBlockHash) {
+        if (!ctx.mut.lastBlockHash) {
             // first start
-            ctx.lastBlockHash = hash;
+            ctx.mut.lastBlockHash = hash;
             return;
         }
-        if (ctx.lastBlockHash === hash) {
+        if (ctx.mut.lastBlockHash === hash) {
             // dupe
             return;
         }
+        ctx.mut.lastBlockHash = hash;
         ctx.rpcClient.getBlock(hash, (err, ret) => {
             if (!err && ret.error) { err = ret.error; }
             if (err) {
