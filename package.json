@@ -21,6 +21,8 @@
     "bintrees": "^1.0.2",
     "bitcoind-rpc": "^0.7.2",
     "blake2b": "^2.1.3",
+    "flow-bin": "^0.95.1",
+    "jshint": "^2.10.2",
     "merkletreejs": "^0.1.6",
     "minimist": "^1.2.0",
     "nthen": "^0.1.8",
@@ -28,8 +30,5 @@
     "tweetnacl": "^1.0.1",
     "write-file-atomic": "^2.4.2"
   },
-  "devDependencies": {
-    "flow-bin": "^0.95.1",
-    "jshint": "^2.10.2"
-  }
+  "devDependencies": {}
 }
