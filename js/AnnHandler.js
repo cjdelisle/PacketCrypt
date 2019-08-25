@@ -26,7 +26,8 @@ export type AnnHandler_Config_t = {
 };
 type PendingRequest_t = {
     req: IncomingMessage,
-    res: ServerResponse
+    res: ServerResponse,
+    warn: Array<string>
 };
 type Context_t = {
     workdir: string,
@@ -71,11 +72,18 @@ const onSubmit = (ctx, req, res) => {
     if (Util.badMethod('POST', req, res)) { return; }
     const worknum = Number(req.headers['x-pc-worknum']);
     const payTo = req.headers['x-pc-payto'] || '';
+    const warn = [];
+    if (!Util.isValidPayTo(payTo)) {
+        warn.push('Address [' + payTo +
+            '] is not a valid pkt address, WORK WILL NOT BE CREDITED');
+        // we're not going to clear the payTo, we'll keep it anyway so that
+        // we have it in the logs just in case.
+    }
     let failed = false;
     const errorEnd = (code, message) => {
         failed = true;
         res.statusCode = code;
-        res.end(JSON.stringify({ warn: [], error: [message], result: '' }));
+        res.end(JSON.stringify({ warn: warn, error: [message], result: '' }));
     };
     if (isNaN(worknum)) {
         return void errorEnd(400, "x-pc-worknum missing or not a number");
@@ -124,7 +132,8 @@ const onSubmit = (ctx, req, res) => {
             //result = ctx.mut.cfg.url + '/outdir/' + fileName;
             ctx.pendingRequests[ctx.workdir + '/outdir/' + fileName] = {
                 req: req,
-                res: res
+                res: res,
+                warn: warn
             };
         }));
     });
@@ -266,18 +275,18 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
                         obj = JSON.parse(str);
                     } catch (e) {
                         pr.res.statusCode = 500;
-                        pr.res.end(JSON.stringify({ warn: [], error: [
+                        pr.res.end(JSON.stringify({ warn: pr.warn, error: [
                             "Failed to parse result from validator [" + str + "]"
                         ], result: '' }));
                         delete ctx.pendingRequests[path];
                         return;
                     }
-                    const content = JSON.stringify({ warn: [], error: [], result: obj });
+                    const content = JSON.stringify({ warn: pr.warn, error: [], result: obj });
                     pr.res.writeHead(200, {
                         'Content-Type': 'application/json',
                         'Content-Length': String(content.length)
                     });
-                    pr.res.end(JSON.stringify({ warn: [], error: [], result: obj }));
+                    pr.res.end(JSON.stringify({ warn: pr.warn, error: [], result: obj }));
                     delete ctx.pendingRequests[path];
                     Fs.unlink(path, (err) => {
                         if (err) {

@@ -3,10 +3,12 @@ const Fs = require('fs');
 const Http = require('http');
 const EventEmitter = require('events').EventEmitter;
 const Crypto = require('crypto');
+
 const Tweetnacl = require('tweetnacl');
 const Blake2b = require('blake2b');
-
 const nThen = require('nthen');
+const Bs58Check = require('bs58check');
+const Bech32 = require('bech32');
 
 /*::
 import type { IncomingMessage, ServerResponse } from 'http'
@@ -266,9 +268,39 @@ const createMutex = module.exports.createMutex = () /*:Util_Mutex_t*/ => {
     return withLock;
 };
 
-const isValidPayTo = module.exports.isValidPayTo = (payTo /*:string*/) => {
-    // TODO: better validation
-    return payTo && payTo.length > 10;
+const isValidPayTo = module.exports.isValidPayTo = (payTo /*:string*/) /*bool*/ => {
+    if (typeof(payTo) !== 'string') { return false; }
+    if (payTo.length > 64) { return false; }
+    if (!payTo.indexOf('pkt1')) {
+        // segwit addr
+        try {
+            const b = Bech32.decode(payTo);
+            return b.prefix === 'pkt';
+        } catch (e) {
+            return false;
+        }
+    } else if (!payTo.indexOf('p')) {
+        try {
+            const d = Bs58Check.decode(payTo);
+            return d[0] === 0x75;
+        } catch (e) {
+            return false;
+        }
+    } else if (!payTo.indexOf('P')) {
+        // Disable these addresses until we're sure we can actually pay them
+        if (0) {
+            try {
+                const d = Bs58Check.decode(payTo);
+                if (d[0] === 0x38) { return true; } // script hash addr
+                if (d[0] === 0xa3) { return true; } // witness pubkey hash addr
+                if (d[0] === 0x22) { return true; } // witness script hash addr
+                return false;
+            } catch (e) {
+                return false;
+            }
+        }
+    }
+    return false;
 };
 
 const badMethod = module.exports.badMethod = (

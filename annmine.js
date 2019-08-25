@@ -210,8 +210,10 @@ const mkMiner = (config, submitAnnUrls) => {
 };
 
 const launch = (config /*:Config_Miner_t*/) => {
-    if (config.paymentAddr.length > 64) {
-        throw new Error("Illegal payment address (over 64 bytes long)");
+    if (!Util.isValidPayTo(config.paymentAddr)) {
+        console.error('Payment address [' + config.paymentAddr +
+            '] is not a valid pkt address');
+        process.exit(100);
     }
     const pool = Pool.create(config.poolUrl);
     nThen((w) => {

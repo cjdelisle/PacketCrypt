@@ -61,13 +61,20 @@ const isZero = (buf) => {
 const onSubmit = (ctx, req, res) => {
     if (Util.badMethod('POST', req, res)) { return; }
     const payTo = req.headers['x-pc-payto'] || '';
+    const warn = [];
+    if (!Util.isValidPayTo(payTo)) {
+        warn.push('Address [' + payTo +
+            '] is not a valid pkt address, WORK WILL NOT BE CREDITED');
+        // we're not going to clear the payTo, we'll keep it anyway so that
+        // we have it in the logs just in case.
+    }
 
     let failed = false;
     const errorEnd = (code, message) => {
         if (failed) { return; }
         failed = true;
         res.statusCode = code;
-        res.end(JSON.stringify({ result: '', error: [message], warn: [] }));
+        res.end(JSON.stringify({ result: '', error: [message], warn: warn }));
     };
 
     // Additional data which is needed with the pcp
@@ -280,7 +287,7 @@ const onSubmit = (ctx, req, res) => {
                             headerHash: headerHash
                         },
                         error: [],
-                        warn: []
+                        warn: warn
                     };
                     console.log(JSON.stringify(result.result));
                     res.end(JSON.stringify(result));
@@ -297,7 +304,7 @@ const onSubmit = (ctx, req, res) => {
                     eventId: shareId.toString('hex')
                 },
                 error: [],
-                warn: []
+                warn: warn
             };
             console.log(JSON.stringify(result.result));
             res.end(JSON.stringify(result));
