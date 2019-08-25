@@ -1,6 +1,8 @@
 /*@flow*/
-const nThen = require('nthen');
 const Http = require('http');
+const Crypto = require('crypto');
+
+const nThen = require('nthen');
 const Tweetnacl = require('tweetnacl');
 
 const Protocol = require('./Protocol.js');
