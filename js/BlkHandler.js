@@ -90,7 +90,6 @@ const onSubmit = (ctx, req, res) => {
     let coinbase;
     let coinbaseCommit;
     let shareId;
-    let headerHash;
     nThen((w) => {
         let len = 0;
         const data = [];
@@ -130,9 +129,6 @@ const onSubmit = (ctx, req, res) => {
         const proofLen = Util.parseVarInt(headerAndProof.slice(81));
         const proof = headerAndProof.slice(81 + proofLen[1], 81 + proofLen[1] + proofLen[0]);
         shareId = Util.getShareId(headerAndProof.slice(0,80), proof);
-        if (shareId.readUInt32LE(0) % ctx.mut.hashMod !== ctx.mut.hashNum) {
-            return void errorEnd(400, "Share posted to wrong block handler");
-        }
 
         currentWork = ctx.poolClient.work;
         if (!currentWork) {
