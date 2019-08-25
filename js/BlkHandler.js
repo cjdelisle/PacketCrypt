@@ -272,6 +272,7 @@ const onSubmit = (ctx, req, res) => {
                     ).digest().reverse().toString('hex');
                     const result = {
                         result: {
+                            type: 'share',
                             payTo: payTo,
                             block: true,
                             time: +new Date(),
@@ -289,6 +290,7 @@ const onSubmit = (ctx, req, res) => {
         } else if (submitRet === 'OK') {
             const result = {
                 result: {
+                    type: 'share',
                     payTo: payTo,
                     block: false,
                     time: +new Date(),
@@ -373,6 +375,7 @@ module.exports.create = (cfg /*:BlkHandler_Config_t*/) => {
                 return void console.error("onWork missing difficulty");
             }
             console.log(JSON.stringify({
+                type: 'block',
                 hash: hash,
                 height: height,
                 difficulty: diff,
