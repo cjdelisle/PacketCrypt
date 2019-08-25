@@ -320,6 +320,7 @@ const main = (argv) => {
         minerId: a.minerId || defaultConf.minerId,
         content: undefined,
         randContent: a.randContent || false,
+        slowStart: false
     };
     if (!a.paymentAddr) {
         console.error("WARNING: You have not passed the --paymentAddr flag\n" +

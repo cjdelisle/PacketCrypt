@@ -30,7 +30,7 @@ type Context_t = {
     mut: {
         hashNum: number,
         hashMod: number,
-
+        lastBlockHash: ?string,
         cfg: BlkHandler_Config_t,
         ready: bool
     }
@@ -359,9 +359,12 @@ module.exports.create = (cfg /*:BlkHandler_Config_t*/) => {
         }
         ctx.mut.lastBlockHash = hash;
         ctx.rpcClient.getBlock(hash, (err, ret) => {
-            if (!err && ret.error) { err = ret.error; }
+            if (!err && ret && ret.error) { err = ret.error; }
             if (err) {
                 return void console.error("onWork unable to call getBlock [" + String(err) + "]");
+            }
+            if (!ret) {
+                return void console.error("onWork ret missing without error");
             }
             if (!ret.result) {
                 return void console.error("onWork result missing in ret [" + JSON.stringify(ret) + "]");

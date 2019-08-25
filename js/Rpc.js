@@ -75,6 +75,7 @@ export type Rpc_Client_t = {
     getBlockchainInfo: (Rpc_Client_Rpc_t<Rpc_BlockchainInfo_t>)=>void,
     checkPcShare: (share: Rpc_Share_t, cb:Rpc_Client_Rpc_t<string>)=>void,
     submitBlock: (blk: string, cb:Rpc_Client_Rpc_t<any>)=>void,
+    getBlock: (hash: string, cb:Rpc_Client_Rpc_t<any>)=>void,
 
     batch: (()=>void, (err: ?Error, ret: ?Rpc_Client_Res_t<any>)=>void)=>void,
     batchedCalls: ?Rpc_Client_Request_t

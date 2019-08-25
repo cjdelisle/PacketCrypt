@@ -28,6 +28,7 @@ export type Config_Miner_t = {
     threads: number,
     maxAnns?: number,
     minerId: number,
+    slowStart: bool,
 
     content?: Config_Miner_Content_t,
     randContent: bool

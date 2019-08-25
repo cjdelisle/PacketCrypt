@@ -21,7 +21,8 @@ import type { Protocol_PcConfigJson_t } from './js/Protocol.js';
 import type { Util_Mutex_t } from './js/Util.js';
 import type { Config_Miner_t } from './js/Config.js'
 
-type Saferphore_t = typeof Saferphore.create(1)
+const _flow_typeof_saferphore = Saferphore.create(1);
+type Saferphore_t = typeof _flow_typeof_saferphore;
 
 type Context_t = {
     config: Config_Miner_t,
@@ -130,7 +131,7 @@ const downloadAnnFile = (
         if (!annBin) { return; }
         getAnnFileParentNum(annPath, w((err, pbn) => {
             if (typeof(pbn) === 'undefined') {
-                console.error('getAnnFileParentNum() error ' + err);
+                console.error('getAnnFileParentNum() error ' + String(err));
                 // filesystem error, we probably want to bail out...
                 throw err;
             }
@@ -221,7 +222,7 @@ const sigMiner = (ctx /*:Context_t*/) => {
     const now = +new Date();
     const diff = now - ctx.minerLastSignaled;
     if (diff < 1000) { return false; }
-    ctx.miner.kill('SIGHUP');
+    if (ctx.miner) { ctx.miner.kill('SIGHUP'); }
     return true;
 };
 
@@ -466,7 +467,7 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
         Fs.unlink(filePath, w((err) => {
             if (err) {
                 console.error("WARNING: failed to delete file [" + filePath + "] [" +
-                    err.code + "]");
+                    String(err.code) + "]");
                 return;
             }
         }));
