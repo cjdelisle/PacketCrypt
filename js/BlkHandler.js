@@ -81,6 +81,7 @@ const onSubmit = (ctx, req, res) => {
     let coinbase;
     let coinbaseCommit;
     let shareId;
+    let headerHash;
     nThen((w) => {
         let len = 0;
         const data = [];
@@ -148,6 +149,8 @@ const onSubmit = (ctx, req, res) => {
             nonce.copy(header, 76);
             header.copy(headerAndProof);
         } while (0);
+
+        headerHash = Crypto.createHash('sha256').update(headerAndProof.slice(0,80)).digest('hex');
 
         // Make sure we are able to get the block template, this is zero cost after the
         // first time it's tried...
@@ -269,7 +272,8 @@ const onSubmit = (ctx, req, res) => {
                             payTo: payTo,
                             block: true,
                             time: +new Date(),
-                            eventId: shareId.toString('hex')
+                            eventId: shareId.toString('hex'),
+                            headerHash: headerHash
                         },
                         error: [],
                         warn: []
@@ -285,7 +289,8 @@ const onSubmit = (ctx, req, res) => {
                     payTo: payTo,
                     block: false,
                     time: +new Date(),
-                    eventId: shareId.toString('hex')
+                    eventId: shareId.toString('hex'),
+                    headerHash: headerHash
                 },
                 error: [],
                 warn: []
