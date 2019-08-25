@@ -264,7 +264,7 @@ const onSubmit = (ctx, req, res) => {
                         errorEnd(400, "error submitting block [" + serr + "]");
                     }
                 } else {
-                    const result = JSON.stringify({
+                    const result = {
                         result: {
                             payTo: payTo,
                             block: true,
@@ -273,14 +273,14 @@ const onSubmit = (ctx, req, res) => {
                         },
                         error: [],
                         warn: []
-                    });
-                    console.log(result.result);
-                    res.end(result);
+                    };
+                    console.log(JSON.stringify(result.result));
+                    res.end(JSON.stringify(result));
                 }
             }));
             return;
         } else if (submitRet === 'OK') {
-            const result = JSON.stringify({
+            const result = {
                 result: {
                     payTo: payTo,
                     block: false,
@@ -289,9 +289,9 @@ const onSubmit = (ctx, req, res) => {
                 },
                 error: [],
                 warn: []
-            });
-            console.log(result);
-            res.end(result);
+            };
+            console.log(JSON.stringify(result.result));
+            res.end(JSON.stringify(result));
             return;
         }
         console.error(submitRet);
