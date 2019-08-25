@@ -90,9 +90,9 @@ const downloadAnnFile = (
         }));
     }).nThen((w) => {
         let nt = nThen;
-        for (let i = 0; i < annBin.length; i += 1024) {
+        const eachAnn = (i) => {
             const annContentLen = annBin.readUInt32LE(i + 20);
-            if (annContentLen <= 32) { continue; }
+            if (annContentLen <= 32) { return; }
             const annContentHash = annBin.slice(i + 24, i + 56);
             nt = nt((ww) => {
                 const cfname = 'ann_' + annContentHash.toString('hex') + '.bin';
@@ -115,7 +115,8 @@ const downloadAnnFile = (
                     });
                 }));
             }).nThen;
-        }
+        };
+        for (let i = 0; i < annBin.length; i += 1024) { eachAnn(i); }
         nt(w());
     }).nThen((w) => {
         if (!annBin) { return; }
@@ -222,7 +223,7 @@ const sigMiner = (ctx /*:Context_t*/) => {
     if (diff < 1000) { return false; }
     ctx.miner.kill('SIGHUP');
     return true;
-}
+};
 
 const onNewWork = (ctx /*:Context_t*/, work, done) => {
     nThen((w) => {
@@ -427,7 +428,7 @@ const getAnnContent = (ctx, ann /*:Buffer*/, cb) => {
         if (err) { return void cb(err); }
         if (buf.length !== length) {
             return void cb(new Error("Length of content file [" + file + "] is [" + buf.length +
-                "] but the announcement defined length is [" + length + "]"))
+                "] but the announcement defined length is [" + length + "]"));
         }
         cb(undefined, buf);
     });
@@ -786,7 +787,7 @@ const launch = (config /*:Config_Miner_t*/) => {
                 }).nThen((w) => {
                     //console.error("Exit pool.onWork")
                     returnAfter()();
-                })
+                });
             });
         });
         setInterval(() => {
@@ -795,7 +796,7 @@ const launch = (config /*:Config_Miner_t*/) => {
                 checkShares(ctx, returnAfter(() => {
                     //console.error("Exit checkShares");
                 }));
-            })
+            });
         }, 500);
     });
 };

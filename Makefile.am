@@ -1,25 +1,32 @@
 # what flags you want to pass to the C compiler & linker
 CFLAGS = \
-    --pedantic \
-    -Wall \
-    -Wextra \
-    -Wno-pointer-sign \
-    -Wno-unused-parameter \
-    -Wno-stringop-truncation \
     -std=c11 \
     -g \
     -O3 -march=native -Werror
 
-#-fsanitize=address -lasan
+WARNFLAGS = -Wall -Wextra --pedantic
 
-CXXFLAGS = \
-    --pedantic \
-    -Wall \
-    -Wextra \
-    -Wno-unused-parameter \
-    -std=c++11 \
-    -g \
-    -O0 -march=native -Werror
+# clang should not panic when GCC options are passed
+WARNFLAGS += -Wno-unknown-warning-option
+
+# gcc thinks every snprintf is potentially 4096 bytes
+WARNFLAGS += -Wno-stringop-truncation
+
+# warning about unused arguments to a function is annoying
+WARNFLAGS += -Wno-unused-parameter
+
+# likewise, complaining about uint8_t* vs char* is annoying
+WARNFLAGS += -Wno-pointer-sign
+
+OPTFLAGS = -O3
+
+DEBUGFLAGS = -g
+
+# Use address sanitizer
+#DEBUGFLAGS += -fsanitize=address -lasan
+
+CFLAGS = -std=c11 $(OPTFLAGS) $(WARNFLAGS) $(DEBUGFLAGS)
+CXXFLAGS = -std=c++11 $(OPTFLAGS) $(WARNFLAGS) $(DEBUGFLAGS)
 
 bin_PROGRAMS =
 lib_LIBRARIES =

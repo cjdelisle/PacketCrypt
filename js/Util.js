@@ -348,7 +348,7 @@ module.exports.deleteUselessAnns = (
                     }
                     console.error('Error in deleteUselessAnns ' + e);
                     throw e;
-                })
+                });
                 rs.on('data', (d) => {
                     if (len > 16) {
                         rs.destroy();
