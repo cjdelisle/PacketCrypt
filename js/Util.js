@@ -504,7 +504,7 @@ const annComputeContentHash = module.exports.annComputeContentHash = (buf /*:Buf
             annComputeContentHash(buf.slice(halfLen))
         ]);
     }
-    return b2hash32(h);
+    return b2hash32(b);
 };
 
 module.exports.getShareId = (header /*:Buffer*/, proof /*:Buffer*/) /*:Buffer*/ => {
