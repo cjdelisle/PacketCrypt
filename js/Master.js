@@ -262,23 +262,22 @@ const onReq = (ctx /*:Context_t*/, req, res) => {
 
 module.exports.create = (cfg /*:Master_Config_t*/) => {
     const workdir = cfg.root.rootWorkdir + '/master_' + cfg.port;
-    let ctx;
-    let secret;
     nThen((w) => {
         Util.checkMkdir(workdir, w());
     }).nThen((w) => {
-        ctx = Object.freeze({
+        const ctx = Object.freeze({
             workdir: workdir,
             rpcClient: Rpc.create(cfg.root.rpc),
             longPollServer: Util.longPollServer(workdir),
-            secret: secret,
             mut: {
                 cfg: cfg,
                 longPollId: undefined,
                 state: undefined
             }
         });
-    }).nThen((w) => {
+        Http.createServer((req, res) => {
+            onReq(ctx, req, res);
+        }).listen(cfg.port);
         console.error("This pool master is configured to run with the following workers:");
         cfg.root.annHandlers.forEach((h) => { console.error(" - AnnHandler: " + h.url); });
         cfg.root.blkHandlers.forEach((h) => { console.error(" - BlkHandler: " + h.url); });
@@ -286,7 +285,4 @@ module.exports.create = (cfg /*:Master_Config_t*/) => {
         console.error();
         onBlock(ctx);
     });
-    Http.createServer((req, res) => {
-        onReq(ctx, req, res);
-    }).listen(cfg.port);
 };

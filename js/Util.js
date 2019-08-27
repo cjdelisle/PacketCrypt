@@ -482,6 +482,10 @@ const getKeypair = module.exports.getKeypair = (rootCfg /*:Config_t*/, height /*
     return Tweetnacl.sign.keyPair.fromSeed(s);
 };
 
+const b2hash32 = module.exports.b2hash32 = (content /*:Buffer*/) => {
+    return Blake2b(32).update(content).digest(Buffer.alloc(32));
+};
+
 const Util_log2ceil = (x) => Math.ceil(Math.log2(x));
 const annComputeContentHash = module.exports.annComputeContentHash = (buf /*:Buffer*/) => {
     if (buf.length < 32) {
@@ -500,11 +504,7 @@ const annComputeContentHash = module.exports.annComputeContentHash = (buf /*:Buf
             annComputeContentHash(buf.slice(halfLen))
         ]);
     }
-    return Blake2b(32).update(b).digest(Buffer.alloc(32));
-};
-
-const b2hash32 = module.exports.b2hash32 = (content /*:Buffer*/) => {
-    return Blake2b(32).update(content).digest(Buffer.alloc(32));
+    return b2hash32(h);
 };
 
 module.exports.getShareId = (header /*:Buffer*/, proof /*:Buffer*/) /*:Buffer*/ => {
