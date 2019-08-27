@@ -224,7 +224,7 @@ module.exports.longPollServer = (dir /*:string*/) /*:Util_LongPollServer_t*/ => 
 
 const httpPost = module.exports.httpPost = (
     url /*:string*/,
-    headers /*:{ [string]:string }*/,
+    headers /*:{ [key: string] : mixed, ... }*/,
     cb /*:(IncomingMessage)=>void*/
 ) => {
     let hostname;
@@ -375,7 +375,6 @@ module.exports.deleteUselessAnns = (
                 rs.on('error', (e) => {
                     if (e.code === 'ENOENT') {
                         console.error("File [" + file + "] disappeared while accessing");
-                        w.abort();
                         return;
                     }
                     console.error('Error in deleteUselessAnns ' + e);

@@ -23,12 +23,14 @@
     "bitcoind-rpc": "^0.7.2",
     "blake2b": "^2.1.3",
     "bs58check": "^2.1.2",
-    "merkletreejs": "^0.1.6",
+    "merkletreejs": "^0.1.7",
     "minimist": "^1.2.0",
-    "nthen": "^0.1.8",
+    "nthen": "^0.1.9",
     "saferphore": "0.0.1",
     "tweetnacl": "^1.0.1",
-    "write-file-atomic": "^2.4.2"
+    "write-file-atomic": "^2.4.3"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "flow-bin": "^0.106.2"
+  }
 }
