@@ -73,7 +73,7 @@ const main = (argv, config) => {
     console.log("Usage:");
     console.log("    --master     # launch the master node");
     console.log("    --payMaker   # launch the paymaker on the master node server");
-    console.log()
+    console.log();
     console.log("    --ann<n>     # launch an announcement validator node");
     console.log("    --blk<n>     # launch a block validator node");
     console.log("    NOTE: There are " + config.annHandlers.length + " announcement validators and" +
