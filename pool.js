@@ -39,6 +39,23 @@ config.master = {
     shareMinWork: 0x20000fff,
     root: config,
 };
+config.payMaker = {
+    port: 8083,
+
+    // Seconds between sending updates to pktd
+    // If this set to zero, the payMaker will accept log uploads but will
+    // not send any changes of payout data to pktd.
+    //updateCycle: 0, // to disable
+    updateCycle: 30,
+
+    // How many seconds backward to keep history in memory
+    historyDepth: 60*60*24,
+
+    // A function which pre-treats updates before they're sent to pktd
+    updateHook: (x) => { return x; },
+
+    root: config,
+};
 
 const main = (argv, config) => {
     if (argv.indexOf('--master') > -1) {
@@ -55,6 +72,8 @@ const main = (argv, config) => {
 
     console.log("Usage:");
     console.log("    --master     # launch the master node");
+    console.log("    --payMaker   # launch the paymaker on the master node server");
+    console.log()
     console.log("    --ann<n>     # launch an announcement validator node");
     console.log("    --blk<n>     # launch a block validator node");
     console.log("    NOTE: There are " + config.annHandlers.length + " announcement validators and" +
