@@ -1,8 +1,11 @@
 const Fs = require('fs');
+const Http = require('http');
 
 const RBTree = require('bintrees').RBTree;
+const nThen = require('nthen');
 
 const Util = require('./Util.js');
+const Rpc = require('./Rpc.js');
 
 // This script implements a simple pplns via a webserver
 // API:
@@ -61,7 +64,7 @@ export type PayMaker_Config_t = {
 type Context_t = {
     workdir: string,
     rpcClient: Rpc_t,
-    eventTree: any
+    eventTree: any,
     dedupTable: {[string]:bool},
     mut: {
         cfg: PayMaker_Config_t
@@ -84,7 +87,7 @@ const isRelevant = (ctx, elem) => {
 const commitEvent = (ctx, elem) => {
     ctx.dedupTable[elem.eventId] = true;
     ctx.eventTree.insert(elem);
-}
+};
 
 const onShare = (ctx, elem, warn) => {
     if (Util.isValidPayTo(elem.payTo)) {
@@ -120,9 +123,9 @@ const onBlock = (ctx, elem, warn) => {
 
 const handleEvents = (ctx, fileName, dataStr) => {
     const strList = dataStr.split('\n');
-    let line;
+    let line = -1;
     const warn = (msg) => {
-        console.error(fileName + ":" + String(i), msg, "Event content:", line);
+        console.error(fileName + ":" + String(line), msg, "Event content:", line);
     };
     for (let i = 0; i < strList.length; i++) {
         line = strList[i];
@@ -164,7 +167,7 @@ const garbageCollect = (ctx) => {
         ctx.eventTree.remove(ev);
         delete ctx.dedupTable[ev.eventId];
     });
-}
+};
 
 const onEvents = (ctx, req, res) => {
     if (Util.badMethod('POST', req, res)) { return; }
@@ -196,7 +199,7 @@ const onEvents = (ctx, req, res) => {
         if (failed) { return; }
         hash = Util.b2hash32(Buffer.from(dataStr, 'utf8')).toString('hex').slice(0,32);
         fileName = ctx.workdir + '/paylog_' + String(+new Date()) + '_' + hash + '.bin';
-        Fs.writeFile(fileName, strList.join('\n'), { flag: 'ax' }, w((err) => {
+        Fs.writeFile(fileName, dataStr, { flag: 'ax' }, w((err) => {
             if (!err) { return; }
             throw err;
         }));
@@ -217,8 +220,8 @@ const computeWhoToPay = (ctx) => {
 
 const onWhoToPay = (ctx, req, res) => {
     if (Util.badMethod('GET', req, res)) { return; }
-
-}
+    // TODO
+};
 
 const onReq = (ctx, req, res) => {
     if (req.url.endsWith('/events')) { return void onEvents(ctx, req, res); }
@@ -237,17 +240,17 @@ const loadData = (ctx, done) => {
         console.error("Loading stored data from [" + String(files.length) + "] files");
         // sort files by block number, load most recent historyLength blocks worth
         let biggest = 0;
-        for (let i = 0; i < files.length; i++) {
+        files.forEach((file) => {
             let num;
-            files[i].replace(/^paylog_([0-9]+).bin$/, (all, n) => {
+            file.replace(/^paylog_([0-9]+).bin$/, (_all, n) => {
                 num = Number(n);
                 return '';
             });
             if (num > biggest) { biggest = num; }
-        }
+        });
         files = files.filter((f) => {
             let num;
-            f.replace(/^paylog_([0-9]+).bin$/, (all, n) => {
+            f.replace(/^paylog_([0-9]+).bin$/, (_all, n) => {
                 num = Number(n);
                 return '';
             });
@@ -263,12 +266,12 @@ const loadData = (ctx, done) => {
                     handleEvents(ctx, fileName, ret);
                 }));
             }).nThen;
-        })
+        });
         nt(w());
     }).nThen((_) => {
         garbageCollect(ctx);
         done();
-    })
+    });
 };
 
 module.exports.create = (cfg /*:PayMaker_Config_t*/) => {
@@ -276,7 +279,7 @@ module.exports.create = (cfg /*:PayMaker_Config_t*/) => {
     let ctx;
     nThen((w) => {
         Util.checkMkdir(workdir, w());
-    }).nThen((_) => {
+    }).nThen((w) => {
         ctx = Object.freeze({
             workdir: workdir,
             rpcClient: Rpc.create(cfg.root.rpc),

@@ -3,7 +3,7 @@ die() { exit 1; }
 eval "${MATRIX_EVAL}";
 if test "x$LINT" = "x1"; then
     npm install || die
-    npm install 'jshint@^2.10.2' || die
+    npm install -g 'jshint@^2.10.2' || die
     npm run lint || die
     npm run flow || die
 else
