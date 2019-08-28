@@ -25,7 +25,7 @@
     "bs58check": "^2.1.2",
     "merkletreejs": "^0.1.7",
     "minimist": "^1.2.0",
-    "nthen": "^0.1.9",
+    "nthen": "^0.1.10",
     "saferphore": "0.0.1",
     "tweetnacl": "^1.0.1",
     "write-file-atomic": "^2.4.3"

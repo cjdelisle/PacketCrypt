@@ -30,6 +30,36 @@ export type Protocol_Work_t = {
     proof: Array<Buffer>,
     binary: Buffer,
 };
+
+export type Protocol_Event_t = {
+    time: number,
+    eventId: string
+};
+export type Protocol_AnnsEvent_t = Protocol_Event_t & {
+    type: "anns",
+    accepted: number,
+    dup: number,
+    inval: number,
+    badHash: number,
+    runt: number,
+    internalErr: number,
+    payTo: string,
+    unsigned: number,
+    totalLen: number
+};
+export type Protocol_ShareEvent_t = Protocol_Event_t & {
+    type: "share",
+    block: bool,
+    headerHash?: string,
+    payTo: string,
+};
+export type Protocol_BlockEvent_t = Protocol_Event_t & {
+    type: "block",
+    hash: string,
+    height: number,
+    difficulty: number,
+};
+
 */
 
 module.exports.VERSION = 3;

@@ -1,5 +1,6 @@
 /*@flow*/
 const Master = require('./js/Master.js');
+const PayMaker = require('./js/PayMaker.js');
 const AnnHandler = require('./js/AnnHandler.js');
 const BlkHandler = require('./js/BlkHandler.js');
 
@@ -51,6 +52,19 @@ config.payMaker = {
     // How many seconds backward to keep history in memory
     historyDepth: 60*60*24,
 
+    // What fraction of the payout to pay to block miners (the rest will be paid to ann miners)
+    blockPayoutFraction: 0.5,
+
+    // This constant will affect how far back into history we pay our announcement miners
+    pplnsAnnConstantX: 10000,
+
+    // This constant will affect how far back into history we pay our block miners
+    pplnsBlkConstantX: 1000,
+
+    // When there are not enough shares to fairly spread out the winnings,
+    // pay what's left over to this address.
+    defaultAddress: "pkt1q6hqsqhqdgqfd8t3xwgceulu7k9d9w5t2amath0qxyfjlvl3s3u4sjza2g2",
+
     // A function which pre-treats updates before they're sent to pktd
     updateHook: (x) => { return x; },
 
@@ -60,6 +74,9 @@ config.payMaker = {
 const main = (argv, config) => {
     if (argv.indexOf('--master') > -1) {
         return void Master.create(config.master);
+    }
+    if (argv.indexOf('--payMaker') > -1) {
+        return void PayMaker.create(config.payMaker);
     }
     for (let i = 0; i < config.annHandlers.length; i++) {
         if (argv.indexOf('--ann' + i) === -1) { continue; }

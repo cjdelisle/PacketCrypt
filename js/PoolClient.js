@@ -197,7 +197,7 @@ module.exports.create = (poolUrl /*:string*/) /*:PoolClient_t*/ => {
                 try {
                     pool.bt = Protocol.blockTemplateDecode(ret);
                 } catch (e) {
-                    console.log("Error decoding ann at [" + url + "] [" + e + "]");
+                    console.error("Error decoding ann at [" + url + "] [" + e + "]");
                     f(e);
                     return;
                 }

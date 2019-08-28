@@ -1,3 +1,4 @@
+/*@flow*/
 const Fs = require('fs');
 const Http = require('http');
 
@@ -47,7 +48,23 @@ const Rpc = require('./Rpc.js');
 
 /*::
 import type { Config_t } from './Config.js';
-import type { Rpc_t } from './Rpc.js';
+import type { Rpc_Client_t } from './Rpc.js';
+import type { Protocol_AnnsEvent_t, Protocol_ShareEvent_t, Protocol_BlockEvent_t } from './Protocol.js'
+
+type ShareEvent_t = Protocol_ShareEvent_t & {
+    credit: number|null
+};
+type AnnsEvent_t = Protocol_AnnsEvent_t & {
+    credit: number|null
+};
+
+type BinTree_t<X> = {
+    insert: (x:X) => bool,
+    remove: (x:X) => bool,
+    min: () => ?X,
+    each: ((x:X) => ?bool)=>void,
+    reach: ((x:X) => ?bool)=>void,
+};
 
 export type PayMaker_Result_t = {
     warn: Array<string>,
@@ -55,22 +72,39 @@ export type PayMaker_Result_t = {
     result: { [string]: number }
 };
 export type PayMaker_Config_t = {
+    port: number,
     enabled: bool,
     updateCycle: number,
     historyDepth: number,
+    blockPayoutFraction: number,
+    pplnsAnnConstantX: number,
+    pplnsBlkConstantX: number,
+    defaultAddress: string,
     updateHook: (x: PayMaker_Result_t) => PayMaker_Result_t,
     root: Config_t,
 };
 type Context_t = {
     workdir: string,
-    rpcClient: Rpc_t,
-    eventTree: any,
+    rpcClient: Rpc_Client_t,
+    blocks: BinTree_t<Protocol_BlockEvent_t>,
+    anns: BinTree_t<AnnsEvent_t>,
+    shares: BinTree_t<ShareEvent_t>,
     dedupTable: {[string]:bool},
     mut: {
         cfg: PayMaker_Config_t
     }
 };
 */
+
+const getDifficulty = (ctx, time) => {
+    let diff = -1;
+    ctx.blocks.reach((b) => {
+        if (b.time >= time) { return; }
+        diff = b.difficulty;
+        return false;
+    });
+    return diff;
+};
 
 const earliestValidTime = (ctx) => {
     return (+new Date()) - (1000 * ctx.mut.cfg.historyDepth);
@@ -84,20 +118,23 @@ const isRelevant = (ctx, elem) => {
     return true;
 };
 
-const commitEvent = (ctx, elem) => {
-    ctx.dedupTable[elem.eventId] = true;
-    ctx.eventTree.insert(elem);
-};
-
-const onShare = (ctx, elem, warn) => {
+const onShare = (ctx, elem /*:ShareEvent_t*/, warn) => {
     if (Util.isValidPayTo(elem.payTo)) {
         warn("Invalid payTo address");
     } else {
-        commitEvent(ctx, elem);
+        const diff = getDifficulty(ctx, elem.time);
+        if (diff < 1) {
+            // we can't credit this share because we don't know the diff at that time
+            elem.credit = null;
+        } else {
+            elem.credit = 1 / diff;
+        }
+        ctx.dedupTable[elem.eventId] = true;
+        ctx.shares.insert(elem);
     }
 };
 
-const onAnns = (ctx, elem, warn) => {
+const onAnns = (ctx, elem /*:AnnsEvent_t*/, warn) => {
     if (Util.isValidPayTo(elem.payTo)) {
         warn("Invalid payTo address");
     } else if (typeof(elem.accepted) !== 'number') {
@@ -107,17 +144,31 @@ const onAnns = (ctx, elem, warn) => {
     } else if (typeof(elem.totalLen) !== 'number') {
         warn("totalLen missing or not a number");
     } else {
-        commitEvent(ctx, elem);
+        const diff = getDifficulty(ctx, elem.time);
+        if (diff < 1) {
+            // we can't credit these anns because we don't know the diff at that time
+            elem.credit = null;
+        } else {
+            let payableAnnCount = Math.min(0, elem.accepted - elem.unsigned);
+            if (elem.totalLen) {
+                // for every 16KB of data, we deduct 1 announcement worth of payment
+                payableAnnCount = Math.min(0, payableAnnCount - (elem.totalLen >> 14));
+            }
+            elem.credit = payableAnnCount / diff;
+        }
+        ctx.dedupTable[elem.eventId] = true;
+        ctx.anns.insert(elem);
     }
 };
 
-const onBlock = (ctx, elem, warn) => {
+const onBlock = (ctx, elem /*:Protocol_BlockEvent_t*/, warn) => {
     if (typeof(elem.height) !== 'number') {
         warn("height is missing or invalid");
     } else if (typeof(elem.difficulty) !== 'number') {
         warn("difficulty is missing or not a number");
     } else {
-        commitEvent(ctx, elem);
+        ctx.dedupTable[elem.eventId] = true;
+        ctx.blocks.insert(elem);
     }
 };
 
@@ -157,16 +208,23 @@ const handleEvents = (ctx, fileName, dataStr) => {
     }
 };
 
-const garbageCollect = (ctx) => {
+const garbageCollectEvents = (ctx, tree) => {
     const toRemove = [];
     const evt = earliestValidTime(ctx);
-    for (let ev = ctx.eventTree.min(); ev.time < evt; ev = ev.next()) {
+    tree.each((ev) => {
+        if (ev.time >= evt) { return false; }
         toRemove.push(ev);
-    }
-    toRemove.forEach((ev) => {
-        ctx.eventTree.remove(ev);
-        delete ctx.dedupTable[ev.eventId];
     });
+    toRemove.forEach((ev) => {
+        delete ctx.dedupTable[ev.eventId];
+        // We hit the limits of what flow can reason about
+        tree.remove((ev /*:any*/));
+    });
+};
+const garbageCollect = (ctx) => {
+    garbageCollectEvents(ctx, ctx.blocks);
+    garbageCollectEvents(ctx, ctx.anns);
+    garbageCollectEvents(ctx, ctx.shares);
 };
 
 const onEvents = (ctx, req, res) => {
@@ -214,21 +272,84 @@ const onEvents = (ctx, req, res) => {
     });
 };
 
-const computeWhoToPay = (ctx) => {
+const computeWhoToPay = (ctx /*:Context_t*/) => {
+    // 1. Walk backward through blocks until the total reaches blockPayoutFraction
+    //   if we reach the beginning, pay everything that is left to defaultAddress
+    //   if we reach a share for which the score is null (meaning we don't know
+    //   the difficulty at that time) then print a warning.
+    // 2. Walk backward through shares until the total reaches 1-blockPayoutFraction
+    //   with the same rules applied.
+    //
+    // At this point, everything should sum to 1
+    //
+    let remaining = ctx.mut.cfg.blockPayoutFraction;
+    const payouts = {};
+    const warn = [];
+    let earliestBlockPayout = Infinity;
+    ctx.shares.reach((s) => {
+        if (s.credit === null) { return false; }
+        earliestBlockPayout = s.time;
+        const toPay = s.credit / ctx.mut.cfg.pplnsBlkConstantX;
+        if (toPay >= remaining) {
+            payouts[s.payTo] = (payouts[s.payTo] || 0) + remaining;
+            remaining = 0;
+            return false;
+        }
+        payouts[s.payTo] = (payouts[s.payTo] || 0) + toPay;
+    });
+    if (remaining) {
+        warn.push("WARNING: Ran out of block shares to pay, consider increasing " +
+            "historyDepth, paying [" + (remaining * 100) + "%] of the payout to " +
+            "defaultAddress");
+        payouts[ctx.mut.cfg.defaultAddress] =
+            (payouts[ctx.mut.cfg.defaultAddress] || 0) + remaining;
+    }
 
+    // Now we do announcements
+    remaining = 1 - ctx.mut.cfg.blockPayoutFraction;
+    let earliestAnnPayout = Infinity;
+    ctx.shares.reach((a) => {
+        if (a.credit === null) { return false; }
+        earliestAnnPayout = a.time;
+        const toPay = a.credit / ctx.mut.cfg.pplnsAnnConstantX;
+        if (toPay >= remaining) {
+            payouts[a.payTo] = (payouts[a.payTo] || 0) + remaining;
+            remaining = 0;
+            return false;
+        }
+        payouts[a.payTo] = (payouts[a.payTo] || 0) + toPay;
+    });
+    if (remaining) {
+        warn.push("WARNING: Ran out of ann shares to pay, consider increasing " +
+            "historyDepth, paying [" + (remaining * 100) + "%] of the payout to " +
+            "defaultAddress");
+        payouts[ctx.mut.cfg.defaultAddress] =
+            (payouts[ctx.mut.cfg.defaultAddress] || 0) + remaining;
+    }
+
+    return {
+        error: [],
+        warn: warn,
+        earliestBlockPayout: earliestBlockPayout,
+        earliestAnnPayout: earliestAnnPayout,
+        result: ctx.mut.cfg.updateHook(payouts)
+    };
 };
 
 const onWhoToPay = (ctx, req, res) => {
     if (Util.badMethod('GET', req, res)) { return; }
-    // TODO
+    const result = computeWhoToPay(ctx);
+    res.end(JSON.stringify(result));
 };
 
-const onReq = (ctx, req, res) => {
+const onReq = (ctx /*:Context_t*/, req, res) => {
     if (req.url.endsWith('/events')) { return void onEvents(ctx, req, res); }
     if (req.url.endsWith('/whotopay')) { return void onWhoToPay(ctx, req, res); }
+    res.statusCode = 404;
+    res.end("not found");
 };
 
-const loadData = (ctx, done) => {
+const loadData = (ctx /*:Context_t*/, done) => {
     let files;
     nThen((w) => {
         Fs.readdir(ctx.workdir, w((err, ret) => {
@@ -241,7 +362,7 @@ const loadData = (ctx, done) => {
         // sort files by block number, load most recent historyLength blocks worth
         let biggest = 0;
         files.forEach((file) => {
-            let num;
+            let num = 0;
             file.replace(/^paylog_([0-9]+).bin$/, (_all, n) => {
                 num = Number(n);
                 return '';
@@ -249,7 +370,7 @@ const loadData = (ctx, done) => {
             if (num > biggest) { biggest = num; }
         });
         files = files.filter((f) => {
-            let num;
+            let num = 0;
             f.replace(/^paylog_([0-9]+).bin$/, (_all, n) => {
                 num = Number(n);
                 return '';
@@ -275,8 +396,16 @@ const loadData = (ctx, done) => {
 };
 
 module.exports.create = (cfg /*:PayMaker_Config_t*/) => {
-    const workdir = cfg.root.rootWorkdir + '/paymaker_' + cfg.port;
+    const workdir = cfg.root.rootWorkdir + '/paymaker_' + String(cfg.port);
     let ctx;
+    if (typeof(cfg.blockPayoutFraction) !== 'number' ||
+        cfg.blockPayoutFraction > 1 ||
+        cfg.blockPayoutFraction < 0)
+    {
+        console.error("WARNING: blockPayoutFraction [" + cfg.blockPayoutFraction +
+            "] is not a number between 0 and 1, defaulting to 0.5");
+        cfg.blockPayoutFraction = 0.5;
+    }
     nThen((w) => {
         Util.checkMkdir(workdir, w());
     }).nThen((w) => {
@@ -284,7 +413,9 @@ module.exports.create = (cfg /*:PayMaker_Config_t*/) => {
             workdir: workdir,
             rpcClient: Rpc.create(cfg.root.rpc),
             dedupTable: {},
-            eventTree: new RBTree((a, b) => (a.time - b.time)),
+            blocks: new RBTree((a, b) => (a.time - b.time)),
+            anns: new RBTree((a, b) => (a.time - b.time)),
+            shares: new RBTree((a, b) => (a.time - b.time)),
             mut: {
                 cfg: cfg
             }
