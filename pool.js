@@ -113,7 +113,7 @@ config.payMaker = {
     blockPayoutFraction: 0.5,
 
     // This constant will affect how far back into history we pay our announcement miners
-    pplnsAnnConstantX: 16,
+    pplnsAnnConstantX: 32,
 
     // This constant will affect how far back into history we pay our block miners
     pplnsBlkConstantX: 2,
