@@ -556,7 +556,6 @@ module.exports.uploadPayLogs = (
             let reply;
             let failed = false;
             nt = nt((w) => {
-                console.error("Posting [" + fileName + "] to paymaker [" + url + "]");
                 Fs.readFile(fileName, w((err, ret) => {
                     if (err) {
                         console.error("Unable to read file [" + fileName + "] because [" +
@@ -567,7 +566,8 @@ module.exports.uploadPayLogs = (
                     fileBuf = ret;
                 }));
             }).nThen((w) => {
-                if (failed) { return; }
+                if (failed || fileBuf.length === 0) { return; }
+                console.error("Posting [" + fileName + "] to paymaker [" + url + "]");
                 httpPost(url, { Authorization: authline }, w((res) => {
                     const data = [];
                     res.on('data', (d) => { data.push(d); });
@@ -584,7 +584,7 @@ module.exports.uploadPayLogs = (
                     }));
                 })).end(fileBuf);
             }).nThen((w) => {
-                if (failed) { return; }
+                if (failed || fileBuf.length === 0) { return; }
                 const id = Crypto.createHash('sha256').update(fileBuf).digest('hex').slice(0,32);
                 let c;
                 try {

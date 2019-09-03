@@ -417,14 +417,17 @@ module.exports.create = (cfg /*:BlkHandler_Config_t*/) => {
             if (!diff) {
                 return void console.error("onWork missing difficulty");
             }
-            console.log(JSON.stringify({
+            const out = JSON.stringify({
                 type: 'block',
                 hash: hash,
                 height: height,
                 difficulty: diff,
                 time: +new Date(),
                 eventId: hash.slice(0,32)
-            }));
+            });
+            console.log(out);
+            if (!ctx.mut.logStream) { throw new Error(); }
+            ctx.mut.logStream.write(out + '\n');
         });
     });
 
