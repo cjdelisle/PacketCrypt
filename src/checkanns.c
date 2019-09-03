@@ -535,11 +535,12 @@ static void processAnns(Worker_t* w, int fileNo) {
     snprintf(buf, 2048, "{\"type\":\"anns\",\"accepted\":%u,\"dup\":%u,"
         "\"inval\":%u,\"badHash\":%u,\"runt\":%u,\"internalErr\":%u,"
         "\"payTo\":\"%s\",\"unsigned\":%u,\"totalLen\":%u,"
-        "\"time\":%llu,\"eventId\":\"%s\"}",
+        "\"time\":%llu,\"eventId\":\"%s\"}\n",
         res.accepted, res.duplicates, res.invalid, res.badContentHash, res.runt,
         res.internalError, res.payTo, res.unsignedCount, res.totalContentLength,
         timeMs, eventId);
-    checkedWrite(w->lw.tmpFile.path, outFileNo, buf, strlen(buf));
+    checkedWrite(w->lw.tmpFile.path, outFileNo, buf, strlen(buf)-1);
+    checkedWrite("paylog file", w->g->paylogFileNo, buf, strlen(buf));
     close(outFileNo);
     strncpy(w->lw.outFile.name, w->lw.inFile->name, FilePath_NAME_SZ);
     if (rename(w->lw.tmpFile.path, w->lw.outFile.path)) {
