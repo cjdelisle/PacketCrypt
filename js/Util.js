@@ -556,7 +556,7 @@ module.exports.uploadPayLogs = (
             let reply;
             let failed = false;
             nt = nt((w) => {
-                console.error("Posting [" + fileName + "] to paymaker");
+                console.error("Posting [" + fileName + "] to paymaker [" + url + "]");
                 Fs.readFile(fileName, w((err, ret) => {
                     if (err) {
                         console.error("Unable to read file [" + fileName + "] because [" +
@@ -591,6 +591,7 @@ module.exports.uploadPayLogs = (
                     c = JSON.parse(reply);
                 } catch (e) {
                     console.error("Posting [" + fileName + "] unable to parse reply [" + reply + "]");
+                    failed = true;
                     return;
                 }
                 c.error.forEach((e) => {

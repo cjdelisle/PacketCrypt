@@ -377,7 +377,7 @@ module.exports.create = (cfg /*:BlkHandler_Config_t*/) => {
             }).nThen((w) => {
                 Util.uploadPayLogs(
                     ctx.workdir + '/paylogdir',
-                    ctx.poolClient.config.paymakerUrl,
+                    ctx.poolClient.config.paymakerUrl + '/events',
                     ctx.mut.cfg.root.paymakerHttpPasswd,
                     false,
                     ()=>{}

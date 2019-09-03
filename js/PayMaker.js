@@ -96,7 +96,8 @@ type Context_t = {
     dedupTable: {[string]:bool},
     mut: {
         mostRecentEventTime: number,
-        cfg: PayMaker_Config_t
+        cfg: PayMaker_Config_t,
+        ready: bool
     }
 };
 */
@@ -418,9 +419,7 @@ const sendUpdate = (ctx) => {
     }
     let failed = false;
     nThen((w) => {
-        console.log('configureMiningPayouts call ' + JSON.stringify(whotopay.result));
         ctx.rpcClient.configureMiningPayouts(whotopay.result, w((err, ret) => {
-            console.log('configureMiningPayouts done');
             if (err) {
                 console.error("sendUpdate:", err);
                 failed = true;
@@ -460,6 +459,19 @@ const onWhoToPay = (ctx, req, res) => {
 };
 
 const onReq = (ctx /*:Context_t*/, req, res) => {
+    const authLine = 'Basic ' +
+        Buffer.from('x:' + ctx.mut.cfg.root.paymakerHttpPasswd, 'utf8').toString('base64');
+    if (req.headers.authorization !== authLine) {
+        res.setHeader("WWW-Authenticate", "Basic realm=paymaker");
+        res.writeHead(401);
+        res.end("401 Unauthorized");
+        return;
+    }
+    if (!ctx.mut.ready) {
+        res.writeHead(500);
+        res.end("500 Not ready");
+        return;
+    }
     if (req.url.endsWith('/events')) { return void onEvents(ctx, req, res); }
     if (/\/whotopay(\?.*)?$/.test(req.url)) { return void onWhoToPay(ctx, req, res); }
     res.statusCode = 404;
@@ -537,9 +549,13 @@ module.exports.create = (cfg /*:PayMaker_Config_t*/) => {
             shares: new RBTree((a, b) => (a.time - b.time)),
             mut: {
                 mostRecentEventTime: 0,
-                cfg: cfg
+                cfg: cfg,
+                ready: false
             }
         });
+        Http.createServer((req, res) => {
+            onReq(ctx, req, res);
+        }).listen(cfg.port);
         loadData(ctx, w());
     }).nThen((_) => {
         if (cfg.updateCycle > 0) {
@@ -547,8 +563,6 @@ module.exports.create = (cfg /*:PayMaker_Config_t*/) => {
                 sendUpdate(ctx);
             }, cfg.updateCycle * 1000);
         }
-        Http.createServer((req, res) => {
-            onReq(ctx, req, res);
-        }).listen(cfg.port);
+        ctx.mut.ready = true;
     });
 };

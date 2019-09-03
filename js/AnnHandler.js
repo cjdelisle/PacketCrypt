@@ -260,7 +260,7 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
             setInterval(() => {
                 Util.uploadPayLogs(
                     ctx.workdir + '/paylogdir',
-                    ctx.poolClient.config.paymakerUrl,
+                    ctx.poolClient.config.paymakerUrl + '/events',
                     ctx.mut.cfg.root.paymakerHttpPasswd,
                     false,
                     ()=>{}
