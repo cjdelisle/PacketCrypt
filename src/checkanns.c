@@ -549,7 +549,7 @@ static void processAnns(Worker_t* w, int fileNo) {
         assert(0);
     }
     Time_END(t);
-    printf("%s\n", buf);
+    printf("%s", buf);
 }
 
 void* workerLoop(void* vWorker) {

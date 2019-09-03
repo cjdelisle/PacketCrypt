@@ -250,8 +250,11 @@ const garbageCollect = (ctx) => {
 
 const getNewestTimestamp = (dataStr) => {
     for (;;) {
-        const i = dataStr.lastIndexOf('\n');
-        if (i < 0) { return null; }
+        let i = dataStr.lastIndexOf('\n');
+        if (i < 0) {
+            if (dataStr.length === 0) { return null; }
+            i = dataStr.length;
+        }
         try {
             const obj = JSON.parse(dataStr.slice(i));
             if (typeof(obj.time) === 'number') {
@@ -294,6 +297,9 @@ const onEvents = (ctx, req, res) => {
         if (failed) { return; }
         hash = Crypto.createHash('sha256').update(dataStr).digest('hex').slice(0,32);
         const d = getNewestTimestamp(dataStr);
+        if (d === null) {
+            return void errorEnd(400, "could not get most recent timestamp from file");
+        }
         fileName = ctx.workdir + '/paylog_' + String(d) + '_' + hash + '.bin';
         const again = () => {
             Fs.writeFile(fileName, dataStr, { flag: 'ax' }, w((err) => {
