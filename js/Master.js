@@ -202,6 +202,7 @@ const configReq = (ctx, height, _req, res) => {
         submitAnnUrls: cfg.root.annHandlers.map((x) => (x.url + '/submit')),
         downloadAnnUrls: cfg.root.annHandlers.map((x) => (x.url)),
         submitBlockUrls: cfg.root.blkHandlers.map((x) => (x.url + '/submit')),
+        paymakerUrl: cfg.root.payMaker.url,
         version: Protocol.VERSION
     };
     res.end(JSON.stringify(out, null, '\t'));

@@ -12,6 +12,7 @@ const Bech32 = require('bech32');
 
 /*::
 import type { IncomingMessage, ServerResponse } from 'http'
+import type { WriteStream } from 'fs'
 
 import type { Config_t } from './Config.js'
 
@@ -102,7 +103,7 @@ const httpGet = module.exports.httpGet = (
         let ended = false;
         setTimeout(() => {
             if (ended) { return; }
-            console.log("httpGet [" + url + "] has stalled, retrying...");
+            console.error("httpGet [" + url + "] has stalled, retrying...");
             ended = true;
             again();
         }, 60000);
@@ -113,7 +114,7 @@ const httpGet = module.exports.httpGet = (
                 const reconnectMs = (reconnects > MAX_FAST_RECONNECTS) ?
                 RECONNECT_MS : FAST_RECONNECT_MS;
                 setTimeout(again, reconnectMs);
-                console.log("Reconnect to [" + url + "] in [" + reconnectMs + "]ms");
+                console.error("Reconnect to [" + url + "] in [" + reconnectMs + "]ms");
                 reconnects++;
             }
         };
@@ -303,6 +304,8 @@ const isValidPayTo = module.exports.isValidPayTo = (payTo /*:string*/) /*bool*/ 
     return false;
 };
 
+if (!isValidPayTo('p7A4miQjxjmLPfbGyqRqyqTb5be9p527zS')) { throw new Error(); }
+
 const badMethod = module.exports.badMethod = (
     meth /*:string*/,
     req /*:IncomingMessage*/,
@@ -329,7 +332,7 @@ module.exports.deleteResults = (dir /*:string*/, minHeight /*:number*/, regex /*
             if (num >= minHeight) { return; }
             nt = nt((w) => {
                 Fs.unlink(dir + '/' + f, w((err) => {
-                    if (err) { console.log("WARNING failed to delete [" + f + "]"); }
+                    if (err) { console.error("WARNING failed to delete [" + f + "]"); }
                 }));
             }).nThen;
         });
@@ -393,12 +396,12 @@ module.exports.deleteUselessAnns = (
                         buf = Buffer.concat(data);
                         return;
                     }
-                    console.log("Error reading file [" + file + "] [" +
+                    console.error("Error reading file [" + file + "] [" +
                         ((err) ? err.message : 'runt file') + "]");
                     Fs.stat(file, w((err, st) => {
                         if (err) { return; }
                         if (st.size < 16) {
-                            console.log("Deleting [" + file + "] because it's a runt");
+                            console.error("Deleting [" + file + "] because it's a runt");
                             rmcb(f, w());
                         }
                     }));
@@ -512,5 +515,116 @@ module.exports.getShareId = (header /*:Buffer*/, proof /*:Buffer*/) /*:Buffer*/ 
     return hh.slice(0,16);
 };
 
+module.exports.openPayLog = (path /*:string*/, cb /*:(WriteStream)=>void*/) => {
+    Fs.readdir(path, (err, ret) => {
+        // Lets halt over this
+        if (err) { throw err; }
+        let biggestNumber = 0;
+        ret.forEach((f) => {
+            let number = -1;
+            f.replace(/^paylog_([0-9]+).ndjson$/, (_all, n) => { number = Number(n); return ''; });
+            if (number > biggestNumber) { biggestNumber = number; }
+        });
+        cb(Fs.createWriteStream(path + '/paylog_' + String(biggestNumber + 1) + '.ndjson'));
+    });
+};
+
+module.exports.uploadPayLogs = (
+    path /*:string*/,
+    url /*:string*/,
+    paymakerPassword /*:string*/,
+    includeCurrent /*:bool*/,
+    cb /*:()=>void*/) => {
+    const authline = 'Basic ' + Buffer.from('x:' + paymakerPassword, 'utf8').toString('base64');
+    Fs.readdir(path, (err, ret) => {
+        // Lets halt over this
+        if (err) { throw err; }
+        const logs = [];
+        let biggestNumber = 0;
+        ret.forEach((f) => {
+            let number = -1;
+            f.replace(/^paylog_([0-9]+).ndjson$/, (_all, n) => { number = Number(n); return ''; });
+            if (number > biggestNumber) { biggestNumber = number; }
+            logs.push(number);
+        });
+        let nt = nThen;
+        logs.forEach((n) => {
+            // Don't upload the one we're writing to
+            if (n === biggestNumber && !includeCurrent) { return; }
+            const fileName = path + '/paylog_' + n + '.ndjson';
+            let fileBuf;
+            let reply;
+            let failed = false;
+            nt = nt((w) => {
+                console.error("Posting [" + fileName + "] to paymaker");
+                Fs.readFile(fileName, w((err, ret) => {
+                    if (err) {
+                        console.error("Unable to read file [" + fileName + "] because [" +
+                            String(err) + "]");
+                        failed = true;
+                        return;
+                    }
+                    fileBuf = ret;
+                }));
+            }).nThen((w) => {
+                if (failed) { return; }
+                httpPost(url, { Authorization: authline }, w((res) => {
+                    const data = [];
+                    res.on('data', (d) => { data.push(d); });
+                    res.on('error', (e) => {
+                        console.error("Unable to post file [" + fileName + "] because [" + e + "]");
+                        failed = true;
+                    });
+                    res.on('end', w(() => {
+                        if (Buffer.isBuffer(data[0])) {
+                            reply = Buffer.concat(data).toString('utf8');
+                        } else {
+                            reply = data.join('');
+                        }
+                    }));
+                })).end(fileBuf);
+            }).nThen((w) => {
+                if (failed) { return; }
+                const id = Crypto.createHash('sha256').update(fileBuf).digest('hex').slice(0,32);
+                let c;
+                try {
+                    c = JSON.parse(reply);
+                } catch (e) {
+                    console.error("Posting [" + fileName + "] unable to parse reply [" + reply + "]");
+                    return;
+                }
+                c.error.forEach((e) => {
+                    console.error("ERROR Posting [" + fileName + "] paymaker [" + e + "]");
+                });
+                if (c.error.length) {
+                    failed = true;
+                    return;
+                }
+                c.warn.forEach((e) => {
+                    console.error("WARN Posting [" + fileName + "] paymaker [" + e + "]");
+                });
+                const eid = c.result.eventId;
+                if (eid !== id) {
+                    console.error("ERROR Posting [" + fileName + "] paymaker eventID mismatch " +
+                        "computed [" + id + "] got back [" + eid + "]");
+                    failed = true;
+                    return;
+                }
+            }).nThen((w) => {
+                if (failed) { return; }
+                Fs.unlink(fileName, w((err) => {
+                    if (err) {
+                        console.error("ERROR deleting [" + fileName + "]");
+                        failed = true;
+                        return;
+                    }
+                }));
+            }).nThen;
+        });
+        nt((_) => {
+            cb();
+        });
+    });
+};
 
 Object.freeze(module.exports);

@@ -278,6 +278,7 @@ _Static_assert(Dedup_SIZE(1) == 8 + sizeof(AnnEntry_t), "");
 typedef struct Global_s {
     pthread_mutex_t deduplock;
 
+    int paylogFileNo;
     WorkQueue_t* q;
     StateAndOutput_t* sao;
     Dedup_t* dedup;
@@ -596,6 +597,8 @@ void* workerLoop(void* vWorker) {
 
 typedef struct MasterThread_s {
     Global_t g;
+    FilePath_t paylogFile;
+    Time paylogCycleTime;
     int threadCount;
     Worker_t* workers;
 } MasterThread_t;
@@ -607,7 +610,8 @@ static MasterThread_t* createMaster(
     const char* annDir,
     const char* stateDir,
     const char* tmpDir,
-    const char* contentDir
+    const char* contentDir,
+    const char* paylogDir
 ) {
     MasterThread_t* mt = calloc(sizeof(MasterThread_t), 1);
     assert(mt);
@@ -621,6 +625,9 @@ static MasterThread_t* createMaster(
 
     mt->g.sao = calloc(sizeof(StateAndOutput_t), 1);
     mt->g.sao->timeOfLastWrite = nowSeconds();
+
+    FilePath_create(&mt->paylogFile, paylogDir);
+    mt->g.paylogFileNo = -1;
 
     mt->threadCount = threadCount;
     mt->workers = calloc(sizeof(Worker_t), threadCount);
@@ -648,6 +655,7 @@ static void destroyMaster(MasterThread_t* mt) {
         FilePath_destroy(&w->lw.annContentFile);
     }
     free(mt->workers);
+    FilePath_destroy(&mt->paylogFile);
     free(mt->g.sao);
     WorkQueue_destroy(mt->g.q);
     pthread_mutex_destroy(&mt->g.deduplock);
@@ -742,6 +750,47 @@ static void loadState(MasterThread_t* mt, DIR* stateDir) {
     mt->g.sao->nextStateFileNo = highestFileNo + 1;
 }
 
+// Open the highest numbered file in the logdir
+// if mt->g.paylogFileNo > -1 then dup2 the file descriptor over this
+// otherwise mt->g.paylogFileNo is configured to the fileno
+// returns 0 on success, -1 on error
+static int openPayLog(MasterThread_t* mt, DIR* logDir) {
+    long biggestFile = 0;
+    for (;;) {
+        struct dirent* file = readdir(logDir);
+        if (file == NULL) {
+            if (errno != 0) {
+                DEBUGF("Error reading paylog dir errno=[%s]\n", strerror(errno));
+                return -1;
+            }
+            rewinddir(logDir);
+            break;
+        }
+        if (strncmp(file->d_name, "paylog_", 7)) { continue; }
+        long fileNum = strtol(&file->d_name[7], NULL, 10);
+        if (fileNum > biggestFile) { biggestFile = fileNum; }
+    }
+    biggestFile++;
+    snprintf(mt->paylogFile.name, FilePath_NAME_SZ, "paylog_%ld.ndjson", biggestFile);
+    DEBUGF("Opening paylog file [%s]\n", mt->paylogFile.path);
+    int f = open(mt->paylogFile.path, O_CREAT | O_WRONLY | O_APPEND, 0666);
+    if (f < 0) {
+        DEBUGF("Error opening paylog dir [%s] errno=[%s]\n", mt->paylogFile.path, strerror(errno));
+        return -1;
+    }
+    if (mt->g.paylogFileNo > -1) {
+        if (dup2(f, mt->g.paylogFileNo) < 0) {
+            DEBUGF("Error: unable to dup2() outfile [%s]\n", strerror(errno));
+            return -1;
+        }
+        close(f);
+    } else {
+        mt->g.paylogFileNo = f;
+    }
+    Time_BEGIN(mt->paylogCycleTime);
+    return 0;
+}
+
 static volatile bool g_pleaseStop = false;
 void sigHandler(int sig) {
     g_pleaseStop = true;
@@ -753,7 +802,7 @@ int main(int argc, const char** argv) {
     int threads = 1;
     int arg = 1;
 
-    if ((argc - arg) < 6) { return usage(); }
+    if ((argc - arg) < 7) { return usage(); }
 
     if (!strcmp(argv[arg], "--threads")) {
         arg++;
@@ -764,7 +813,7 @@ int main(int argc, const char** argv) {
         }
         arg++;
     }
-    if ((argc - arg) < 6) { return usage(); }
+    if ((argc - arg) < 7) { return usage(); }
 
     const char* inDir = argv[arg++];
     const char* outDir = argv[arg++];
@@ -772,6 +821,7 @@ int main(int argc, const char** argv) {
     const char* stateDir = argv[arg++];
     const char* tmpDir = argv[arg++];
     const char* contentDir = argv[arg++];
+    const char* paylogDir = argv[arg++];
 
     FileUtil_checkDir("input", inDir);
     FileUtil_checkDir("output", outDir);
@@ -779,9 +829,10 @@ int main(int argc, const char** argv) {
     FileUtil_checkDir("state", stateDir);
     FileUtil_checkDir("temp", tmpDir);
     FileUtil_checkDir("content", contentDir);
+    FileUtil_checkDir("paylog", paylogDir);
 
     MasterThread_t* mt =
-        createMaster(threads, inDir, outDir, annDir, stateDir, tmpDir, contentDir);
+        createMaster(threads, inDir, outDir, annDir, stateDir, tmpDir, contentDir, paylogDir);
 
     {
         DIR* d = opendir(stateDir);
@@ -794,6 +845,15 @@ int main(int argc, const char** argv) {
         DEBUGF("Loaded [%d] dedup entries successfully, current parentBlockHeight [%u]\n",
             mt->g.dedup->dedupTableLen, mt->g.sao->state.hdr.parentBlockHeight);
         closedir(d);
+    }
+
+    DIR* logdir = opendir(paylogDir);
+    if (!logdir) {
+        DEBUGF("Could not access paylog directory [%s] errno=[%s]", paylogDir, strerror(errno));
+        assert(0);
+    }
+    if (openPayLog(mt, logdir)) {
+        assert(0 && "Unable to open payLog");
     }
 
     // Attach sig handler as late as possible before we start touching things that can
@@ -813,6 +873,10 @@ int main(int argc, const char** argv) {
             break;
         }
         if (WorkQueue_masterScan(mt->g.q)) { sleep(1); }
+        Time_END(mt->paylogCycleTime);
+        if (Time_MICROS(mt->paylogCycleTime) > 60000000) {
+            openPayLog(mt, logdir);
+        }
     }
 
     DEBUGF0("Got request to stop, stopping threads...\n");

@@ -13,6 +13,7 @@ const Rpc = require('./Rpc.js');
 const SHARE_MAX_LENGTH = 0xffff;
 
 /*::
+import type { WriteStream } from 'fs';
 import type { Config_t } from './Config.js';
 import type { PoolClient_t } from './PoolClient.js';
 import type { Util_LongPollServer_t, Util_Mutex_t } from './Util.js';
@@ -25,11 +26,13 @@ export type BlkHandler_Config_t = {
     root: Config_t
 }
 type Context_t = {
+    workdir: string,
     poolClient: PoolClient_t,
     rpcClient: Rpc_Client_t,
     mut: {
         hashNum: number,
         hashMod: number,
+        logStream: ?WriteStream,
         lastBlockHash: ?string,
         cfg: BlkHandler_Config_t,
         ready: bool
@@ -285,7 +288,12 @@ const onSubmit = (ctx, req, res) => {
                         error: [],
                         warn: warn
                     };
-                    console.log(JSON.stringify(result.result));
+
+                    const out = JSON.stringify(result.result);
+                    console.log(out);
+                    if (!ctx.mut.logStream) { throw new Error(); }
+                    ctx.mut.logStream.write(out + '\n');
+
                     res.end(JSON.stringify(result));
                 }
             }));
@@ -302,7 +310,12 @@ const onSubmit = (ctx, req, res) => {
                 error: [],
                 warn: warn
             };
-            console.log(JSON.stringify(result.result));
+
+            const out = JSON.stringify(result.result);
+            console.log(out);
+            if (!ctx.mut.logStream) { throw new Error(); }
+            ctx.mut.logStream.write(out + '\n');
+
             res.end(JSON.stringify(result));
             return;
         }
@@ -323,11 +336,13 @@ const onReq = (ctx, req, res) => {
 
 module.exports.create = (cfg /*:BlkHandler_Config_t*/) => {
     const ctx /*:Context_t*/ = Object.freeze({
+        workdir: cfg.root.rootWorkdir + '/blk_' + cfg.port,
         rpcClient: Rpc.create(cfg.root.rpc),
         mut: {
             cfg: cfg,
             ready: false,
             lastBlockHash: undefined,
+            logStream: undefined,
 
             hashNum: -1,
             hashMod: -1
@@ -346,7 +361,29 @@ module.exports.create = (cfg /*:BlkHandler_Config_t*/) => {
             ctx.mut.hashMod = conf.submitBlockUrls.length;
             ctx.mut.hashNum = conf.submitBlockUrls.indexOf(url);
         }));
+        Util.checkMkdir(ctx.workdir + '/paylogdir', w());
+    }).nThen((w) => {
+        Util.openPayLog(ctx.workdir + '/paylogdir', w((stream) => {
+            ctx.mut.logStream = stream;
+        }));
     }).nThen((_) => {
+        setInterval(() => {
+            nThen((w) => {
+                Util.openPayLog(ctx.workdir + '/paylogdir', w((stream) => {
+                    if (!ctx.mut.logStream) { throw new Error(); }
+                    ctx.mut.logStream.close();
+                    ctx.mut.logStream = stream;
+                }));
+            }).nThen((w) => {
+                Util.uploadPayLogs(
+                    ctx.workdir + '/paylogdir',
+                    ctx.poolClient.config.paymakerUrl,
+                    ctx.mut.cfg.root.paymakerHttpPasswd,
+                    false,
+                    ()=>{}
+                );
+            });
+        }, 60000);
         ctx.mut.ready = true;
     });
     ctx.poolClient.onWork((w) => {

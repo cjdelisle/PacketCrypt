@@ -8,6 +8,7 @@ export type Protocol_PcConfigJson_t = {
     submitAnnUrls: Array<string>,
     downloadAnnUrls: Array<string>,
     submitBlockUrls: Array<string>,
+    paymakerUrl: string,
     version: number,
 };
 

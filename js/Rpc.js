@@ -5,7 +5,7 @@ const RpcClient = require('bitcoind-rpc');
 import type { Protocol_RawBlockTemplate_t } from './Protocol.js';
 export type Rpc_Client_Res_t<T> = {
     result: T,
-    error: null,
+    error: Object|null,
     id: string
 };
 export type Rpc_Client_Request_t = {
@@ -76,6 +76,7 @@ export type Rpc_Client_t = {
     checkPcShare: (share: Rpc_Share_t, cb:Rpc_Client_Rpc_t<string>)=>void,
     submitBlock: (blk: string, cb:Rpc_Client_Rpc_t<any>)=>void,
     getBlock: (hash: string, cb:Rpc_Client_Rpc_t<any>)=>void,
+    configureMiningPayouts: (po:{[string]:number}, cb:Rpc_Client_Rpc_t<any>)=>void,
 
     batch: (()=>void, (err: ?Error, ret: ?Rpc_Client_Res_t<any>)=>void)=>void,
     batchedCalls: ?Rpc_Client_Request_t
@@ -124,6 +125,17 @@ module.exports.create = (cfg /*:Rpc_Config_t*/) /*:Rpc_Client_t*/ => {
                 id: "mantpool",
                 method: "checkpcshare",
                 params: [share]
+            };
+        }, cb);
+    };
+
+    out.configureMiningPayouts = (payouts, cb) => {
+        out.batch(() => {
+            out.batchedCalls = {
+                jsonrpc: "1.0",
+                id: "mantpool",
+                method: "configureminingpayouts",
+                params: [payouts]
             };
         }, cb);
     };

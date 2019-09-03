@@ -1,6 +1,8 @@
 /*@flow*/
 const Fs = require('fs');
 const Http = require('http');
+const Crypto = require('crypto');
+const Querystring = require('querystring');
 
 const RBTree = require('bintrees').RBTree;
 const nThen = require('nthen');
@@ -62,6 +64,7 @@ type BinTree_t<X> = {
     insert: (x:X) => bool,
     remove: (x:X) => bool,
     min: () => ?X,
+    max: () => ?X,
     each: ((x:X) => ?bool)=>void,
     reach: ((x:X) => ?bool)=>void,
 };
@@ -72,14 +75,15 @@ export type PayMaker_Result_t = {
     result: { [string]: number }
 };
 export type PayMaker_Config_t = {
+    url: string,
     port: number,
-    enabled: bool,
     updateCycle: number,
     historyDepth: number,
     blockPayoutFraction: number,
     pplnsAnnConstantX: number,
     pplnsBlkConstantX: number,
     defaultAddress: string,
+    errorAddress: string,
     updateHook: (x: PayMaker_Result_t) => PayMaker_Result_t,
     root: Config_t,
 };
@@ -91,16 +95,22 @@ type Context_t = {
     shares: BinTree_t<ShareEvent_t>,
     dedupTable: {[string]:bool},
     mut: {
+        mostRecentEventTime: number,
         cfg: PayMaker_Config_t
     }
 };
 */
 
+// Number of hashes needed for an expectation of a share
+// Should be aligned with this:
+// https://github.com/pkt-cash/pktd/blob/a1a569152b078ed28f1526ea8e72e76546b940f1/chaincfg/params.go#L644
+const BASE_DIFFICULTY = 4096;
+
 const getDifficulty = (ctx, time) => {
     let diff = -1;
     ctx.blocks.reach((b) => {
         if (b.time >= time) { return; }
-        diff = b.difficulty;
+        diff = b.difficulty * BASE_DIFFICULTY;
         return false;
     });
     return diff;
@@ -119,8 +129,8 @@ const isRelevant = (ctx, elem) => {
 };
 
 const onShare = (ctx, elem /*:ShareEvent_t*/, warn) => {
-    if (Util.isValidPayTo(elem.payTo)) {
-        warn("Invalid payTo address");
+    if (!Util.isValidPayTo(elem.payTo)) {
+        warn("Invalid payTo address [" + elem.payTo + "]");
     } else {
         const diff = getDifficulty(ctx, elem.time);
         if (diff < 1) {
@@ -134,9 +144,18 @@ const onShare = (ctx, elem /*:ShareEvent_t*/, warn) => {
     }
 };
 
+const getEffectivePayableAnnCount = (elem /*:AnnsEvent_t*/) => {
+    let payableAnnCount = Math.max(0, elem.accepted - elem.unsigned);
+    if (elem.totalLen) {
+        // for every 16KB of data, we deduct 1 announcement worth of payment
+        payableAnnCount = Math.max(0, payableAnnCount - (elem.totalLen >> 14));
+    }
+    return payableAnnCount;
+};
+
 const onAnns = (ctx, elem /*:AnnsEvent_t*/, warn) => {
-    if (Util.isValidPayTo(elem.payTo)) {
-        warn("Invalid payTo address");
+    if (!Util.isValidPayTo(elem.payTo)) {
+        warn("Invalid payTo address [" + elem.payTo + "]");
     } else if (typeof(elem.accepted) !== 'number') {
         warn("accepted missing or not a number");
     } else if (typeof(elem.unsigned) !== 'number') {
@@ -149,12 +168,7 @@ const onAnns = (ctx, elem /*:AnnsEvent_t*/, warn) => {
             // we can't credit these anns because we don't know the diff at that time
             elem.credit = null;
         } else {
-            let payableAnnCount = Math.min(0, elem.accepted - elem.unsigned);
-            if (elem.totalLen) {
-                // for every 16KB of data, we deduct 1 announcement worth of payment
-                payableAnnCount = Math.min(0, payableAnnCount - (elem.totalLen >> 14));
-            }
-            elem.credit = payableAnnCount / diff;
+            elem.credit = getEffectivePayableAnnCount(elem) / diff;
         }
         ctx.dedupTable[elem.eventId] = true;
         ctx.anns.insert(elem);
@@ -174,18 +188,24 @@ const onBlock = (ctx, elem /*:Protocol_BlockEvent_t*/, warn) => {
 
 const handleEvents = (ctx, fileName, dataStr) => {
     const strList = dataStr.split('\n');
-    let line = -1;
+    let lineNum = -1;
+    let line;
     const warn = (msg) => {
-        console.error(fileName + ":" + String(line), msg, "Event content:", line);
+        console.error(fileName + ":" + String(lineNum), msg, " - Event content:", line);
     };
     for (let i = 0; i < strList.length; i++) {
         line = strList[i];
+        if (!line.trim()) { continue; }
+        lineNum = i;
         let elem;
         try {
             elem = JSON.parse(line);
         } catch (e) {
             warn("unable to parse as json");
             continue;
+        }
+        if (elem.accepted) {
+            elem.type = 'anns';
         }
         if (typeof(elem.type) !== 'string') {
             warn("type field is missing or not a string");
@@ -227,6 +247,21 @@ const garbageCollect = (ctx) => {
     garbageCollectEvents(ctx, ctx.shares);
 };
 
+const getNewestTimestamp = (dataStr) => {
+    for (;;) {
+        const i = dataStr.lastIndexOf('\n');
+        if (i < 0) { return null; }
+        try {
+            const obj = JSON.parse(dataStr.slice(i));
+            if (typeof(obj.time) === 'number') {
+                return obj.time;
+            }
+        } catch (e) { }
+        // Failed to parse, try looking backward
+        dataStr = dataStr.slice(0, i);
+    }
+};
+
 const onEvents = (ctx, req, res) => {
     if (Util.badMethod('POST', req, res)) { return; }
     let failed = false;
@@ -249,19 +284,36 @@ const onEvents = (ctx, req, res) => {
         req.on('end', w(() => {
             if (failed) { return; }
             if (Buffer.isBuffer(data[0])) {
-                return void errorEnd(400, "Data is binary instead of a string");
+                dataStr = Buffer.concat(data).toString('utf8');
+            } else {
+                dataStr = data.join('');
             }
-            dataStr = data.join('');
         }));
     }).nThen((w) => {
         if (failed) { return; }
-        hash = Util.b2hash32(Buffer.from(dataStr, 'utf8')).toString('hex').slice(0,32);
-        fileName = ctx.workdir + '/paylog_' + String(+new Date()) + '_' + hash + '.bin';
-        Fs.writeFile(fileName, dataStr, { flag: 'ax' }, w((err) => {
-            if (!err) { return; }
-            throw err;
-        }));
+        hash = Crypto.createHash('sha256').update(dataStr).digest('hex').slice(0,32);
+        const d = getNewestTimestamp(dataStr);
+        fileName = ctx.workdir + '/paylog_' + String(d) + '_' + hash + '.bin';
+        const again = () => {
+            Fs.writeFile(fileName, dataStr, { flag: 'ax' }, w((err) => {
+                if (!err) { return; }
+                if (err.code === 'EEXIST') {
+                    Fs.readFile(fileName, 'utf8', w((err, ret) => {
+                        if (err) { throw err; }
+                        if (ret !== dataStr) {
+                            console.error("File [" + fileName +
+                                "] exists but with different content, replacing");
+                            again();
+                        }
+                    }));
+                    return;
+                }
+                throw err;
+            }));
+        };
+        again();
     }).nThen((_) => {
+        if (failed) { return; }
         res.end(JSON.stringify({
             result: { eventId: hash },
             warn: [],
@@ -272,7 +324,7 @@ const onEvents = (ctx, req, res) => {
     });
 };
 
-const computeWhoToPay = (ctx /*:Context_t*/) => {
+const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
     // 1. Walk backward through blocks until the total reaches blockPayoutFraction
     //   if we reach the beginning, pay everything that is left to defaultAddress
     //   if we reach a share for which the score is null (meaning we don't know
@@ -284,22 +336,23 @@ const computeWhoToPay = (ctx /*:Context_t*/) => {
     //
     let remaining = ctx.mut.cfg.blockPayoutFraction;
     const payouts = {};
+    const payoutShares = {};
     const warn = [];
     let earliestBlockPayout = Infinity;
     ctx.shares.reach((s) => {
+        if (s.time > maxtime) { return; }
+        // console.error('share');
         if (s.credit === null) { return false; }
         earliestBlockPayout = s.time;
-        const toPay = s.credit / ctx.mut.cfg.pplnsBlkConstantX;
-        if (toPay >= remaining) {
-            payouts[s.payTo] = (payouts[s.payTo] || 0) + remaining;
-            remaining = 0;
-            return false;
-        }
+        let toPay = s.credit / ctx.mut.cfg.pplnsBlkConstantX;
+        if (toPay >= remaining) { toPay = remaining; }
+        payoutShares[s.payTo] = (payoutShares[s.payTo] || 0) + 1;
         payouts[s.payTo] = (payouts[s.payTo] || 0) + toPay;
+        remaining -= toPay;
+        if (remaining === 0) { return false; }
     });
     if (remaining) {
-        warn.push("WARNING: Ran out of block shares to pay, consider increasing " +
-            "historyDepth, paying [" + (remaining * 100) + "%] of the payout to " +
+        warn.push("Ran out of block shares to pay paying [" + (remaining * 100) + "%] to " +
             "defaultAddress");
         payouts[ctx.mut.cfg.defaultAddress] =
             (payouts[ctx.mut.cfg.defaultAddress] || 0) + remaining;
@@ -308,43 +361,107 @@ const computeWhoToPay = (ctx /*:Context_t*/) => {
     // Now we do announcements
     remaining = 1 - ctx.mut.cfg.blockPayoutFraction;
     let earliestAnnPayout = Infinity;
-    ctx.shares.reach((a) => {
+    const payoutAnns = {};
+    ctx.anns.reach((a) => {
+        if (a.time > maxtime) { return; }
+        // console.error('ann');
         if (a.credit === null) { return false; }
         earliestAnnPayout = a.time;
-        const toPay = a.credit / ctx.mut.cfg.pplnsAnnConstantX;
-        if (toPay >= remaining) {
-            payouts[a.payTo] = (payouts[a.payTo] || 0) + remaining;
-            remaining = 0;
-            return false;
-        }
+        let toPay = a.credit / ctx.mut.cfg.pplnsAnnConstantX;
+        if (toPay >= remaining) { toPay = remaining; }
+        payoutAnns[a.payTo] = (payoutAnns[a.payTo] || 0) + getEffectivePayableAnnCount(a);
         payouts[a.payTo] = (payouts[a.payTo] || 0) + toPay;
+        remaining -= toPay;
+        if (remaining === 0) { return false; }
     });
     if (remaining) {
-        warn.push("WARNING: Ran out of ann shares to pay, consider increasing " +
-            "historyDepth, paying [" + (remaining * 100) + "%] of the payout to " +
+        warn.push("Ran out of ann shares to pay paying [" + (remaining * 100) + "%] to " +
             "defaultAddress");
         payouts[ctx.mut.cfg.defaultAddress] =
             (payouts[ctx.mut.cfg.defaultAddress] || 0) + remaining;
     }
 
-    return {
+    let latestPayout = (()=>{
+        const m = ctx.shares.max();
+        const t0 = m ? m.time : 0;
+        const a = ctx.anns.max();
+        const t1 = a ? a.time : 0;
+        return Math.max(t0, t1);
+    })();
+
+    return ctx.mut.cfg.updateHook({
         error: [],
         warn: warn,
         earliestBlockPayout: earliestBlockPayout,
         earliestAnnPayout: earliestAnnPayout,
-        result: ctx.mut.cfg.updateHook(payouts)
-    };
+        latestPayout: latestPayout,
+        payoutShares: payoutShares,
+        payoutAnns: payoutAnns,
+        result: payouts
+    });
+};
+
+const sendUpdate = (ctx) => {
+    const whotopay = computeWhoToPay(ctx, Infinity);
+    if (whotopay.error.length) {
+        whotopay.error.forEach((e) => {
+            console.error("sendUpdate ERROR:", e);
+        });
+        console.error("sendUpdate due to errors, sending all coins to ", ctx.mut.cfg.errorAddress);
+        whotopay.result = {};
+        whotopay.result[ctx.mut.cfg.errorAddress] = 1;
+    }
+    if (whotopay.warn.length > 0) {
+        whotopay.warn.forEach((e) => {
+            console.error("sendUpdate WARN:", e);
+        });
+    }
+    let failed = false;
+    nThen((w) => {
+        console.log('configureMiningPayouts call ' + JSON.stringify(whotopay.result));
+        ctx.rpcClient.configureMiningPayouts(whotopay.result, w((err, ret) => {
+            console.log('configureMiningPayouts done');
+            if (err) {
+                console.error("sendUpdate:", err);
+                failed = true;
+            } else if (!ret || ret.result !== null || ret.error !== null) {
+                console.error("sendUpdate: unexpected result:", ret);
+                failed = true;
+            }
+        }));
+    }).nThen((w) => {
+        if (!failed) { return; }
+        const wtp = {};
+        wtp[ctx.mut.cfg.errorAddress] = 1;
+        ctx.rpcClient.configureMiningPayouts(wtp, w((err, ret) => {
+            if (err) {
+                console.error("sendUpdate:", err);
+                failed = true;
+            } else if (!ret || ret.result !== null || ret.error !== null) {
+                console.error("sendUpdate: unexpected result:", ret);
+                failed = true;
+            }
+            console.error("sendUpdate CRITICAL: unable to configure payout to error address");
+        }));
+    });
 };
 
 const onWhoToPay = (ctx, req, res) => {
     if (Util.badMethod('GET', req, res)) { return; }
-    const result = computeWhoToPay(ctx);
+    let maxtime = Infinity;
+    if (req.url.indexOf('?') > -1) {
+        const q = Querystring.parse(req.url.slice(req.url.indexOf('?') + 1));
+        if (typeof(q.maxtime) === 'string' && !isNaN(Number(q.maxtime))) {
+            maxtime = Number(q.maxtime);
+        }
+    }
+    const result = computeWhoToPay(ctx, maxtime);
     res.end(JSON.stringify(result));
 };
 
 const onReq = (ctx /*:Context_t*/, req, res) => {
     if (req.url.endsWith('/events')) { return void onEvents(ctx, req, res); }
-    if (req.url.endsWith('/whotopay')) { return void onWhoToPay(ctx, req, res); }
+    if (/\/whotopay(\?.*)?$/.test(req.url)) { return void onWhoToPay(ctx, req, res); }
     res.statusCode = 404;
     res.end("not found");
 };
@@ -354,33 +471,34 @@ const loadData = (ctx /*:Context_t*/, done) => {
     nThen((w) => {
         Fs.readdir(ctx.workdir, w((err, ret) => {
             if (err) { throw err; }
-            files = ret.filter((f) => /^paylog_[0-9]+_[0-9]+.bin$/.test(f));
+            files = ret.filter((f) => /^paylog_[0-9]+_[a-f0-9]+.bin$/.test(f));
         }));
     }).nThen((w) => {
         if (!files.length) { return; }
         console.error("Loading stored data from [" + String(files.length) + "] files");
-        // sort files by block number, load most recent historyLength blocks worth
-        let biggest = 0;
+        // sort files by time, load most recent historyLength blocks worth
         files.forEach((file) => {
             let num = 0;
-            file.replace(/^paylog_([0-9]+).bin$/, (_all, n) => {
+            file.replace(/^paylog_([0-9]+)_[a-f0-9]+.bin$/, (_all, n) => {
                 num = Number(n);
                 return '';
             });
-            if (num > biggest) { biggest = num; }
+            if (num > ctx.mut.mostRecentEventTime) { ctx.mut.mostRecentEventTime = num; }
         });
-        files = files.filter((f) => {
+
+        files = files.filter((file) => {
             let num = 0;
-            f.replace(/^paylog_([0-9]+).bin$/, (_all, n) => {
+            file.replace(/^paylog_([0-9]+)_[a-f0-9]+.bin$/, (_all, n) => {
                 num = Number(n);
                 return '';
             });
-            return num >= (biggest - (1000 * ctx.mut.cfg.historyDepth));
+            return num >= (ctx.mut.mostRecentEventTime - (1000 * ctx.mut.cfg.historyDepth));
         });
         let nt = nThen;
         files.forEach((f) => {
             nt = nt((w) => {
                 const fileName = ctx.workdir + '/' + f;
+                console.error("Loading data from from [" + fileName + "]");
                 Fs.readFile(fileName, 'utf8', w((err, ret) => {
                     // These files should not be deleted
                     if (err) { throw err; }
@@ -391,6 +509,7 @@ const loadData = (ctx /*:Context_t*/, done) => {
         nt(w());
     }).nThen((_) => {
         garbageCollect(ctx);
+        console.error("Ready");
         done();
     });
 };
@@ -417,11 +536,17 @@ module.exports.create = (cfg /*:PayMaker_Config_t*/) => {
             anns: new RBTree((a, b) => (a.time - b.time)),
             shares: new RBTree((a, b) => (a.time - b.time)),
             mut: {
+                mostRecentEventTime: 0,
                 cfg: cfg
             }
         });
         loadData(ctx, w());
     }).nThen((_) => {
+        if (cfg.updateCycle > 0) {
+            setInterval(() => {
+                sendUpdate(ctx);
+            }, cfg.updateCycle * 1000);
+        }
         Http.createServer((req, res) => {
             onReq(ctx, req, res);
         }).listen(cfg.port);

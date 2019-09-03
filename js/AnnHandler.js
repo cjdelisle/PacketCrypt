@@ -37,6 +37,7 @@ type Context_t = {
         hashNum: number,
         hashMod: number,
 
+        payLog: ?WriteStream,
         cfg: AnnHandler_Config_t,
         checkanns: void | ChildProcess,
         anndirLongpoll: void|Util_LongPollServer_t,
@@ -55,6 +56,7 @@ const launchCheckanns = (ctx /*:Context_t*/) => {
         ctx.workdir + '/statedir',
         ctx.workdir + '/tmpdir',
         ctx.workdir + '/contentdir',
+        ctx.workdir + '/paylogdir',
     ];
     console.error(ctx.mut.cfg.root.checkannsPath + ' ' + args.join(' '));
     const checkanns = ctx.mut.checkanns = Spawn(ctx.mut.cfg.root.checkannsPath, args, {
@@ -222,6 +224,7 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
             anndirLongpoll: undefined,
             highestAnnFile: -1,
             ready: false,
+            payLog: undefined,
 
             hashNum: -1,
             hashMod: -1
@@ -239,6 +242,7 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
             ctx.mut.hashNum = conf.downloadAnnUrls.indexOf(cfg.url);
         }));
         nThen((w) => {
+            Util.checkMkdir(ctx.workdir + '/paylogdir', w());
             Util.checkMkdir(ctx.workdir + '/indir', w());
             Util.checkMkdir(ctx.workdir + '/outdir', w());
             Util.checkMkdir(ctx.workdir + '/anndir', w());
@@ -252,6 +256,16 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
         }).nThen((w) => {
             Util.clearDir(ctx.workdir + '/tmpdir', w());
             Util.clearDir(ctx.workdir + '/uploaddir', w());
+
+            setInterval(() => {
+                Util.uploadPayLogs(
+                    ctx.workdir + '/paylogdir',
+                    ctx.poolClient.config.paymakerUrl,
+                    ctx.mut.cfg.root.paymakerHttpPasswd,
+                    false,
+                    ()=>{}
+                );
+            }, 30000);
 
             Util.longPollServer(ctx.workdir + '/outdir/').onFileUpdate((file) => {
                 const path = ctx.workdir + '/outdir/' + file;
