@@ -222,7 +222,8 @@ const sigMiner = (ctx /*:Context_t*/) => {
     const now = +new Date();
     const diff = now - ctx.minerLastSignaled;
     if (diff < 1000) { return false; }
-    if (ctx.miner) { ctx.miner.kill('SIGHUP'); }
+    const b = Buffer.from("01000000", "hex");
+    if (ctx.miner) { ctx.miner.stdin.write(b); }
     return true;
 };
 

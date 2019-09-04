@@ -20,7 +20,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <math.h>
-#include <signal.h>
+#include <time.h>
 
 #define DEBUGF(...) fprintf(stderr, "pcblk: " __VA_ARGS__)
 
@@ -40,6 +40,9 @@ static int usage() {
         "    for more information\n");
     return 100;
 }
+
+// If the stdin command has this bit set, we'll open a new output file
+#define CMD_OPEN_NEW_FILE 1
 
 typedef struct Context_s {
     // Only read 1/2 the total possible anns in one cycle, this way we avoid
@@ -309,11 +312,6 @@ static void beginMining(Context_t* ctx)
     ctx->mining = true;
 }
 
-static bool g_openNewFile = false;
-static void sighup(int signal) {
-    g_openNewFile = true;
-}
-
 int main(int argc, char** argv) {
     assert(!sodium_init());
     long long maxAnns = 1024*1024;
@@ -361,9 +359,6 @@ int main(int argc, char** argv) {
 
     if (!wrkdirName || !contentdirName || maxAnns < 1 || threads < 1) { return usage(); }
 
-    // Setup before making any blocking calls to try to win races with the parent process.
-    signal(SIGHUP, sighup);
-
     if (slowStart) {
         for (int i = 0; i < 10; i++) {
             sleep(1);
@@ -405,15 +400,25 @@ int main(int argc, char** argv) {
 
     ctx->bm = BlockMiner_create(maxAnns, minerId, threads, outfile, false);
 
+    int top = 100;
     int32_t outFileNo = 1;
     for (uint32_t i = 0;; i++) {
-        uint8_t discard[8];
-        if (1 > read(STDIN_FILENO, discard, 8) && (EAGAIN != errno)) {
-            DEBUGF("Stdin is nolonger connected, exiting\n");
-            return 0;
+        uint32_t command = 0;
+        for (int j = 0; j < top; j++) {
+            if (4 == read(STDIN_FILENO, &command, 4)) {
+                // drop out
+            } else if (EAGAIN != errno) {
+                DEBUGF("Stdin is nolonger connected, exiting\n");
+                return 0;
+            } else {
+                struct timespec ts = { .tv_sec = 0, .tv_nsec = 10000 };
+                nanosleep(&ts, NULL);
+            }
         }
+        top = 100;
+
         // if we get sighup'd, open a new file and dup2 it so we will begin writing there.
-        if (g_openNewFile) {
+        if (command & CMD_OPEN_NEW_FILE) {
             snprintf(ctx->filepath.name, FilePath_NAME_SZ, "shares_%d.bin", outFileNo++);
             int nextOutfile = open(ctx->filepath.path, O_WRONLY | O_CREAT | O_EXCL, 0222);
             if (nextOutfile < 0) {
@@ -425,7 +430,6 @@ int main(int argc, char** argv) {
                 return 100;
             }
             close(nextOutfile);
-            g_openNewFile = false;
             if (chmod(ctx->filepath.path, 0666)) {
                 DEBUGF("Failed to chmod [%s] errno=[%s]\n", ctx->filepath.path, strerror(errno));
                 return 100;
@@ -437,14 +441,12 @@ int main(int argc, char** argv) {
         if (!loadWork(ctx)) {
             // no new work, we potentially swapped files because of a signal but we
             // need not restart the miner.
-            sleep(1);
             continue;
         }
 
         // Only applicable before we receive our first work, we can't really load
         // any anns because we don't know which ones might be useful.
         if (!ctx->currentWork) {
-            sleep(1);
             continue;
         }
 
@@ -489,10 +491,8 @@ int main(int argc, char** argv) {
         if (!ctx->mining) { beginMining(ctx); }
 
         // wait for announcements and don't spam the logs too hard...
-        if (!ctx->mining) { sleep(5); }
-
-        // sleep 1 second before re-scanning the work dir in order to reduce load
-        sleep(1);
+        // wait 6 seconds
+        if (!ctx->mining) { top = 600; }
 
         if (!(i % 4)) {
             uint64_t hps = BlockMiner_getHashesPerSecond(ctx->bm);
