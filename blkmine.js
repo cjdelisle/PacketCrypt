@@ -66,90 +66,98 @@ const downloadAnnFile = (
     fileNo /*:number*/,
     cb /*:(?DownloadAnnError_t, ?DownloadAnnResult_t)=>true|void*/
 ) => {
-    const url = serverUrl + '/anns/anns_' + fileNo + '.bin';
-    const fileSuffix = '_' + serverId + '_' + fileNo + '.bin';
-    const annPath = wrkdir + '/anndir/anns' + fileSuffix;
-    let parentBlockNum;
-    let annBin;
-    let wrkPath;
-    nThen((w) => {
-        Fs.stat(annPath, w((err, st) => {
-            if (err && err.code === 'ENOENT') { return; }
-            if (err) { throw err; }
-            w.abort();
-            return void cb({ code: 'EEXIST', annPath: annPath });
-        }));
-    }).nThen((w) => {
-        console.error("Get announcements [" + url + "] -> [" + annPath + "]");
-        Util.httpGetBin(url, w((err, res) => {
-            if (!res) {
-                if (!err) { err = new Error("unknown error"); }
+    const again = () => {
+        const url = serverUrl + '/anns/anns_' + fileNo + '.bin';
+        const fileSuffix = '_' + serverId + '_' + fileNo + '.bin';
+        const annPath = wrkdir + '/anndir/anns' + fileSuffix;
+        let parentBlockNum;
+        let annBin;
+        let wrkPath;
+        nThen((w) => {
+            Fs.stat(annPath, w((err, st) => {
+                if (err && err.code === 'ENOENT') { return; }
+                if (err) { throw err; }
                 w.abort();
-                return cb(err);
-            }
-            annBin = res;
-        }));
-    }).nThen((w) => {
-        let nt = nThen;
-        const eachAnn = (i) => {
-            const annContentLen = annBin.readUInt32LE(i + 20);
-            if (annContentLen <= 32) { return; }
-            const annContentHash = annBin.slice(i + 24, i + 56);
-            nt = nt((ww) => {
-                const cfname = 'ann_' + annContentHash.toString('hex') + '.bin';
-                const curl = serverUrl + '/content/' + cfname;
-                const cpath = wrkdir + '/contentdir/' + cfname;
-                //console.error("Get announcement content [" + curl + "] -> [" + cpath + "]");
-                Util.httpGetBin(curl, ww((err, res) => {
-                    if (!res) {
-                        if (!err) { err = new Error("unknown error"); }
-                        ww.abort();
-                        w.abort();
-                        return cb(err);
-                    }
-                    Fs.writeFile(cpath, res, (err) => {
-                        if (err) {
+                return void cb({ code: 'EEXIST', annPath: annPath });
+            }));
+        }).nThen((w) => {
+            console.error("Get announcements [" + url + "] -> [" + annPath + "]");
+            Util.httpGetBin(url, w((err, res) => {
+                if (!res) {
+                    if (!err) { err = new Error("unknown error"); }
+                    w.abort();
+                    if (cb(err)) { setTimeout(again, 5000); }
+                }
+                annBin = res;
+            }));
+        }).nThen((w) => {
+            if (!annBin) { return; }
+            let nt = nThen;
+            const eachAnn = (i) => {
+                if (!annBin) { throw new Error(); } // shouldn't happen
+                const annContentLen = annBin.readUInt32LE(i + 20);
+                if (annContentLen <= 32) { return; }
+                const annContentHash = annBin.slice(i + 24, i + 56);
+                nt = nt((ww) => {
+                    const cfname = 'ann_' + annContentHash.toString('hex') + '.bin';
+                    const curl = serverUrl + '/content/' + cfname;
+                    const cpath = wrkdir + '/contentdir/' + cfname;
+                    //console.error("Get announcement content [" + curl + "] -> [" + cpath + "]");
+                    Util.httpGetBin(curl, ww((err, res) => {
+                        if (!res) {
+                            if (!err) { err = new Error("unknown error"); }
                             ww.abort();
                             w.abort();
-                            cb(err);
+                            if (cb(err)) { setTimeout(again, 5000); }
+                            return;
                         }
-                    });
-                }));
-            }).nThen;
-        };
-        for (let i = 0; i < annBin.length; i += 1024) { eachAnn(i); }
-        nt(w());
-    }).nThen((w) => {
-        if (!annBin) { return; }
-        Fs.writeFile(annPath, annBin, w((err) => {
-            if (err) {
-                w.abort();
-                cb(err);
+                        Fs.writeFile(cpath, res, (err) => {
+                            if (err) {
+                                ww.abort();
+                                w.abort();
+                                if (cb(err)) { setTimeout(again, 5000); }
+                            }
+                        });
+                    }));
+                }).nThen;
+            };
+            for (let i = 0; i < annBin.length; i += 1024) { eachAnn(i); }
+            nt(w());
+        }).nThen((w) => {
+            if (!annBin) { return; }
+            Fs.writeFile(annPath, annBin, w((err) => {
+                if (err) {
+                    w.abort();
+                    if (cb(err)) { setTimeout(again, 5000); }
+                }
+            }));
+        }).nThen((w) => {
+            if (!annBin) { return; }
+            getAnnFileParentNum(annPath, w((err, pbn) => {
+                if (typeof(pbn) === 'undefined') {
+                    console.error('getAnnFileParentNum() error ' + String(err));
+                    // filesystem error, we probably want to bail out...
+                    throw err;
+                }
+                parentBlockNum = pbn;
+            }));
+        }).nThen((w) => {
+            if (!annBin) { return; }
+            wrkPath = wrkdir + '/wrkdir/anns_' + parentBlockNum + fileSuffix;
+            Fs.link(annPath, wrkPath, w((err) => {
+                if (err) { throw err; }
+            }));
+        }).nThen((_) => {
+            if (!annBin) { return; }
+            if (cb(undefined, {
+                annPath: annPath,
+                wrkPath: wrkPath
+            })) {
+                setTimeout(again, 5000);
             }
-        }));
-    }).nThen((w) => {
-        if (!annBin) { return; }
-        getAnnFileParentNum(annPath, w((err, pbn) => {
-            if (typeof(pbn) === 'undefined') {
-                console.error('getAnnFileParentNum() error ' + String(err));
-                // filesystem error, we probably want to bail out...
-                throw err;
-            }
-            parentBlockNum = pbn;
-        }));
-    }).nThen((w) => {
-        if (!annBin) { return; }
-        wrkPath = wrkdir + '/wrkdir/anns_' + parentBlockNum + fileSuffix;
-        Fs.link(annPath, wrkPath, w((err) => {
-            if (err) { throw err; }
-        }));
-    }).nThen((_) => {
-        if (!annBin) { return; }
-        cb(undefined, {
-            annPath: annPath,
-            wrkPath: wrkPath
         });
-    });
+    };
+    again();
 };
 
 /*
