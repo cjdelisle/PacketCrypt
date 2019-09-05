@@ -53,7 +53,7 @@ int Work_check(const unsigned char * hash, int target) {
 	int significantPart = hash[zeroBytes - 1] << 16;
 	significantPart |= hash[zeroBytes - 2] << 8;
 	significantPart |= hash[zeroBytes - 3];
-	if (significantPart > target)
+	if (significantPart >= target)
 		return false;
 
 	return true;
