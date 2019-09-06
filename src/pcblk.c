@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include "packetcrypt/PacketCrypt.h"
 #include "packetcrypt/BlockMiner.h"
 #include "FilePath.h"
