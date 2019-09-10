@@ -259,16 +259,21 @@ const getNewestTimestamp = (dataStr) => {
     }
     for (;;) {
         let i = dataStr.lastIndexOf('\n');
+        let toParse = dataStr;
         if (i < 0) {
             if (dataStr.length === 0) { return null; }
-            i = dataStr.length;
+        } else {
+            toParse = dataStr.slice(i);
         }
         try {
-            const obj = JSON.parse(dataStr.slice(i));
+            const obj = JSON.parse(toParse);
             if (typeof(obj.time) === 'number') {
                 return obj.time;
             }
         } catch (e) { }
+        if (i < 0) {
+            return null;
+        }
         // Failed to parse, try looking backward
         dataStr = dataStr.slice(0, i);
     }
@@ -276,8 +281,6 @@ const getNewestTimestamp = (dataStr) => {
 
 const onEvents = (ctx, req, res, done) => {
     if (Util.badMethod('POST', req, res)) { return done(); }
-    console.error("Handling event post from [" + req.connection.remoteAddress + "] ([" +
-        req.headers['x-forwarded-for'] + "])");
     let failed = false;
     const errorEnd = (code, message) => {
         if (failed) { return; }
@@ -306,14 +309,13 @@ const onEvents = (ctx, req, res, done) => {
         }));
     }).nThen((w) => {
         if (failed) { return; }
-        console.error("Computing hash and getting newest timestamp");
         hash = Crypto.createHash('sha256').update(dataStr).digest('hex').slice(0,32);
+        console.error("/events Processing file [" + hash + "]");
         const d = getNewestTimestamp(dataStr);
         if (d === null) {
             return void errorEnd(400, "could not get most recent timestamp from file");
         }
         fileName = ctx.workdir + '/paylog_' + String(d) + '_' + hash + '.bin';
-        console.error("Writing out file");
         const again = () => {
             Fs.writeFile(fileName, dataStr, { flag: 'ax' }, w((err) => {
                 if (!err) { return; }
@@ -334,7 +336,6 @@ const onEvents = (ctx, req, res, done) => {
         again();
     }).nThen((_) => {
         if (failed) { return; }
-        console.error("Handling events");
         res.end(JSON.stringify({
             result: { eventId: hash },
             warn: [],
@@ -342,7 +343,7 @@ const onEvents = (ctx, req, res, done) => {
         }));
         handleEvents(ctx, fileName, dataStr);
         garbageCollect(ctx);
-        console.error("Done");
+        console.error("/events done processing [" + hash + "]");
         done();
     });
 };
