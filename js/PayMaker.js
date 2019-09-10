@@ -252,6 +252,11 @@ const garbageCollect = (ctx) => {
 };
 
 const getNewestTimestamp = (dataStr) => {
+    // We're only going to search the last 10000 bytes of the thing for
+    // a useful block, if we get uploaded a giant binary we're failing it!
+    if (dataStr.length > 10000) {
+        dataStr = dataStr.slice(dataStr.length - 10000);
+    }
     for (;;) {
         let i = dataStr.lastIndexOf('\n');
         if (i < 0) {
