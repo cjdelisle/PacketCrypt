@@ -276,6 +276,8 @@ const getNewestTimestamp = (dataStr) => {
 
 const onEvents = (ctx, req, res, done) => {
     if (Util.badMethod('POST', req, res)) { return done(); }
+    console.error("Handling event post from [" + req.connection.remoteAddress + "] ([" +
+        req.headers['x-forwarded-for'] + "])");
     let failed = false;
     const errorEnd = (code, message) => {
         if (failed) { return; }
@@ -304,12 +306,14 @@ const onEvents = (ctx, req, res, done) => {
         }));
     }).nThen((w) => {
         if (failed) { return; }
+        console.error("Computing hash and getting newest timestamp");
         hash = Crypto.createHash('sha256').update(dataStr).digest('hex').slice(0,32);
         const d = getNewestTimestamp(dataStr);
         if (d === null) {
             return void errorEnd(400, "could not get most recent timestamp from file");
         }
         fileName = ctx.workdir + '/paylog_' + String(d) + '_' + hash + '.bin';
+        console.error("Writing out file");
         const again = () => {
             Fs.writeFile(fileName, dataStr, { flag: 'ax' }, w((err) => {
                 if (!err) { return; }
@@ -330,6 +334,7 @@ const onEvents = (ctx, req, res, done) => {
         again();
     }).nThen((_) => {
         if (failed) { return; }
+        console.error("Handling events");
         res.end(JSON.stringify({
             result: { eventId: hash },
             warn: [],
@@ -337,6 +342,7 @@ const onEvents = (ctx, req, res, done) => {
         }));
         handleEvents(ctx, fileName, dataStr);
         garbageCollect(ctx);
+        console.error("Done");
         done();
     });
 };
