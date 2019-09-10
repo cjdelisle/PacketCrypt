@@ -325,7 +325,12 @@ const onEvents = (ctx, req, res, done) => {
                         if (ret !== dataStr) {
                             console.error("File [" + fileName +
                                 "] exists but with different content, replacing");
-                            again();
+                            Fs.unlink(fileName, w((err) => {
+                                if (err) {
+                                    return void errorEnd(500, "could delete file to replace it");
+                                }
+                                again();
+                            }));
                         }
                     }));
                     return;
