@@ -6,6 +6,7 @@ const Querystring = require('querystring');
 
 const RBTree = require('bintrees').RBTree;
 const nThen = require('nthen');
+const Saferphore = require('saferphore');
 
 const Util = require('./Util.js');
 const Rpc = require('./Rpc.js');
@@ -87,6 +88,7 @@ export type PayMaker_Config_t = {
     updateHook: (x: PayMaker_Result_t) => PayMaker_Result_t,
     root: Config_t,
 };
+const _flow_typeof_saferphore = Saferphore.create(1);
 type Context_t = {
     workdir: string,
     rpcClient: Rpc_Client_t,
@@ -94,6 +96,7 @@ type Context_t = {
     anns: BinTree_t<AnnsEvent_t>,
     shares: BinTree_t<ShareEvent_t>,
     dedupTable: {[string]:bool},
+    oes: typeof _flow_typeof_saferphore,
     mut: {
         mostRecentEventTime: number,
         cfg: PayMaker_Config_t,
@@ -266,8 +269,8 @@ const getNewestTimestamp = (dataStr) => {
     }
 };
 
-const onEvents = (ctx, req, res) => {
-    if (Util.badMethod('POST', req, res)) { return; }
+const onEvents = (ctx, req, res, done) => {
+    if (Util.badMethod('POST', req, res)) { return done(); }
     let failed = false;
     const errorEnd = (code, message) => {
         if (failed) { return; }
@@ -275,6 +278,7 @@ const onEvents = (ctx, req, res) => {
         failed = true;
         res.statusCode = code;
         res.end(JSON.stringify({ result: '', error: [message], warn: [] }));
+        done();
     };
     let dataStr;
     let fileName;
@@ -328,6 +332,7 @@ const onEvents = (ctx, req, res) => {
         }));
         handleEvents(ctx, fileName, dataStr);
         garbageCollect(ctx);
+        done();
     });
 };
 
@@ -478,8 +483,15 @@ const onReq = (ctx /*:Context_t*/, req, res) => {
         res.end("500 Not ready");
         return;
     }
-    if (req.url.endsWith('/events')) { return void onEvents(ctx, req, res); }
-    if (/\/whotopay(\?.*)?$/.test(req.url)) { return void onWhoToPay(ctx, req, res); }
+    if (req.url.endsWith('/events')) {
+        ctx.oes.take((returnAfter) => {
+            onEvents(ctx, req, res, returnAfter(()=>{}));
+        });
+        return;
+    }
+    if (/\/whotopay(\?.*)?$/.test(req.url)) {
+        return void onWhoToPay(ctx, req, res);
+    }
     res.statusCode = 404;
     res.end("not found");
 };
@@ -553,6 +565,7 @@ module.exports.create = (cfg /*:PayMaker_Config_t*/) => {
             blocks: new RBTree((a, b) => (a.time - b.time)),
             anns: new RBTree((a, b) => (a.time - b.time)),
             shares: new RBTree((a, b) => (a.time - b.time)),
+            oes: Saferphore.create(1),
             mut: {
                 mostRecentEventTime: 0,
                 cfg: cfg,
