@@ -73,19 +73,26 @@ Make sure you have [homebrew](https://brew.sh/) installed first, then:
 
 ## Mining
 
-Once you've built the relevant code, you can begin mining *announcements* with:
+Once you've built the relevant code, you can begin mining *announcements* in the
+[gridfinity](https://gridfinity.com) mining pool using:
 
-    node ./annmine.js http://pool.cjdns.fr/master
+    node ./annmine.js http://pool.gridfinity.com/master
 
 To mine blocks, use:
 
-    node ./blkmine.js http://pool.cjdns.fr/master
+    node ./blkmine.js http://pool.gridfinity.com/master
 
-For more information about these utilities, see
+You'll probably want to specify the payment address and other flags, you can just type
+
+    node ./annmine.js
+    node ./blkmine.js
+
+to see the arguments which you can pass to these utilities or visit
 [annmine](https://github.com/cjdelisle/PacketCrypt/blob/master/docs/annmine.md) and
-[blkmine](https://github.com/cjdelisle/PacketCrypt/blob/master/docs/blkmine.md) and for
-learning about running a pool, see
-[pool](https://github.com/cjdelisle/PacketCrypt/blob/master/docs/pool.md)
+[blkmine](https://github.com/cjdelisle/PacketCrypt/blob/master/docs/blkmine.md).
+
+For information about running a pool, see
+[pool](https://github.com/cjdelisle/PacketCrypt/blob/master/docs/pool.md).
 
 ## How it works
 
