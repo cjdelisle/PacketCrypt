@@ -150,6 +150,10 @@ int main(int argc, const char** argv) {
             for (int i = 0; i < files.count; i++) {
                 //DEBUGF("Re-opening file [%s]\n", files.names[i]);
                 int newOutFileNo = open(files.names[i], O_WRONLY | O_CREAT | O_APPEND, 0666);
+                if (newOutFileNo > 10) {
+                    DEBUGF("WARN using a lot of filenos, opened file [%s] with fileno [%d]\n",
+                        files.names[i], newOutFileNo);
+                }
                 if (newOutFileNo < 0) {
                     DEBUGF("Error: unable to re-open outfile [%s] [%s]\n",
                         files.names[i], strerror(errno));
@@ -163,8 +167,10 @@ int main(int argc, const char** argv) {
                 close(newOutFileNo);
             }
         }
-        DEBUGF("Starting job with work target [%08x] and content length [%d]\n",
-            req.workTarget, req.contentLen);
+        if (req.contentLen > 0) {
+            DEBUGF("Starting job with work target [%08x] and content length [%d]\n",
+                req.workTarget, req.contentLen);
+        }
         AnnMiner_start(annMiner, &req, content);
         free(pleaseFree);
         pleaseFree = NULL;

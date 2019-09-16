@@ -11,6 +11,8 @@ const Util = require('./js/Util.js');
 const MAX_RAND_CONTENT_SZ = 2048;
 const REBUILD_JOB_EVERY_MS = 10000;
 
+const MAX_REQUESTS_IN_FLIGHT = 16;
+
 /*::
 import type { PoolClient_t } from './js/PoolClient.js'
 import type { Protocol_Work_t, Protocol_AnnResult_t } from './js/Protocol.js'
@@ -26,7 +28,8 @@ type Context_t = {
     uploads: Array<{ url: string, req: ClientRequest, reqNum: number }>,
     submitAnnUrls: Array<string>,
     config: Config_Miner_t,
-    reqNum: number
+    reqNum: number,
+    requestsInFlight: number,
 };
 */
 
@@ -34,6 +37,7 @@ const httpRes = (ctx, res /*:IncomingMessage*/, reqNum) => {
     const data = [];
     res.on('data', (d) => { data.push(d.toString('utf8')); });
     res.on('end', () => {
+        ctx.requestsInFlight--;
         if (res.statusCode !== 200) {
             // if (res.statusCode === 400) {
             //     console.error("Pool replied with error 400 [" + data.join('') + "] stopping");
@@ -71,8 +75,6 @@ const httpRes = (ctx, res /*:IncomingMessage*/, reqNum) => {
 
 const getFileName = (config, i) => (config.dir + '/anns_' + i + '.bin');
 
-const backtrace = () => { try { throw new Error(); } catch (e) { return e.stack; } };
-
 const messageMiner = (ctx, msg) => {
     if (!ctx.miner) { return; }
     //console.error("Signaling miner " + backtrace());
@@ -108,7 +110,6 @@ const rotateAndUpload = (ctx /*:Context_t*/, done) => {
             const parentBlockHeight = fileContent[i].readUInt32LE(12) + 1;
             const contentLen = fileContent[i].readUInt32LE(20);
             const reqNum = ctx.reqNum++;
-            const file = getFileName(ctx.config, i);
             console.error("[" + String(reqNum) + "] post [" + url + "] worknum [" +
                 String(parentBlockHeight) + "] content length [" + contentLen + "]");
             const req = Util.httpPost(url, {
@@ -121,6 +122,7 @@ const rotateAndUpload = (ctx /*:Context_t*/, done) => {
                     JSON.stringify(err) + "]");
             });
             req.end(fileContent[i]);
+            ctx.requestsInFlight++;
         });
     }).nThen((_w) => {
         done(uploaded);
@@ -175,6 +177,7 @@ const rebuildJob = (ctx /*Context_t*/, w /*:Protocol_Work_t*/) => {
 };
 
 const doRefreshWork = (ctx) => {
+    if (ctx.requestsInFlight > MAX_REQUESTS_IN_FLIGHT) { return; }
     ctx.inMutex((done) => {
         rotateAndUpload(ctx, (didUpload) => {
             const expired = (+new Date()) > (REBUILD_JOB_EVERY_MS + ctx.lastWorkRefresh);
@@ -218,6 +221,7 @@ const launch = (config /*:Config_Miner_t*/) => {
     const pool = Pool.create(config.poolUrl);
     nThen((w) => {
         Util.checkMkdir(config.dir, w());
+        Util.clearDir(config.dir, w());
         pool.getMasterConf(w());
     }).nThen((_w) => {
         const submitAnnUrls = pool.config.submitAnnUrls;
@@ -229,7 +233,8 @@ const launch = (config /*:Config_Miner_t*/) => {
             pool: pool,
             inMutex: Util.createMutex(),
             uploads: [],
-            reqNum: 0
+            reqNum: 0,
+            requestsInFlight: 0
         };
         const minerOnClose = () => {
             if (!ctx.miner) { throw new Error(); }
