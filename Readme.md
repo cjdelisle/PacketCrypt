@@ -91,6 +91,9 @@ to see the arguments which you can pass to these utilities or visit
 [annmine](https://github.com/cjdelisle/PacketCrypt/blob/master/docs/annmine.md) and
 [blkmine](https://github.com/cjdelisle/PacketCrypt/blob/master/docs/blkmine.md).
 
+**NOTE:** Because of a [bug in pcblk](https://github.com/cjdelisle/PacketCrypt/issues/3) it is
+best to stop and restart the block miner periodically (for example every 10 minutes).
+
 For information about running a pool, see
 [pool](https://github.com/cjdelisle/PacketCrypt/blob/master/docs/pool.md).
 
