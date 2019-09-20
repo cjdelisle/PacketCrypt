@@ -32,5 +32,6 @@
   },
   "devDependencies": {
     "flow-bin": "^0.106.2"
-  }
+  },
+  "license": "(LGPL-2.1-only OR LGPL-3.0-only)"
 }

@@ -1,3 +1,9 @@
+/**
+ * (C) Copyright 2019
+ * Caleb James DeLisle
+ *
+ * SPDX-License-Identifier: (LGPL-2.1-only OR LGPL-3.0-only)
+ */
 #include "packetcrypt/Validate.h"
 #include "Buf.h"
 #include "Announce.h"

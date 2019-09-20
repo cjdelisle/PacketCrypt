@@ -1,3 +1,12 @@
+/**
+ * (C) Copyright 2019
+ * Caleb James DeLisle
+ *
+ * SPDX-License-Identifier: (LGPL-2.1-only OR LGPL-3.0-only)
+ *
+ * This is a Library Header File, it is intended to be included in other projects without
+ * affecting the license of those projects.
+ */
 #ifndef ANNMINER_H
 #define ANNMINER_H
 

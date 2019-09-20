@@ -1,3 +1,9 @@
+/**
+ * (C) Copyright 2019
+ * Caleb James DeLisle
+ *
+ * SPDX-License-Identifier: (LGPL-2.1-only OR LGPL-3.0-only)
+ */
 /*@flow*/
 const Spawn = require('child_process').spawn;
 const Fs = require('fs');

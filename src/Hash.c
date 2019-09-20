@@ -1,3 +1,9 @@
+/**
+ * (C) Copyright 2019
+ * Caleb James DeLisle
+ *
+ * SPDX-License-Identifier: (LGPL-2.1-only OR LGPL-3.0-only)
+ */
 #include "Hash.h"
 #include "sodium/crypto_generichash_blake2b.h"
 #include "sodium/crypto_stream_chacha20.h"

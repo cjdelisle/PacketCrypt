@@ -788,13 +788,12 @@ multiplication is is the high bits of the result.
     * JMP unconditional jump (used with IF to implement the "else" block)
     * END end a scope (LOOP, IF)
 
-## TODO list
+## License
 
-This algorithm is not completely done, there are a few things which are still missing:
-
-* [] RandHash
-  * [] Can we use more memory ?
-  * [] MIX instruction to frustrate program loop parallelization
-  * [] ABS, MIN and MAX insns
-  * [] float instructions ?
-  * [] amd64 jit
+You may use this software under the terms of the
+[LGPL-2.1](https://www.gnu.org/licenses/lgpl-2.1-standalone.html)
+OR at your option, the
+[LGPL-3.0](https://www.gnu.org/licenses/lgpl-3.0-standalone.html).
+It is intended that you may embed this software in products, regardless of the licenses
+which those products use, however any changes to the internals of this codebase (for
+example to improve performance) should be made open source.

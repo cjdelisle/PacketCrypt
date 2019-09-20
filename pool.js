@@ -1,3 +1,9 @@
+/**
+ * (C) Copyright 2019
+ * Caleb James DeLisle
+ *
+ * SPDX-License-Identifier: (LGPL-2.1-only OR LGPL-3.0-only)
+ */
 /*@flow*/
 const Master = require('./js/Master.js');
 const PayMaker = require('./js/PayMaker.js');
