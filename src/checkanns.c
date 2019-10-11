@@ -541,10 +541,10 @@ static void processAnns(Worker_t* w, int fileNo) {
     snprintf(buf, 2048, "{\"type\":\"anns\",\"accepted\":%u,\"dup\":%u,"
         "\"inval\":%u,\"badHash\":%u,\"runt\":%u,\"internalErr\":%u,"
         "\"payTo\":\"%s\",\"unsigned\":%u,\"totalLen\":%u,"
-        "\"time\":%llu,\"eventId\":\"%s\"}\n",
+        "\"time\":%llu,\"eventId\":\"%s\",\"target\":%u}\n",
         res.accepted, res.duplicates, res.invalid, res.badContentHash, res.runt,
         res.internalError, res.payTo, res.unsignedCount, res.totalContentLength,
-        timeMs, eventId);
+        timeMs, eventId, w->lw.inBuf.minWork);
     checkedWrite(w->lw.tmpFile.path, outFileNo, buf, strlen(buf)-1);
     checkedWrite("paylog file", w->g->paylogFileNo, buf, strlen(buf));
     close(outFileNo);

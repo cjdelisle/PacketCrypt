@@ -354,6 +354,15 @@ const compactToDbl = (c) => {
 const TWO_TO_THE_256 = 1.157920892373162e+77;
 const workForTar = (target) => ( TWO_TO_THE_256 / (target + 1) );
 
+module.exports.isWorkUselessExponential = (target /*:number*/, age /*:number*/) => {
+    if (age < 3) { return false; }
+    age -= 3;
+    const tar = compactToDbl(target);
+    const work = workForTar(tar);
+    const degradedWork = work / Math.pow(2, age);
+    return degradedWork < 0.25; // lets be safe and check that it's less than 0.25 rather than less than 1.
+};
+
 // readdir
 // open each file, check offsets 8 (work bits) and 12 (parent block height)
 // convert block height to double

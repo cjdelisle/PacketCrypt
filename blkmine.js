@@ -66,6 +66,7 @@ type DownloadAnnError_t = Error | {statusCode:number} | {code:string,annPath:str
 */
 
 const downloadAnnFile = (
+    currentHeight /*:number*/,
     wrkdir /*:string*/,
     serverUrl /*:string*/,
     serverId /*:string*/,
@@ -96,6 +97,14 @@ const downloadAnnFile = (
                 }
                 annBin = res;
             }));
+        }).nThen((w) => {
+            if (!annBin) { return; }
+            const annParentBlockHeight = annBin.readUInt32LE(12);
+            const annWorkBits = annBin.readUInt32LE(8);
+            if (Util.isWorkUselessExponential(annWorkBits, currentHeight - annParentBlockHeight)) {
+                w.abort();
+                return void cb({ code: 'USELESS', annPath: annPath });
+            }
         }).nThen((w) => {
             if (!annBin) { return; }
             let nt = nThen;
@@ -671,7 +680,7 @@ const mkMiner = (ctx) => {
     ctx.miner = miner;
 };
 
-const downloadOldAnns = (config, masterConf, done) => {
+const downloadOldAnns = (config, currentHeight, masterConf, done) => {
     let nt = nThen;
     console.error("Downloading announcements to fill memory");
 
@@ -706,7 +715,7 @@ const downloadOldAnns = (config, masterConf, done) => {
         if (i > serverCurrentNum.length) { i = 0; }
         if (!serverCurrentNum[i]) { return void again(i + 1); }
         const as = serverCurrentNum[i];
-        downloadAnnFile(config.dir, as.server, String(i), as.currentAnnNum, (err, res) => {
+        downloadAnnFile(currentHeight, config.dir, as.server, String(i), as.currentAnnNum, (err, res) => {
             if (res) {
                 return void Fs.stat(res.annPath, (err, st) => {
                     if (err) { throw err; }
@@ -718,6 +727,12 @@ const downloadOldAnns = (config, masterConf, done) => {
             if (err && err.code === 'EEXIST') {
                 // We already have this file, search for the previous...
                 as.currentAnnNum--;
+                return void again(i + 1);
+            }
+            if (err && err.code === 'USELESS') {
+                console.error("No more useful announcements on server [" + as.server + "]");
+                serverCurrentNum[i] = undefined;
+                activeServers--;
                 return void again(i + 1);
             }
             if (err && err.statusCode === 404) {
@@ -739,13 +754,25 @@ const downloadOldAnns = (config, masterConf, done) => {
 };
 
 const pollAnnHandlers = (ctx) => {
+    const downloadSlots = [];
     const again = (server, i, num) => {
-        downloadAnnFile(ctx.config.dir, server, String(i), num, (err, res) => {
+        let completed = false;
+        setTimeout(() => {
+            if (completed) { return; }
+            completed = true;
+            again(server, i, num);
+        }, 60000);
+        if (!ctx.work) { return; }
+        const currentHeight = ctx.work.height;
+        downloadAnnFile(currentHeight, ctx.config.dir, server, String(i), num, (err, res) => {
+            if (completed) { return; }
             if (res) {
+                completed = true;
                 return void again(server, i, num + 1);
             }
             if (err && err.code === 'EEXIST' && err.annPath) {
                 // Lets just continue looking for newer files
+                completed = true;
                 return void again(server, i, num + 1);
                 // const path = String(err.annPath);
                 // throw new Error("Failed to download ann file to [" + path +
@@ -780,7 +807,8 @@ const launch = (config /*:Config_Miner_t*/) => {
         if (!pool.work) { throw new Error(); }
         deleteUselessAnns(config, pool.work.height, w());
     }).nThen((w) => {
-        downloadOldAnns(config, masterConf, w());
+        if (!pool.work) { throw new Error(); }
+        downloadOldAnns(config, pool.work.height, masterConf, w());
     }).nThen((w) => {
         const ctx = {
             config: config,

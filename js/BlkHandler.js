@@ -258,6 +258,7 @@ const onSubmit = (ctx, req, res) => {
         }));
     }).nThen((w) => {
         if (failed) { return; }
+        if (!currentWork) { throw new Error(); }
         if (submitRet === 'RESUBMIT_AS_BLOCK') {
             if (!blockTemplate) { throw new Error(); }
 
@@ -269,6 +270,7 @@ const onSubmit = (ctx, req, res) => {
 
             ctx.rpcClient.submitBlock(wholeBlock, w((err, ret) => {
                 if (!err && ret) { err = ret.result; }
+                if (!currentWork) { throw new Error(); }
                 if (err) {
                     console.error("error:");
                     console.error(err);
@@ -289,7 +291,8 @@ const onSubmit = (ctx, req, res) => {
                             block: true,
                             time: +new Date(),
                             eventId: shareId.toString('hex'),
-                            headerHash: headerHash
+                            headerHash: headerHash,
+                            target: currentWork.shareTarget
                         },
                         error: [],
                         warn: warn
@@ -311,7 +314,8 @@ const onSubmit = (ctx, req, res) => {
                     payTo: payTo,
                     block: false,
                     time: +new Date(),
-                    eventId: shareId.toString('hex')
+                    eventId: shareId.toString('hex'),
+                    target: currentWork.shareTarget
                 },
                 error: [],
                 warn: warn
