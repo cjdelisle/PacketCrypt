@@ -160,6 +160,10 @@ const downloadAnnFile = (
             if (!annBin) { return; }
             wrkPath = wrkdir + '/wrkdir/anns_' + parentBlockNum + fileSuffix;
             Fs.link(annPath, wrkPath, w((err) => {
+                if (err && err.code === 'EEXIST') {
+                    // Just ignore if the file already exists
+                    return;
+                }
                 if (err) { throw err; }
             }));
         }).nThen((_) => {
