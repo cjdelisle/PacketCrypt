@@ -354,6 +354,15 @@ const compactToDbl = (c) => {
 const TWO_TO_THE_256 = 1.157920892373162e+77;
 const workForTar = (target) => ( TWO_TO_THE_256 / (target + 1) );
 
+const isWorkUselessExponential = module.exports.isWorkUselessExponential = (target /*:number*/, age /*:number*/) => {
+    if (age < 3) { return false; }
+    age -= 3;
+    const tar = compactToDbl(target);
+    const work = workForTar(tar);
+    const degradedWork = work / Math.pow(2, age);
+    return degradedWork < 0.25; // lets be safe and check that it's less than 0.25 rather than less than 1.
+};
+
 // readdir
 // open each file, check offsets 8 (work bits) and 12 (parent block height)
 // convert block height to double
@@ -415,18 +424,10 @@ module.exports.deleteUselessAnns = (
             }).nThen((w) => {
                 if (!buf) { return; }
                 const height = buf.readInt32LE(12);
-                const age = currentHeight - height;
-                if (age < 5) { return; }
                 const bits = buf.readUInt32LE(8);
-                const target = compactToDbl(bits);
-                const work = workForTar(target);
-                const effectiveWork = work / (age - 3);
-
-                // work of 2 is the point where it's nolonger worth keeping an ann
-                // we'll set this to 1.75 in order to not worry about rounding issues
-                if (effectiveWork > 1.75) { return; }
-
-                rmcb(f, w());
+                if (isWorkUselessExponential(bits, currentHeight - height)) {
+                    rmcb(f, w());
+                }
             }).nThen;
         });
         nt(w());
