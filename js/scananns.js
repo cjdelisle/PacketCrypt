@@ -13,8 +13,8 @@ const printAnns = (f, buf) => {
     let block = -1;
     let count = 0;
     for (let i = 0; i < buf.length; i += 1024) {
-        const d = buf.readUInt32LE(8);
-        const b = buf.readUInt32LE(12);
+        const d = buf.readUInt32LE(i + 8);
+        const b = buf.readUInt32LE(i + 12);
         if (d === diff && b === block) {
             count++;
             continue;
