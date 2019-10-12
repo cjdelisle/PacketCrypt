@@ -187,10 +187,10 @@ const doRefreshWork = (ctx) => {
     ctx.inMutex((done) => {
         rotateAndUpload(ctx, (didUpload) => {
             const expired = (+new Date()) > (REBUILD_JOB_EVERY_MS + ctx.lastWorkRefresh);
-            if (!ctx.pool.work) {
+            if (!ctx.work) {
                 console.error('no work');
             } else if (didUpload || expired) {
-                rebuildJob(ctx, ctx.pool.work);
+                rebuildJob(ctx, ctx.work);
             }
             done();
         });
@@ -232,6 +232,8 @@ const launch = (config /*:Config_Miner_t*/) => {
     }).nThen((_w) => {
         const submitAnnUrls = pool.config.submitAnnUrls;
         const ctx = {
+            work: undefined,
+            nextWork: undefined,
             lastWorkRefresh: +new Date(),
             config: config,
             miner: mkMiner(config, submitAnnUrls),
@@ -256,7 +258,17 @@ const launch = (config /*:Config_Miner_t*/) => {
         };
         minerOnClose();
 
-        pool.onWork((w) => { doRefreshWork(ctx); });
+        pool.onWork((w) => {
+            if (!ctx.work) {
+                ctx.work = w;
+            } else if (ctx.nextWork) {
+                ctx.work = ctx.nextWork;
+            } else {
+                ctx.work = w;
+            }
+            ctx.nextWork = w;
+            doRefreshWork(ctx);
+        });
         refreshWorkLoop2(ctx);
         // kick it off
         pool.getWork((w) => { rebuildJob(ctx, w); });
