@@ -121,7 +121,7 @@ const onSubmit = (ctx, req, res) => {
             hashMod: ctx.mut.hashMod,
             signingKey: work.signingKey,
             parentBlockHash: work.lastHash,
-            minWork: currentWork.annTarget,
+            minWork: work.annTarget,
             mostRecentBlock: worknum - 1,
             payTo: payTo
         };
