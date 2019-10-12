@@ -47,16 +47,12 @@ typedef struct {
     Buf32_t parentBlockHash;
     char* content;
     HeaderAndHash_t hah;
-
-    pthread_rwlock_t jobLock;
-    pthread_mutex_t updateLock;
 } Job_t;
 
 typedef struct Worker_s Worker_t;
 struct AnnMiner_s {
     int numWorkers;
     Worker_t* workers;
-    Job_t jobs[2];
 
     HeaderAndHash_t hah;
 
@@ -77,7 +73,9 @@ enum ThreadState {
 };
 
 struct Worker_s {
-    Job_t* activeJob;
+    //Job_t* activeJob;
+    Job_t job;
+
     Announce_t ann;
     CryptoCycle_State_t state;
     PacketCrypt_ValidateCtx_t vctx;
@@ -88,7 +86,8 @@ struct Worker_s {
     // read by the main thread
     sig_atomic_t hashesPerSecond;
 
-    int softNonceMin;
+    uint32_t workerNum;
+
     int softNonce;
     int softNonceMax;
 
@@ -116,11 +115,6 @@ static AnnMiner_t* allocCtx(int numWorkers)
     assert(!pthread_mutex_init(&ctx->lock, NULL));
     assert(!pthread_cond_init(&ctx->cond, NULL));
 
-    for (uint32_t i = 0; i < (sizeof(ctx->jobs) / sizeof(ctx->jobs[0])); i++) {
-        pthread_rwlock_init(&ctx->jobs[i].jobLock, NULL);
-        pthread_mutex_init(&ctx->jobs[i].updateLock, NULL);
-    }
-
     ctx->numWorkers = numWorkers;
     ctx->workers = calloc(sizeof(Worker_t), numWorkers);
     assert(ctx->workers);
@@ -131,10 +125,6 @@ static AnnMiner_t* allocCtx(int numWorkers)
 }
 static void freeCtx(AnnMiner_t* ctx)
 {
-    for (uint32_t i = 0; i < (sizeof(ctx->jobs) / sizeof(ctx->jobs[0])); i++) {
-        pthread_rwlock_destroy(&ctx->jobs[i].jobLock);
-        pthread_mutex_destroy(&ctx->jobs[i].updateLock);
-    }
     assert(!pthread_cond_destroy(&ctx->cond));
     assert(!pthread_mutex_destroy(&ctx->lock));
     free(ctx->workers);
@@ -147,32 +137,32 @@ static void populateTable(CryptoCycle_Item_t* table, Buf64_t* annHash0) {
 
 // 1 means success
 static int annHash(Worker_t* restrict w, uint32_t nonce) {
-    CryptoCycle_init(&w->state, &w->activeJob->annHash1.thirtytwos[0], nonce);
+    CryptoCycle_init(&w->state, &w->job.annHash1.thirtytwos[0], nonce);
     int itemNo = -1;
     for (int i = 0; i < 4; i++) {
         itemNo = (CryptoCycle_getItemNo(&w->state) % Announce_TABLE_SZ);
-        CryptoCycle_Item_t* restrict it = &w->activeJob->table[itemNo];
+        CryptoCycle_Item_t* restrict it = &w->job.table[itemNo];
         if (Util_unlikely(!CryptoCycle_update(
             &w->state, it, NULL, Conf_AnnHash_RANDHASH_CYCLES, &w->vctx)))
         {
             return 0;
         }
     }
-    uint32_t target = w->activeJob->hah.annHdr.workBits;
+    uint32_t target = w->job.hah.annHdr.workBits;
 
     CryptoCycle_final(&w->state);
     if (!Work_check(w->state.bytes, target)) { return 0; }
     //if (w->ctx->test) { Hash_printHex(w->state.bytes, 32); }
 
-    Buf_OBJCPY(&w->ann.hdr, &w->activeJob->hah.annHdr);
+    Buf_OBJCPY(&w->ann.hdr, &w->job.hah.annHdr);
     Buf_OBJCPY_LDST(w->ann.hdr.softNonce, &nonce);
-    Announce_Merkle_getBranch(&w->ann.merkleProof, itemNo, &w->activeJob->merkle);
-    Buf_OBJCPY_LDST(w->ann.lastAnnPfx, &w->activeJob->table[itemNo]);
+    Announce_Merkle_getBranch(&w->ann.merkleProof, itemNo, &w->job.merkle);
+    Buf_OBJCPY_LDST(w->ann.lastAnnPfx, &w->job.table[itemNo]);
     //printf("itemNo %d\n", itemNo);
     return 1;
 }
 
-#define HASHES_PER_CYCLE 500
+#define HASHES_PER_CYCLE 512
 
 static void search(Worker_t* restrict w)
 {
@@ -181,13 +171,12 @@ static void search(Worker_t* restrict w)
 
     int nonce = w->softNonce;
     for (int i = 1; i < HASHES_PER_CYCLE; i++) {
-        if (nonce > 0x00ffffff) { return; }
         if (Util_likely(!annHash(w, nonce++))) { continue; }
         // Found an ann!
         int res = Validate_checkAnn(
             NULL,
             (PacketCrypt_Announce_t*)&w->ann,
-            w->activeJob->parentBlockHash.bytes,
+            w->job.parentBlockHash.bytes,
             &w->vctx);
         if (res) {
             fprintf(stderr, "Validate_checkAnn returned [%s]\n",
@@ -211,8 +200,8 @@ static void search(Worker_t* restrict w)
             assert(ann);
             memcpy(ann, &w->ann, sizeof w->ann);
             if (w->ann.hdr.contentLength > 32) {
-                assert(w->activeJob->content);
-                memcpy(&ann[1024], w->activeJob->content, w->ann.hdr.contentLength);
+                assert(w->job.content);
+                memcpy(&ann[1024], w->job.content, w->ann.hdr.contentLength);
             }
             if (w->ctx->sendPtr) {
                 PacketCrypt_Find_t f = {
@@ -242,44 +231,35 @@ static void search(Worker_t* restrict w)
     return;
 }
 
-static void makeNextJob(HeaderAndHash_t* hah, Job_t* j, uint32_t nextHardNonce) {
-    Buf_OBJCPY(&j->hah, hah);
-    j->hah.annHdr.hardNonce = nextHardNonce;
-    Hash_COMPRESS64_OBJ(&j->annHash0, &j->hah);
-
-    populateTable(j->table, &j->annHash0);
-
-    Announce_Merkle_build(&j->merkle, (uint8_t*)j->table, sizeof *j->table);
-
-    Buf64_t* root = Announce_Merkle_root(&j->merkle);
-    Buf_OBJCPY(&j->parentBlockHash, &j->hah.hash.thirtytwos[0]);
-    Buf_OBJCPY(&j->hah.hash, root);
-    Hash_COMPRESS64_OBJ(&j->annHash1, &j->hah);
-}
-
 static void getNextJob(Worker_t* w) {
-    HeaderAndHash_t hah;
-    Buf_OBJCPY(&hah, &w->activeJob->hah);
-    Job_t* next = &w->ctx->jobs[(w->activeJob == &w->ctx->jobs[1])];
-    assert(!pthread_rwlock_unlock(&w->activeJob->jobLock));
-
-    assert(!pthread_mutex_lock(&next->updateLock));
-    if (next->hah.annHdr.hardNonce != hah.annHdr.hardNonce + 1) {
-        // We don't need double-checked locking here because we're holding
-        // the updateLock so nobody else can be in here at the same time.
-        assert(!pthread_rwlock_wrlock(&next->jobLock));
-        fprintf(stderr, "AnnMiner: Updating hard_nonce\n");
-        makeNextJob(&hah, next, hah.annHdr.hardNonce + 1);
-        assert(!pthread_rwlock_unlock(&next->jobLock));
+    if (Buf_OBJCMP(&w->job.hah, &w->ctx->hah)) {
+        Buf_OBJCPY(&w->job.hah, &w->ctx->hah);
+        w->job.hah.annHdr.hardNonce += w->workerNum;
+    } else {
+        w->job.hah.annHdr.hardNonce += w->ctx->numWorkers;
     }
-    assert(!pthread_mutex_unlock(&next->updateLock));
+    Hash_COMPRESS64_OBJ(&w->job.annHash0, &w->job.hah);
 
-    assert(!pthread_rwlock_rdlock(&next->jobLock));
-    w->activeJob = next;
-    w->softNonce = w->softNonceMin;
+    populateTable(w->job.table, &w->job.annHash0);
+
+    Announce_Merkle_build(&w->job.merkle, (uint8_t*)w->job.table, sizeof *w->job.table);
+
+    Buf64_t* root = Announce_Merkle_root(&w->job.merkle);
+    Buf_OBJCPY(&w->job.parentBlockHash, &w->job.hah.hash.thirtytwos[0]);
+    Buf_OBJCPY(&w->job.hah.hash, root);
+    Hash_COMPRESS64_OBJ(&w->job.annHash1, &w->job.hah);
+
+    w->softNonceMax = Util_annSoftNonceMax(w->job.hah.annHdr.workBits);
+    w->softNonce = 0;
 }
 
 static bool checkStop(Worker_t* worker) {
+    if (getRequestedState(worker) == ThreadState_RUNNING) {
+        // This is checking a non-atomic memory address without synchronization
+        // but if we don't read the most recent data, it doesn't matter, we'll
+        // be back in 512 more cycles.
+        return false;
+    }
     pthread_mutex_lock(&worker->ctx->lock);
     for (;;) {
         enum ThreadState rts = getRequestedState(worker);
@@ -287,30 +267,25 @@ static bool checkStop(Worker_t* worker) {
             setState(worker, rts);
             pthread_mutex_unlock(&worker->ctx->lock);
             if (rts == ThreadState_SHUTDOWN) {
-                pthread_rwlock_unlock(&worker->activeJob->jobLock);
                 return true;
             }
             return false;
         }
-        pthread_rwlock_unlock(&worker->activeJob->jobLock);
         setState(worker, rts);
         pthread_cond_wait(&worker->ctx->cond, &worker->ctx->lock);
-        pthread_rwlock_rdlock(&worker->activeJob->jobLock);
     }
 }
 
 static void* thread(void* vworker) {
     Worker_t* worker = vworker;
-    pthread_rwlock_rdlock(&worker->activeJob->jobLock);
     for (;;) {
         if (getRequestedState(worker) != ThreadState_RUNNING) {
             if (checkStop(worker)) { return NULL; }
         }
-        search(worker);
         if (worker->softNonce + HASHES_PER_CYCLE > worker->softNonceMax) {
-            if (checkStop(worker)) { return NULL; }
             getNextJob(worker);
         }
+        search(worker);
     }
 }
 
@@ -354,12 +329,11 @@ void AnnMiner_start(AnnMiner_t* ctx, AnnMiner_Request_t* req, uint8_t* content) 
 
     // if we're called with identical data, we should not reset the workers
     // because that will cause multiple searches of the same nonce space.
-    if (Buf_OBJCMP(&ctx->hah, &hah) || !ctx->workers[0].activeJob) {
+    if (Buf_OBJCMP(&ctx->hah, &hah)) {
         Buf_OBJCPY(&ctx->hah, &hah);
-        makeNextJob(&hah, &ctx->jobs[0], hah.annHdr.hardNonce);
-        ctx->jobs[0].content = content;
         for (int i = 0; i < ctx->numWorkers; i++) {
-            ctx->workers[i].activeJob = &ctx->jobs[0];
+            // Trigger the workers to rebuild the work immediately
+            ctx->workers[i].softNonceMax = 0;
         }
     }
 
@@ -387,13 +361,8 @@ AnnMiner_t* AnnMiner_create(
     ctx->sendPtr = sendPtr;
     ctx->minerId = minerId;
 
-    int softNonceStep = 0x00ffffff / threads;
     for (int i = 0; i < threads; i++) {
-        ctx->workers[i].softNonceMin = softNonceStep * i;
-        ctx->workers[i].softNonce = softNonceStep * i;
-        ctx->workers[i].softNonceMax = softNonceStep * (i + 1);
-        // this job is not active yet but we need to feed the threads a lock to start them up
-        ctx->workers[i].activeJob = &ctx->jobs[0];
+        ctx->workers[i].workerNum = i;
         assert(!pthread_create(&ctx->workers[i].thread, NULL, thread, &ctx->workers[i]));
     }
     return ctx;

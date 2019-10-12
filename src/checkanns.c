@@ -13,6 +13,7 @@
 #include "WorkQueue.h"
 #include "FileUtil.h"
 #include "ContentMerkle.h"
+#include "Util.h"
 
 #include "sodium/core.h"
 #include "sodium/randombytes.h"
@@ -135,6 +136,7 @@ typedef struct Result_s {
     uint32_t internalError;
     uint32_t unsignedCount;
     uint32_t totalContentLength;
+    uint32_t highNonce;
     uint8_t payTo[64];
 } Result_t;
 
@@ -198,6 +200,7 @@ static void mkDedupes(AnnEntry_t* dedupsOut, const PacketCrypt_Announce_t* annsI
 static int validateAnns(LocalWorker_t* lw, int annCount, Result_t* res) {
     int goodCount = 0;
     int modulo = (lw->inBuf.hashMod > 0) ? lw->inBuf.hashMod : 1;
+    uint32_t softNonceMax = Util_annSoftNonceMax(lw->inBuf.minWork);
     for (int i = 0; i < annCount; i++) {
         bool isUnsigned = Buf_IS_ZERO(lw->inBuf.anns[i].hdr.signingKey);
         if (!isUnsigned && Buf_OBJCMP(&lw->inBuf.signingKey, &lw->inBuf.anns[i].hdr.signingKey)) {
@@ -213,6 +216,11 @@ static int validateAnns(LocalWorker_t* lw, int annCount, Result_t* res) {
         } else if (Validate_checkAnn(NULL, &lw->inBuf.anns[i], lw->inBuf.parentBlockHash.bytes, &lw->vctx)) {
             // doesn't check out
         } else {
+            uint32_t sn = 0;
+            memcpy(&sn, &lw->inBuf.anns[i].hdr, 4);
+            sn &= 0x00ffffff;
+            res->highNonce += (sn > softNonceMax);
+
             goodCount++;
             res->unsignedCount += isUnsigned;
             res->totalContentLength += lw->inBuf.anns[i].hdr.contentLength;
@@ -541,10 +549,10 @@ static void processAnns(Worker_t* w, int fileNo) {
     snprintf(buf, 2048, "{\"type\":\"anns\",\"accepted\":%u,\"dup\":%u,"
         "\"inval\":%u,\"badHash\":%u,\"runt\":%u,\"internalErr\":%u,"
         "\"payTo\":\"%s\",\"unsigned\":%u,\"totalLen\":%u,"
-        "\"time\":%llu,\"eventId\":\"%s\",\"target\":%u}\n",
+        "\"time\":%llu,\"eventId\":\"%s\",\"target\":%u,\"highNonce\":%u}\n",
         res.accepted, res.duplicates, res.invalid, res.badContentHash, res.runt,
         res.internalError, res.payTo, res.unsignedCount, res.totalContentLength,
-        timeMs, eventId, w->lw.inBuf.minWork);
+        timeMs, eventId, w->lw.inBuf.minWork, res.highNonce);
     checkedWrite(w->lw.tmpFile.path, outFileNo, buf, strlen(buf)-1);
     checkedWrite("paylog file", w->g->paylogFileNo, buf, strlen(buf));
     close(outFileNo);

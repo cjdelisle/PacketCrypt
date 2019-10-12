@@ -26,12 +26,17 @@ static inline int Util_log2ceil(uint64_t x) {
 
 static inline uint64_t Util_reverse64(uint64_t x)
 {
-    #define RM(in, mask, rb) ((((in) >> (rb)) & (mask)) | (((in) & (mask)) << (rb)))
-    x = RM(x, 0x5555555555555555ull, 1);
-    x = RM(x, 0x3333333333333333ull, 2);
-    x = RM(x, 0x0F0F0F0F0F0F0F0Full, 4);
+    #define Util_RM(in, mask, rb) ((((in) >> (rb)) & (mask)) | (((in) & (mask)) << (rb)))
+    x = Util_RM(x, 0x5555555555555555ull, 1);
+    x = Util_RM(x, 0x3333333333333333ull, 2);
+    x = Util_RM(x, 0x0F0F0F0F0F0F0F0Full, 4);
     return __builtin_bswap64(x);
-    #undef RM
+    #undef Util_RM
+}
+
+static inline uint32_t Util_annSoftNonceMax(uint32_t target) {
+    int bits = (22 - Util_log2floor(target & 0x007fffff)) + ((0x20 - (target >> 24)) * 8) + 10;
+    return (bits >= 24) ? 0x00ffffff : (0x00ffffff >> (24 - bits));
 }
 
 #if defined(__GNUC__) && __GNUC__ >= 7
