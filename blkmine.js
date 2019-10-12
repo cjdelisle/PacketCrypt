@@ -665,6 +665,7 @@ const mkMiner = (ctx) => {
     });
     miner.on('close', (num, sig) => {
         console.error("pcblk died [" + num + "] [" + sig + "], restarting in 1 second");
+        ctx.miner = undefined;
         setTimeout(() => {
             ctx.lock.take((returnAfter) => {
                 //console.error("Enter pkblk died");
