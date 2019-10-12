@@ -147,20 +147,20 @@ const onShare = (ctx, elem /*:ShareEvent_t*/, warn) => {
             // we can't credit this share because we don't know the diff at that time
             elem.credit = null;
         } else {
-            elem.credit = 1 / diff;
+            elem.credit = Util.getWorkMultiple(elem.target) / diff;
         }
         ctx.dedupTable[elem.eventId] = true;
         ctx.shares.insert(elem);
     }
 };
 
-const getEffectivePayableAnnCount = (elem /*:AnnsEvent_t*/) => {
+const getPayableAnnWork = (elem /*:AnnsEvent_t*/) => {
     let payableAnnCount = Math.max(0, elem.accepted - elem.unsigned);
     if (elem.totalLen) {
         // for every 16KB of data, we deduct 1 announcement worth of payment
         payableAnnCount = Math.max(0, payableAnnCount - (elem.totalLen >> 14));
     }
-    return payableAnnCount;
+    return Util.getWorkMultiple(elem.target) * payableAnnCount;
 };
 
 const onAnns = (ctx, elem /*:AnnsEvent_t*/, warn) => {
@@ -178,7 +178,7 @@ const onAnns = (ctx, elem /*:AnnsEvent_t*/, warn) => {
             // we can't credit these anns because we don't know the diff at that time
             elem.credit = null;
         } else {
-            elem.credit = getEffectivePayableAnnCount(elem) / diff;
+            elem.credit = getPayableAnnWork(elem) / diff;
         }
         ctx.dedupTable[elem.eventId] = true;
         ctx.anns.insert(elem);
@@ -227,8 +227,14 @@ const handleEvents = (ctx, fileName, dataStr) => {
             // too old or is a duplicate, we will be quiet
             continue;
         } else if (elem.type === 'share') {
+            if (!elem.target) {
+                elem.target = 0x20000fff;
+            }
             onShare(ctx, elem, warn);
         } else if (elem.type === 'anns') {
+            if (!elem.target) {
+                elem.target = 0x20000fff;
+            }
             onAnns(ctx, elem, warn);
         } else if (elem.type === 'block') {
             onBlock(ctx, elem, warn);
@@ -381,7 +387,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         earliestBlockPayout = s.time;
         let toPay = s.credit / ctx.mut.cfg.pplnsBlkConstantX;
         if (toPay >= remaining) { toPay = remaining; }
-        payoutShares[s.payTo] = (payoutShares[s.payTo] || 0) + 1;
+        payoutShares[s.payTo] = (payoutShares[s.payTo] || 0) + s.credit;
         payouts[s.payTo] = (payouts[s.payTo] || 0) + toPay;
         remaining -= toPay;
         if (remaining === 0) { return false; }
@@ -404,7 +410,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         earliestAnnPayout = a.time;
         let toPay = a.credit / ctx.mut.cfg.pplnsAnnConstantX;
         if (toPay >= remaining) { toPay = remaining; }
-        payoutAnns[a.payTo] = (payoutAnns[a.payTo] || 0) + getEffectivePayableAnnCount(a);
+        payoutAnns[a.payTo] = (payoutAnns[a.payTo] || 0) + a.credit;
         payouts[a.payTo] = (payouts[a.payTo] || 0) + toPay;
         remaining -= toPay;
         if (remaining === 0) { return false; }

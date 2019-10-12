@@ -52,13 +52,15 @@ export type Protocol_AnnsEvent_t = Protocol_Event_t & {
     internalErr: number,
     payTo: string,
     unsigned: number,
-    totalLen: number
+    totalLen: number,
+    target: number
 };
 export type Protocol_ShareEvent_t = Protocol_Event_t & {
     type: "share",
     block: bool,
     headerHash?: string,
     payTo: string,
+    target: number
 };
 export type Protocol_BlockEvent_t = Protocol_Event_t & {
     type: "block",

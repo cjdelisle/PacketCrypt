@@ -354,6 +354,10 @@ const compactToDbl = (c) => {
 const TWO_TO_THE_256 = 1.157920892373162e+77;
 const workForTar = (target) => ( TWO_TO_THE_256 / (target + 1) );
 
+const getWorkMultiple = module.exports.getWorkMultiple = (target /*:number*/) => {
+    return workForTar(compactToDbl(target)) / 4096;
+};
+
 const isWorkUselessExponential = module.exports.isWorkUselessExponential = (target /*:number*/, age /*:number*/) => {
     if (age < 3) { return false; }
     age -= 3;
