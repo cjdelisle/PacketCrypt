@@ -258,6 +258,8 @@ const onSubmit = (ctx, req, res) => {
         }));
     }).nThen((w) => {
         if (failed) { return; }
+        if (!currentWork) { return; }
+        const shareTarget = currentWork.shareTarget;
         if (submitRet === 'RESUBMIT_AS_BLOCK') {
             if (!blockTemplate) { throw new Error(); }
 
@@ -289,7 +291,8 @@ const onSubmit = (ctx, req, res) => {
                             block: true,
                             time: +new Date(),
                             eventId: shareId.toString('hex'),
-                            headerHash: headerHash
+                            headerHash: headerHash,
+                            target: shareTarget
                         },
                         error: [],
                         warn: warn
@@ -311,7 +314,8 @@ const onSubmit = (ctx, req, res) => {
                     payTo: payTo,
                     block: false,
                     time: +new Date(),
-                    eventId: shareId.toString('hex')
+                    eventId: shareId.toString('hex'),
+                    target: shareTarget
                 },
                 error: [],
                 warn: warn
