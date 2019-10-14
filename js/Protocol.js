@@ -79,6 +79,7 @@ module.exports.PC_END_TYPE = 0;
 module.exports.PC_PCP_TYPE = 1;
 module.exports.PC_SIGNATURES_TYPE = 2;
 module.exports.PC_CONTENTPROOFS_TYPE = 3;
+module.exports.PC_PCP2_TYPE = 4;
 
 module.exports.ANN_PARENT_HEIGHT_OFFSET = 12;
 module.exports.ANN_CONTENT_LENGTH_OFFSET = 20;

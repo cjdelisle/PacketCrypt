@@ -132,7 +132,7 @@ const onSubmit = (ctx, req, res) => {
         }
 
         const proofMarker = Util.parseVarInt(headerAndProof.slice(80));
-        if (proofMarker[0] !== Protocol.PC_PCP_TYPE) {
+        if (proofMarker[0] !== Protocol.PC_PCP_TYPE && proofMarker[0] !== Protocol.PC_PCP2_TYPE) {
             return void errorEnd(400, "First element after header must be Pcp");
         }
         const proofLen = Util.parseVarInt(headerAndProof.slice(81));
