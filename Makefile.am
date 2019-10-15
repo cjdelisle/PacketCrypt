@@ -3,12 +3,6 @@
 #
 # SPDX-License-Identifier: (LGPL-2.1-only OR LGPL-3.0-only)
 
-# what flags you want to pass to the C compiler & linker
-CFLAGS = \
-    -std=c11 \
-    -g \
-    -O3 -march=native -Werror
-
 WARNFLAGS = -Wall -Wextra --pedantic
 
 # clang should not panic when GCC options are passed

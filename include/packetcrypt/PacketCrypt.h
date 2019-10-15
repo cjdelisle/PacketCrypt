@@ -157,6 +157,10 @@ typedef struct {
 } PacketCrypt_AnnounceHdr_t;
 _Static_assert(sizeof(PacketCrypt_AnnounceHdr_t) == 88, "");
 
+static inline uint32_t PacketCrypt_AnnounceHdr_softNonce(const PacketCrypt_AnnounceHdr_t* hdr) {
+    return (hdr->softNonce[2] << 16) | (hdr->softNonce[1] << 8) | hdr->softNonce[0];
+}
+
 typedef struct {
     PacketCrypt_AnnounceHdr_t hdr;
     uint64_t proof[117];

@@ -6,6 +6,7 @@
  */
 #include "Difficulty.h"
 #include "Conf.h"
+#include "config.h"
 
 #include <assert.h>
 #include <stdbool.h>
@@ -142,6 +143,11 @@ static inline void getEffectiveWork(
 
     assign(workOut, blockWork);
 
+#ifdef PCP2
+    // difficulty *= 1024
+    assert(BN_lshift(workOut, workOut, 10));
+#endif
+
     // workOut = workOut**3
     assert(BN_sqr(workOut, workOut, ctx));
     assert(BN_mul(workOut, workOut, blockWork, ctx));
@@ -151,6 +157,10 @@ static inline void getEffectiveWork(
     BIGNUM* bnAnnCount = BN_new();
     assert(bnAnnCount);
     setuint64(bnAnnCount, annCount);
+
+#ifdef PCP2
+    assert(BN_sqr(bnAnnCount, bnAnnCount, ctx));
+#endif
 
     // workOut /= annCount
     assert(BN_div(workOut, NULL, workOut, bnAnnCount, ctx));
@@ -199,13 +209,47 @@ uint64_t Difficulty_getHashRateMultiplier(uint32_t annTar, uint64_t annCount)
     bnWorkForDiff(ctx, bnAnnWork, x);
 
     setuint64(bnAnnCount, annCount);
+#ifdef PCP2
+    assert(BN_sqr(bnAnnCount, bnAnnCount, ctx));
+#endif
     assert(BN_mul(x, bnAnnWork, bnAnnCount, ctx));
 
-    return BN_get_word(x);
+#ifdef PCP2
+    // Difficulty jumps by 1024
+    assert(BN_rshift(x, x, 10));
+#endif
+
+    uint64_t out = BN_get_word(x);
+
+    BN_free(bnAnnCount);
+    BN_free(bnAnnWork);
+    BN_free(x);
+    BN_CTX_free(ctx);
+
+    return out;
+}
+
+static inline uint32_t degradeAnnouncementTarget2(uint32_t annTar, uint32_t annAgeBlocks)
+{
+    if (annAgeBlocks < Conf_PacketCrypt_ANN_WAIT_PERIOD) { return 0xffffffff; }
+    if (annAgeBlocks == Conf_PacketCrypt_ANN_WAIT_PERIOD) { return annTar; }
+    annAgeBlocks -= Conf_PacketCrypt_ANN_WAIT_PERIOD;
+    BIGNUM* bnAnnTar = BN_new(); assert(bnAnnTar);
+    bnSetCompact(bnAnnTar, annTar);
+    assert(BN_lshift(bnAnnTar, bnAnnTar, annAgeBlocks));
+    uint32_t out = 0xffffffff;
+    if (BN_num_bits(bnAnnTar) < 256) {
+        out = bnGetCompact(bnAnnTar);
+    }
+    BN_free(bnAnnTar);
+    return out > 0x207ffff ? 0xffffffff : out;
 }
 
 uint32_t Difficulty_degradeAnnouncementTarget(uint32_t annTar, uint32_t annAgeBlocks)
 {
+#ifdef PCP2
+    return degradeAnnouncementTarget2(annTar, annAgeBlocks);
+#endif
     if (annAgeBlocks < Conf_PacketCrypt_ANN_WAIT_PERIOD) { return 0xffffffff; }
     annAgeBlocks -= (Conf_PacketCrypt_ANN_WAIT_PERIOD - 1);
     BN_CTX* ctx = BN_CTX_new(); assert(ctx);
@@ -236,11 +280,17 @@ bool Difficulty_isMinAnnDiffOk(uint32_t target)
     if (target == 0 || target > 0x20ffffff) {
         return false;
     }
+#ifdef PCP2
+    if (target > 0x207fffff) { return false; }
+#endif
     BN_CTX* ctx = BN_CTX_new(); assert(ctx);
     BIGNUM* bnTar = BN_new(); assert(bnTar);
     BIGNUM* bnWork = BN_new(); assert(bnWork);
     BIGNUM* bnMax = BN_new(); assert(bnMax);
     bnSetCompact(bnTar, target);
+#ifdef PCP2
+    if (BN_is_zero(bnTar) || BN_is_negative(bnTar)) { return false; }
+#endif
     bnWorkForDiff(ctx, bnWork, bnTar);
     if (BN_is_zero(bnWork)) { return false; }
     bn256(bnMax);

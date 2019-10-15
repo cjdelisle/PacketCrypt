@@ -22,7 +22,7 @@ const MAX_REQUESTS_IN_FLIGHT = 16;
 /*::
 import type { PoolClient_t } from './js/PoolClient.js'
 import type { Protocol_Work_t, Protocol_AnnResult_t } from './js/Protocol.js'
-import type { Config_Miner_t, Config_Miner_Content_t } from './js/Config.js'
+import type { Config_AnnMiner_t, Config_Miner_Content_t } from './js/Config.js'
 import type { Util_Mutex_t } from './js/Util.js'
 import type { ChildProcess } from 'child_process'
 import type { ClientRequest, IncomingMessage } from 'http'
@@ -33,7 +33,7 @@ type Context_t = {
     inMutex: Util_Mutex_t,
     uploads: Array<{ url: string, req: ClientRequest, reqNum: number }>,
     submitAnnUrls: Array<string>,
-    config: Config_Miner_t,
+    config: Config_AnnMiner_t,
     reqNum: number,
     requestsInFlight: number,
 };
@@ -218,7 +218,7 @@ const mkMiner = (config, submitAnnUrls) => {
     });
 };
 
-const launch = (config /*:Config_Miner_t*/) => {
+const launch = (config /*:Config_AnnMiner_t*/) => {
     if (!Util.isValidPayTo(config.paymentAddr)) {
         console.error('Payment address [' + config.paymentAddr +
             '] is not a valid pkt address');
@@ -332,8 +332,7 @@ const main = (argv) => {
         threads: a.threads || defaultConf.threads,
         minerId: a.minerId || defaultConf.minerId,
         content: undefined,
-        randContent: a.randContent || false,
-        slowStart: false
+        randContent: a.randContent || false
     };
     if (!a.paymentAddr) {
         console.error("WARNING: You have not passed the --paymentAddr flag\n" +

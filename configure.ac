@@ -86,5 +86,13 @@ AC_ARG_ENABLE([difftest],
 )
 AM_CONDITIONAL([ENABLE_DIFFTEST], [test x$enable_difftest = xyes])
 
+AC_ARG_ENABLE([pcp2],
+    AS_HELP_STRING([--enable-pcp2], [Build PacketCrypt version 2]),
+    [ enable_pcp2=yes ]
+)
+AS_IF([test "x$enable_pcp2" = xyes], [
+    AC_DEFINE([PCP2], [1], [PacketCrypt version 2])
+])
+
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT

@@ -11,6 +11,7 @@
 #define BLOCKMINER_H
 
 #include "packetcrypt/PacketCrypt.h"
+#include "config.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -62,12 +63,16 @@ void BlockMiner_free(BlockMiner_t* bm);
  * You cannot add announcements while the miner is locked but you can once it begins mining.
  */
 #define BlockMiner_addAnns_LOCKED 1
+#ifdef PCP2
+int BlockMiner_addAnns(BlockMiner_t* bm, PacketCrypt_Announce_t* anns, uint64_t count);
+#else
 int BlockMiner_addAnns(
     BlockMiner_t* bm,
     PacketCrypt_Announce_t* anns,
     uint8_t** contents,
     uint64_t count,
     int noCopy);
+#endif
 
 /**
  * Prepare the miner for mining a block, this call outputs a coinbase commitment to your location

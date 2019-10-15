@@ -40,4 +40,6 @@ union Announce_Union {
 
 void Announce_mkitem(uint64_t num, CryptoCycle_Item_t* item, uint8_t seed[static 32]);
 
+bool Announce_hasHighBits(const PacketCrypt_AnnounceHdr_t* annHdr);
+
 #endif

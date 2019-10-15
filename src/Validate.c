@@ -15,6 +15,7 @@
 #include "Work.h"
 #include "Util.h"
 #include "ContentMerkle.h"
+#include "config.h"
 
 #include "sodium/crypto_sign_ed25519.h"
 
@@ -43,8 +44,13 @@ int Validate_checkAnn(
 
     CryptoCycle_Item_t item;
     CryptoCycle_State_t state;
-    uint32_t softNonce = 0;
-    Buf_OBJCPY_LSRC(&softNonce, ann->hdr.softNonce);
+    uint32_t softNonce = PacketCrypt_AnnounceHdr_softNonce(&ann->hdr);
+    uint32_t softNonceMax = Util_annSoftNonceMax(ann->hdr.workBits);
+    if (softNonce > softNonceMax) {
+#ifdef PCP2
+        return Validate_checkAnn_INVAL;
+#endif
+    }
     CryptoCycle_init(&state, &annHash1.thirtytwos[0], softNonce);
     int itemNo = -1;
     for (int i = 0; i < 4; i++) {
@@ -103,12 +109,17 @@ static int checkPcHash(uint64_t indexesOut[PacketCrypt_NUM_ANNS],
     Hash_COMPRESS32_OBJ(&hdrHash, &hap->blockHeader);
     CryptoCycle_init(&pcState, &hdrHash, hap->nonce2);
 
+#ifndef PCP2
     uint32_t proofIdx = hap->nonce2 ^ hdrHash.ints[0];
+#endif
 
     for (int j = 0; j < 4; j++) {
+        const uint8_t* contentProof = NULL;
+#ifndef PCP2
         Buf32_t contentProofBuf;
-        const uint8_t* contentProof = ContentMerkle_getProofBlock(
+        contentProof = ContentMerkle_getProofBlock(
             proofIdx, &contentProofBuf, contents[j], hap->announcements[j].hdr.contentLength);
+#endif
         // This gets modded over the total anns in PacketCryptProof_hashProof()
         indexesOut[j] = CryptoCycle_getItemNo(&pcState);
         CryptoCycle_Item_t* it = (CryptoCycle_Item_t*) &hap->announcements[j];
@@ -131,6 +142,18 @@ static int checkPcHash(uint64_t indexesOut[PacketCrypt_NUM_ANNS],
     return Validate_checkBlock_INSUF_POW;
 }
 
+#ifdef PCP2
+int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
+                        uint32_t hapLen,
+                        uint32_t blockHeight,
+                        uint32_t shareTarget,
+                        const PacketCrypt_Coinbase_t* coinbaseCommitment,
+                        const uint8_t blockHashes[static PacketCrypt_NUM_ANNS * 32],
+                        uint8_t workHashOut[static 32],
+                        PacketCrypt_ValidateCtx_t* vctx)
+{
+    const uint8_t** annContents = NULL;
+#else
 int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
                         uint32_t hapLen,
                         uint32_t blockHeight,
@@ -141,6 +164,7 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
                         uint8_t workHashOut[static 32],
                         PacketCrypt_ValidateCtx_t* vctx)
 {
+#endif
     if (hapLen < PacketCrypt_HeaderAndProof_SIZEOF(0)) {
         return Validate_checkBlock_PCP_INVAL;
     }

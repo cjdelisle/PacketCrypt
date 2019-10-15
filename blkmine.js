@@ -25,13 +25,13 @@ import type { ClientRequest, IncomingMessage } from 'http';
 import type { PoolClient_t } from './js/PoolClient.js';
 import type { Protocol_PcConfigJson_t } from './js/Protocol.js';
 import type { Util_Mutex_t } from './js/Util.js';
-import type { Config_Miner_t } from './js/Config.js'
+import type { Config_BlkMiner_t } from './js/Config.js'
 
 const _flow_typeof_saferphore = Saferphore.create(1);
 type Saferphore_t = typeof _flow_typeof_saferphore;
 
 type Context_t = {
-    config: Config_Miner_t,
+    config: Config_BlkMiner_t,
     miner: void|ChildProcess,
     pool: PoolClient_t,
     masterConf: Protocol_PcConfigJson_t,
@@ -67,12 +67,13 @@ type DownloadAnnError_t = Error | {statusCode:number} | {code:string,annPath:str
 
 const downloadAnnFile = (
     currentHeight /*:number*/,
-    wrkdir /*:string*/,
+    config /*:Config_BlkMiner_t*/,
     serverUrl /*:string*/,
     serverId /*:string*/,
     fileNo /*:number*/,
     cb /*:(?DownloadAnnError_t, ?DownloadAnnResult_t)=>true|void*/
 ) => {
+    const wrkdir = config.dir;
     const again = () => {
         const url = serverUrl + '/anns/anns_' + fileNo + '.bin';
         const fileSuffix = '_' + serverId + '_' + fileNo + '.bin';
@@ -107,6 +108,7 @@ const downloadAnnFile = (
             }
         }).nThen((w) => {
             if (!annBin) { return; }
+            if (config.version >= 2) { return; }
             let nt = nThen;
             const eachAnn = (i) => {
                 if (!annBin) { throw new Error(); } // shouldn't happen
@@ -215,7 +217,7 @@ const getAnnFileNum = (
     });
 };
 
-const deleteWorkAndShares = (config /*:Config_Miner_t*/, _cb) => {
+const deleteWorkAndShares = (config /*:Config_BlkMiner_t*/, _cb) => {
     const cb = Util.once(_cb);
     let files;
     nThen((w) => {
@@ -371,7 +373,8 @@ const mkMerkleProof = (() => {
 // format expected by BlkHandler
 const convertShare = (
     buf /*:Buffer*/,
-    annContents /*:Array<Buffer>*/
+    annContents /*:Array<Buffer>*/,
+    version /*:number*/
 ) /*:Share_t*/ => {
     const coinbase = buf.slice(0, Protocol.COINBASE_COMMIT_LEN).toString('hex');
     buf = buf.slice(Protocol.COINBASE_COMMIT_LEN);
@@ -386,7 +389,7 @@ const convertShare = (
 
     const submission = [
         header,
-        Util.mkVarInt(Protocol.PC_PCP_TYPE),
+        Util.mkVarInt((version === 1) ? Protocol.PC_PCP_TYPE : Protocol.PC_PCP2_TYPE),
         Util.mkVarInt(proof.length),
         proof,
     ];
@@ -505,6 +508,7 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
             const annContents = [];
             let failed = false;
             nThen((w) => {
+                if (ctx.config.version !== 1) { return; }
                 [0,1,2,3].forEach((num) => {
                     const ann = getAnn(share, num);
                     const length = ann.readUInt32LE(Protocol.ANN_CONTENT_LENGTH_OFFSET);
@@ -522,7 +526,7 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
                 });
             }).nThen((w) => {
                 if (failed) { return; }
-                const shr = convertShare(share, annContents);
+                const shr = convertShare(share, annContents, ctx.config.version);
                 const handlerNum = shr.contentProofIdx % ctx.masterConf.submitBlockUrls.length;
                 const url = ctx.masterConf.submitBlockUrls[handlerNum];
                 console.error("Uploading share [" + filePath + "] [" + i + "] to [" + url + "]");
@@ -655,10 +659,10 @@ const mkMiner = (ctx) => {
     if (ctx.config.slowStart) {
         args.push('--slowStart');
     }
-    args.push(
-        ctx.config.dir + '/wrkdir',
-        ctx.config.dir + '/contentdir'
-    );
+    args.push(ctx.config.dir + '/wrkdir');
+    if (ctx.config.version === 1) {
+        args.push(ctx.config.dir + '/contentdir');
+    }
     console.error(ctx.config.corePath + ' ' + args.join(' '));
     const miner = Spawn(ctx.config.corePath, args, {
         stdio: [ 'pipe', 1, 2 ]
@@ -720,7 +724,7 @@ const downloadOldAnns = (config, currentHeight, masterConf, done) => {
         if (i > serverCurrentNum.length) { i = 0; }
         if (!serverCurrentNum[i]) { return void again(i + 1); }
         const as = serverCurrentNum[i];
-        downloadAnnFile(currentHeight, config.dir, as.server, String(i), as.currentAnnNum, (err, res) => {
+        downloadAnnFile(currentHeight, config, as.server, String(i), as.currentAnnNum, (err, res) => {
             if (res) {
                 return void Fs.stat(res.annPath, (err, st) => {
                     if (err) { throw err; }
@@ -769,7 +773,7 @@ const pollAnnHandlers = (ctx) => {
         }, 60000);
         if (!ctx.work) { return; }
         const currentHeight = ctx.work.height;
-        downloadAnnFile(currentHeight, ctx.config.dir, server, String(i), num, (err, res) => {
+        downloadAnnFile(currentHeight, ctx.config, server, String(i), num, (err, res) => {
             if (completed) { return; }
             if (res) {
                 completed = true;
@@ -793,7 +797,7 @@ const pollAnnHandlers = (ctx) => {
     });
 };
 
-const launch = (config /*:Config_Miner_t*/) => {
+const launch = (config /*:Config_BlkMiner_t*/) => {
     if (!Util.isValidPayTo(config.paymentAddr)) {
         console.error('Payment address [' + config.paymentAddr +
             '] is not a valid pkt address');
@@ -805,7 +809,9 @@ const launch = (config /*:Config_Miner_t*/) => {
         pool.getMasterConf(w((conf) => { masterConf = conf; }));
         Util.checkMkdir(config.dir + '/wrkdir', w());
         Util.checkMkdir(config.dir + '/anndir', w());
-        Util.checkMkdir(config.dir + '/contentdir', w());
+        if (config.version === 1) {
+            Util.checkMkdir(config.dir + '/contentdir', w());
+        }
         Util.clearDir(config.dir + '/wrkdir', w());
     }).nThen((w) => {
         mkLinks(config, w());
@@ -852,6 +858,35 @@ const launch = (config /*:Config_Miner_t*/) => {
     });
 };
 
+const MAGIC1 = "See: https://github.com/cjdelisle/PacketCrypt/blob/master/docs/pcblk.md";
+const MAGIC2 = "PacketCrypt Block Miner: Protocol Version ";
+const getMinerVersion = (cfg, cb) => {
+    const miner = Spawn(cfg.corePath, []);
+    let data = '';
+    miner.stderr.on('data', (d) => { data += d; });
+    miner.on('close', () => {
+        if (data.indexOf(MAGIC2) === -1) {
+            if (data.indexOf(MAGIC1) === -1) {
+                console.error("pcblk not present or not working, if you are running the miner");
+                console.error("from outside of the PacketCryp directory, make sure you pass --corePath");
+                process.exit(100);
+            } else {
+                console.error("pcblk is out of date, you may need to recompile");
+                process.exit(100);
+            }
+        } else if (data.indexOf(MAGIC2 + '2\n') > -1) {
+            console.error("PacketCrypt Block Miner: Protocol Version 2");
+            cb(2);
+        } else if (data.indexOf(MAGIC2 + '1\n') > -1) {
+            console.error("PacketCrypt Block Miner: Protocol Version 1");
+            cb(1);
+        } else {
+            console.error("pcblk unknown protocol version");
+            process.exit(100);
+        }
+    });
+};
+
 const usage = () => {
     console.log("Usage: node blkmine.js OPTIONS <poolurl>\n" +
         "    OPTIONS:\n" +
@@ -888,7 +923,8 @@ const main = (argv) => {
         maxAnns: DEFAULT_MAX_ANNS,
         threads: 1,
         minerId: Math.floor(Math.random()*(1<<30)*2),
-        slowStart: false
+        slowStart: false,
+        version: 1
     };
     const a = Minimist(argv.slice(2), { boolean: [ 'slowStart' ] });
     if (!/http(s)?:\/\/.*/.test(a._[0])) { process.exit(usage()); }
@@ -901,15 +937,16 @@ const main = (argv) => {
         threads: a.threads || defaultConf.threads,
         minerId: a.minerId || defaultConf.minerId,
         slowStart: a.slowStart === true || defaultConf.slowStart,
-
-        // unused, just to please flow
-        randContent: false,
+        version: defaultConf.version
     };
     if (!a.paymentAddr) {
         console.error("WARNING: You have not passed the --paymentAddr flag\n" +
             "    as a default, " + DEFAULT_PAYMENT_ADDR + " will be used,\n" +
             "    cjd appreciates your generosity");
     }
-    launch(Object.freeze(conf));
+    getMinerVersion(conf, (version) => {
+        conf.version = version;
+        launch(Object.freeze(conf));
+    });
 };
 main(process.argv);

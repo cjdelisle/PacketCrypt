@@ -34,11 +34,15 @@ export type Config_Miner_t = {
     dir: string,
     poolUrl: string,
     threads: number,
-    maxAnns?: number,
     minerId: number,
+};
+export type Config_BlkMiner_t = Config_Miner_t & {
+    version: number,
     slowStart: bool,
-
+    maxAnns: number
+};
+export type Config_AnnMiner_t = Config_Miner_t & {
     content?: Config_Miner_Content_t,
     randContent: bool
-};
+}
 */

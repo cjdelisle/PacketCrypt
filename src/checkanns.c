@@ -14,6 +14,7 @@
 #include "FileUtil.h"
 #include "ContentMerkle.h"
 #include "Util.h"
+#include "config.h"
 
 #include "sodium/core.h"
 #include "sodium/randombytes.h"
@@ -216,11 +217,13 @@ static int validateAnns(LocalWorker_t* lw, int annCount, Result_t* res) {
         } else if (Validate_checkAnn(NULL, &lw->inBuf.anns[i], lw->inBuf.parentBlockHash.bytes, &lw->vctx)) {
             // doesn't check out
         } else {
-            uint32_t sn = 0;
-            memcpy(&sn, &lw->inBuf.anns[i].hdr, 4);
-            sn &= 0x00ffffff;
-            res->highNonce += (sn > softNonceMax);
-
+            if (PacketCrypt_AnnounceHdr_softNonce(&lw->inBuf.anns[i].hdr) > softNonceMax) {
+                res->highNonce++;
+                #ifdef PCP2
+                    lw->dedupsIn[i].start = 0;
+                    continue;
+                #endif
+            }
             goodCount++;
             res->unsignedCount += isUnsigned;
             res->totalContentLength += lw->inBuf.anns[i].hdr.contentLength;

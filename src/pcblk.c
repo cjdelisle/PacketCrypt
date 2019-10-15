@@ -13,6 +13,7 @@
 #include "FileUtil.h"
 #include "Conf.h"
 #include "Difficulty.h"
+#include "config.h"
 
 #include "sodium/crypto_hash_sha256.h"
 #include "sodium/core.h"
@@ -31,8 +32,21 @@
 
 #define DEBUGF(...) fprintf(stderr, "pcblk: " __VA_ARGS__)
 
+static const int PROTOCOL_VERSION = (
+    #ifdef PCP2
+        2
+    #else
+        1
+    #endif
+);
+
 static int usage() {
-    fprintf(stderr, "Usage: ./pcblk OPTIONS <wrkdir> <contentdir>\n"
+    fprintf(stderr, "Usage: ./pcblk OPTIONS <wrkdir>"
+#ifndef PCP2
+    " <contentdir>"
+#endif
+        "\n"
+        "PacketCrypt Block Miner: Protocol Version %d\n"
         "    OPTIONS:\n"
         "        --maxanns <n> # Maximum number of announcements to use when mining\n"
         "        --threads <n> # number of threads to use, default is 1\n"
@@ -41,10 +55,12 @@ static int usage() {
         "                      # from mining duplicate shares, default is 0\n"
         "        --slowStart   # sleep for 10 seconds when starting up (time to attach gdb)\n"
         "    <wrkdir>          # a dir containing announcements grouped by parent block\n"
+#ifndef PCP2
         "    <contentdir>      # a dir containing any announcement content which is needed\n"
+#endif
         "\n"
         "    See: https://github.com/cjdelisle/PacketCrypt/blob/master/docs/pcblk.md\n"
-        "    for more information\n");
+        "    for more information\n", PROTOCOL_VERSION);
     return 100;
 }
 
@@ -58,7 +74,9 @@ typedef struct Context_s {
     int64_t maxAnns;
 
     FilePath_t filepath;
+#ifndef PCP2
     FilePath_t contentpath;
+#endif
     BlockMiner_t* bm;
 
     PoolProto_Work_t* currentWork;
@@ -110,6 +128,7 @@ static int loadFile(Context_t* ctx, const char* fileName) {
 
     close(fileno);
 
+#ifndef PCP2
     size_t numContents = 0;
     for (size_t i = 0; i < numAnns; i++) {
         numContents += (anns[i].hdr.contentLength > 32);
@@ -158,7 +177,7 @@ static int loadFile(Context_t* ctx, const char* fileName) {
         free(anns);
         return 0;
     }
-
+#endif
     if (unlink(ctx->filepath.path)) {
         // make sure we can delete it before we add the announcements,
         // better to lose the announcements than to fill the miner to the moon with garbage.
@@ -167,6 +186,7 @@ static int loadFile(Context_t* ctx, const char* fileName) {
         return 0;
     }
 
+#ifndef PCP2
     if (missingContent) {
         free(anns);
         return 0;
@@ -175,6 +195,9 @@ static int loadFile(Context_t* ctx, const char* fileName) {
     // DEBUGF("Loading [%llu] announcements from [%s]\n",
     //     (unsigned long long)numAnns, ctx->filepath.path);
     int ret = BlockMiner_addAnns(ctx->bm, anns, contents, numAnns, true);
+#else
+    int ret = BlockMiner_addAnns(ctx->bm, anns, numAnns);
+#endif
     if (ret) {
         if (ret == BlockMiner_addAnns_LOCKED) {
             DEBUGF("Could not add announcements, miner is locked\n");
@@ -326,7 +349,9 @@ int main(int argc, char** argv) {
     int64_t minerId = 0;
     bool slowStart = false;
     const char* wrkdirName = NULL;
+#ifndef PCP2
     const char* contentdirName = NULL;
+#endif
     for (int i = 1; i < argc; i++) {
         if (maxAnns < 0) {
             maxAnns = strtoll(argv[i], NULL, 10);
@@ -356,15 +381,21 @@ int main(int argc, char** argv) {
             slowStart = true;
         } else if (!wrkdirName) {
             wrkdirName = argv[i];
+#ifndef PCP2
         } else if (!contentdirName) {
             contentdirName = argv[i];
+#endif
         } else {
             DEBUGF("I do not understand the argument %s\n", argv[i]);
             return usage();
         }
     }
 
-    if (!wrkdirName || !contentdirName || maxAnns < 1 || threads < 1) { return usage(); }
+    if (!wrkdirName || maxAnns < 1 || threads < 1) { return usage(); }
+
+#ifndef PCP2
+    if (!contentdirName) { return usage(); }
+#endif
 
     if (slowStart) {
         for (int i = 0; i < 10; i++) {
@@ -396,7 +427,9 @@ int main(int argc, char** argv) {
 
     // for the specific numbered directories inside of the input dir
     FilePath_create(&ctx->filepath, wrkdirName);
+#ifndef PCP2
     FilePath_create(&ctx->contentpath, contentdirName);
+#endif
 
     snprintf(ctx->filepath.name, FilePath_NAME_SZ, "shares_0.bin");
     int outfile = open(ctx->filepath.path, O_WRONLY | O_CREAT | O_EXCL, 0666);

@@ -16,6 +16,7 @@
 #include "Util.h"
 #include "Conf.h"
 #include "ContentMerkle.h"
+#include "config.h"
 
 #include <stdlib.h>
 #include <assert.h>
@@ -45,7 +46,9 @@ typedef struct AnnounceEffectiveWork_s AnnounceEffectiveWork_t;
 typedef struct Ann_s {
     PacketCrypt_Announce_t ann;
     AnnounceEffectiveWork_t* aewPtr;
-    uint8_t* content;
+    #ifndef PCP2
+        uint8_t* content;
+    #endif
     uint64_t _treePosition;
 } Ann_t;
 
@@ -54,7 +57,9 @@ struct AnnounceEffectiveWork_s {
     uint32_t effectiveWork;
     uint32_t initialWork;
     uint32_t parentBlock;
-    char* _pad;
+    #ifndef PCP2
+        char* _pad;
+    #endif
 };
 
 typedef struct NextAnnounceEffectiveWork_s {
@@ -62,7 +67,9 @@ typedef struct NextAnnounceEffectiveWork_s {
     uint32_t effectiveWork;
     uint32_t initialWork;
     uint32_t parentBlock;
-    uint8_t* content;
+    #ifndef PCP2
+        uint8_t* content;
+    #endif
 } NextAnnounceEffectiveWork_t;
 
 // exists just in order to force same alignment
@@ -74,7 +81,9 @@ union AnnounceEffectiveWorkLike {
 typedef struct AnnounceList_s AnnounceList_t;
 struct AnnounceList_s {
     PacketCrypt_Announce_t* anns;
-    uint8_t** contents;
+    #ifndef PCP2
+        uint8_t** contents;
+    #endif
     uint64_t count;
     AnnounceList_t* next;
 };
@@ -235,15 +244,20 @@ static bool mine(Worker_t* w)
 
         for (int i = 0; i < HASHES_PER_CYCLE; i++) {
             CryptoCycle_init(&w->pcState, &hdrHash, ++lowNonce);
-            uint32_t proofIdx = hdrHash.ints[0] ^ lowNonce;
+            #ifndef PCP2
+                uint32_t proofIdx = hdrHash.ints[0] ^ lowNonce;
+            #endif
             MineResult_t res;
             for (int j = 0; j < 4; j++) {
                 uint64_t x = res.items[j] = CryptoCycle_getItemNo(&w->pcState) % w->bm->annCount;
                 CryptoCycle_Item_t* it = (CryptoCycle_Item_t*) &w->bm->anns[x].ann;
-                Buf32_t contentProofBuf;
-                const uint8_t* contentProof = ContentMerkle_getProofBlock(
-                    proofIdx, &contentProofBuf, w->bm->anns[x].content,
-                    w->bm->anns[x].ann.hdr.contentLength);
+                const uint8_t* contentProof = NULL;
+                #ifndef PCP2
+                    Buf32_t contentProofBuf;
+                    contentProof = ContentMerkle_getProofBlock(
+                        proofIdx, &contentProofBuf, w->bm->anns[x].content,
+                        w->bm->anns[x].ann.hdr.contentLength);
+                #endif
                 assert(CryptoCycle_update(&w->pcState, it, contentProof, 0, NULL));
             }
             CryptoCycle_smul(&w->pcState);
@@ -343,7 +357,9 @@ static void freeQueue(BlockMiner_t* ctx)
         //         free(l->contents[j++]);
         //     }
         // }
-        free(l->contents);
+        #ifndef PCP2
+            free(l->contents);
+        #endif
         free(l->anns);
         free(l);
         l = ll;
@@ -382,7 +398,9 @@ void BlockMiner_free(BlockMiner_t* ctx)
     waitState(ctx, ThreadState_SHUTDOWN);
 
     for (size_t i = 0; i < ctx->annCapacity; i++) {
-        free(ctx->anns[i].content);
+        #ifndef PCP2
+            free(ctx->anns[i].content);
+        #endif
     }
 
     free(ctx->anns);
@@ -430,22 +448,36 @@ static void updateAew(
 static void prepareAnns(BlockMiner_t* bm, AnnounceList_t* list, uint32_t nextBlockHeight) {
     bm->nextAew = realloc(bm->nextAew, (bm->nextAewLen + list->count) * sizeof(bm->nextAew[0]));
     assert(bm->nextAew);
-    for (size_t i = 0, j = bm->nextAewLen, k = 0; i < list->count; i++, j++) {
+    #ifndef PCP2
+        size_t k = 0;
+    #endif
+    for (size_t i = 0, j = bm->nextAewLen; i < list->count; i++, j++) {
         PacketCrypt_Announce_t* ann = &list->anns[i];
         NextAnnounceEffectiveWork_t* aew = &bm->nextAew[j];
         aew->initialWork = ann->hdr.workBits;
         aew->parentBlock = ann->hdr.parentBlockHeight;
         aew->ann = ann;
         aew->effectiveWork = 0xffffffff;
-        aew->content = NULL;
-        if (ann->hdr.contentLength > 32) {
-            aew->content = list->contents[k++];
-        }
+        #ifndef PCP2
+            aew->content = NULL;
+            if (ann->hdr.contentLength > 32) {
+                aew->content = list->contents[k++];
+            }
+        #endif
     }
     updateAew(&bm->nextAew[bm->nextAewLen], list->count, nextBlockHeight);
     bm->nextAewLen += list->count;
 }
 
+#ifdef PCP2
+int BlockMiner_addAnns(
+    BlockMiner_t* bm,
+    PacketCrypt_Announce_t* anns,
+    uint64_t count)
+{
+    int noCopy = true;
+    uint8_t** contents = NULL;
+#else
 int BlockMiner_addAnns(
     BlockMiner_t* bm,
     PacketCrypt_Announce_t* anns,
@@ -453,6 +485,7 @@ int BlockMiner_addAnns(
     uint64_t count,
     int noCopy)
 {
+#endif
     if (bm->state == State_LOCKED) { return BlockMiner_addAnns_LOCKED; }
     AnnounceList_t* l = calloc(sizeof(AnnounceList_t), 1);
     assert(l && anns);
@@ -483,7 +516,9 @@ int BlockMiner_addAnns(
         assert(annsCpy[i].hdr.workBits);
     }
     l->anns = annsCpy;
-    l->contents = contentsCpy;
+    #ifndef PCP2
+        l->contents = contentsCpy;
+    #endif
     l->count = count;
     l->next = bm->queue;
     bm->queue = l;
@@ -615,8 +650,10 @@ int BlockMiner_lockForMining(
         Buf_OBJCPY(&annTarget->ann, bm->nextAew[newAnnI].ann);
         Buf_OBJCPY(aewTarget, &bm->nextAew[newAnnI]);
 
-        free(annTarget->content);
-        annTarget->content = bm->nextAew[newAnnI].content;
+        #ifndef PCP2
+            free(annTarget->content);
+            annTarget->content = bm->nextAew[newAnnI].content;
+        #endif
 
         // assign pointers
         aewTarget->ann = annTarget;
