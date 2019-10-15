@@ -143,14 +143,15 @@ static inline void getEffectiveWork(
 
     assign(workOut, blockWork);
 
+    // workOut = workOut**3
+    assert(BN_sqr(workOut, workOut, ctx));
+    assert(BN_mul(workOut, workOut, blockWork, ctx));
+
 #ifdef PCP2
     // difficulty *= 1024
     assert(BN_lshift(workOut, workOut, 10));
 #endif
 
-    // workOut = workOut**3
-    assert(BN_sqr(workOut, workOut, ctx));
-    assert(BN_mul(workOut, workOut, blockWork, ctx));
     // workOut /= annWork
     assert(BN_div(workOut, NULL, workOut, annWork, ctx));
 
@@ -242,7 +243,7 @@ static inline uint32_t degradeAnnouncementTarget2(uint32_t annTar, uint32_t annA
         out = bnGetCompact(bnAnnTar);
     }
     BN_free(bnAnnTar);
-    return out > 0x207ffff ? 0xffffffff : out;
+    return out > 0x207fffff ? 0xffffffff : out;
 }
 
 uint32_t Difficulty_degradeAnnouncementTarget(uint32_t annTar, uint32_t annAgeBlocks)
