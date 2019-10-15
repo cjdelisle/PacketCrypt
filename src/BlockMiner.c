@@ -469,15 +469,6 @@ static void prepareAnns(BlockMiner_t* bm, AnnounceList_t* list, uint32_t nextBlo
     bm->nextAewLen += list->count;
 }
 
-#ifdef PCP2
-int BlockMiner_addAnns(
-    BlockMiner_t* bm,
-    PacketCrypt_Announce_t* anns,
-    uint64_t count)
-{
-    int noCopy = true;
-    uint8_t** contents = NULL;
-#else
 int BlockMiner_addAnns(
     BlockMiner_t* bm,
     PacketCrypt_Announce_t* anns,
@@ -485,6 +476,9 @@ int BlockMiner_addAnns(
     uint64_t count,
     int noCopy)
 {
+#ifdef PCP2
+    noCopy = true;
+    contents = NULL;
 #endif
     if (bm->state == State_LOCKED) { return BlockMiner_addAnns_LOCKED; }
     AnnounceList_t* l = calloc(sizeof(AnnounceList_t), 1);
@@ -514,6 +508,13 @@ int BlockMiner_addAnns(
     for (size_t i = 0; i < count; i++) {
         // sanity
         assert(annsCpy[i].hdr.workBits);
+#ifdef PCP2
+        uint32_t softNonce = PacketCrypt_AnnounceHdr_softNonce(&annsCpy[i].hdr);
+        if (softNonce > Util_annSoftNonceMax(annsCpy[i].hdr.workBits)) {
+            // Kill the announcement because its softNonce is too high
+            annsCpy[i].hdr.workBits = 0xffffffff;
+        }
+#endif
     }
     l->anns = annsCpy;
     #ifndef PCP2

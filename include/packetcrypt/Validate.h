@@ -17,7 +17,8 @@ enum {
     Validate_checkAnn_OK =                  0,
     Validate_checkAnn_INVAL =               1,
     Validate_checkAnn_INVAL_ITEM4 =         2,
-    Validate_checkAnn_INSUF_POW =           3
+    Validate_checkAnn_INSUF_POW =           3,
+    Validate_checkAnn_SOFT_NONCE_HIGH =     4
 };
 
 char* Validate_checkAnn_outToString(int code);
@@ -47,16 +48,6 @@ enum {
 
 char* Validate_checkBlock_outToString(int code);
 
-#ifdef PCP2
-int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
-                        uint32_t hapLen,
-                        uint32_t blockHeight,
-                        uint32_t shareTarget,
-                        const PacketCrypt_Coinbase_t* coinbaseCommitment,
-                        const uint8_t blockHashes[static PacketCrypt_NUM_ANNS * 32],
-                        uint8_t workHashOut[static 32],
-                        PacketCrypt_ValidateCtx_t* vctx);
-#else
 int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
                         uint32_t hapLen,
                         uint32_t blockHeight,
@@ -66,6 +57,5 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
                         const uint8_t** annContents,
                         uint8_t workHashOut[static 32],
                         PacketCrypt_ValidateCtx_t* vctx);
-#endif
 
 #endif

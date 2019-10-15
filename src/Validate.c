@@ -48,7 +48,7 @@ int Validate_checkAnn(
     uint32_t softNonceMax = Util_annSoftNonceMax(ann->hdr.workBits);
     if (softNonce > softNonceMax) {
 #ifdef PCP2
-        return Validate_checkAnn_INVAL;
+        return Validate_checkAnn_SOFT_NONCE_HIGH;
 #endif
     }
     CryptoCycle_init(&state, &annHash1.thirtytwos[0], softNonce);
@@ -142,18 +142,6 @@ static int checkPcHash(uint64_t indexesOut[PacketCrypt_NUM_ANNS],
     return Validate_checkBlock_INSUF_POW;
 }
 
-#ifdef PCP2
-int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
-                        uint32_t hapLen,
-                        uint32_t blockHeight,
-                        uint32_t shareTarget,
-                        const PacketCrypt_Coinbase_t* coinbaseCommitment,
-                        const uint8_t blockHashes[static PacketCrypt_NUM_ANNS * 32],
-                        uint8_t workHashOut[static 32],
-                        PacketCrypt_ValidateCtx_t* vctx)
-{
-    const uint8_t** annContents = NULL;
-#else
 int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
                         uint32_t hapLen,
                         uint32_t blockHeight,
@@ -164,6 +152,8 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
                         uint8_t workHashOut[static 32],
                         PacketCrypt_ValidateCtx_t* vctx)
 {
+#ifdef PCP2
+    annContents = NULL;
 #endif
     if (hapLen < PacketCrypt_HeaderAndProof_SIZEOF(0)) {
         return Validate_checkBlock_PCP_INVAL;
@@ -223,6 +213,7 @@ char* Validate_checkAnn_outToString(int code) {
         XX(Validate_checkAnn_INVAL)
         XX(Validate_checkAnn_INVAL_ITEM4)
         XX(Validate_checkAnn_INSUF_POW)
+        XX(Validate_checkAnn_SOFT_NONCE_HIGH)
         default:;
     }
     return "Validate_checkAnn_UNKNOWN_ERROR";

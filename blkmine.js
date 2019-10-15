@@ -389,7 +389,7 @@ const convertShare = (
 
     const submission = [
         header,
-        Util.mkVarInt((version === 1) ? Protocol.PC_PCP_TYPE : Protocol.PC_PCP2_TYPE),
+        Util.mkVarInt(Protocol.PC_PCP_TYPE),
         Util.mkVarInt(proof.length),
         proof,
     ];

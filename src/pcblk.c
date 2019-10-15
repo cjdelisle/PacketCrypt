@@ -196,7 +196,7 @@ static int loadFile(Context_t* ctx, const char* fileName) {
     //     (unsigned long long)numAnns, ctx->filepath.path);
     int ret = BlockMiner_addAnns(ctx->bm, anns, contents, numAnns, true);
 #else
-    int ret = BlockMiner_addAnns(ctx->bm, anns, numAnns);
+    int ret = BlockMiner_addAnns(ctx->bm, anns, NULL, numAnns, false);
 #endif
     if (ret) {
         if (ret == BlockMiner_addAnns_LOCKED) {
