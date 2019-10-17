@@ -387,11 +387,17 @@ const convertShare = (
         contentProofs.push(mkMerkleProof(annContents[i], contentProofIdx));
     }
 
+    const versionBuf = Util.mkVarInt(version);
+
     const submission = [
         header,
         Util.mkVarInt(Protocol.PC_PCP_TYPE),
         Util.mkVarInt(proof.length),
         proof,
+
+        Util.mkVarInt(Protocol.PC_VERSION_TYPE),
+        Util.mkVarInt(versionBuf.length),
+        versionBuf
     ];
 
     if (contentProofs.length) {
@@ -540,6 +546,7 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
                 req.on('error', (err) => {
                     console.error("Failed to upload share [" + err + "]");
                 });
+                //console.log(JSON.stringify(shr.toSubmit));
             });
         });
     }).nThen((w) => {
