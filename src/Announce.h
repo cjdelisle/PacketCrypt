@@ -38,8 +38,23 @@ union Announce_Union {
     Announce_t ann;
 };
 
-void Announce_mkitem(uint64_t num, CryptoCycle_Item_t* item, uint8_t seed[static 32]);
+void Announce_mkitem(uint64_t num, CryptoCycle_Item_t* item, Buf32_t* seed);
 
 bool Announce_hasHighBits(const PacketCrypt_AnnounceHdr_t* annHdr);
+
+int Announce_createProg(PacketCrypt_ValidateCtx_t* prog, Buf32_t* seed);
+
+int Announce_mkitem2(uint64_t num, CryptoCycle_Item_t* item,
+    Buf32_t* seed, PacketCrypt_ValidateCtx_t* ctx);
+
+static inline void Announce_crypt(Announce_t* ann, const CryptoCycle_State_t* state) {
+    int j = 0;
+    for (int i = 0; i < (int)((sizeof ann->merkleProof) / 8 - 8); i++) {
+        ((uint64_t*) &ann->merkleProof)[i] ^= ((uint64_t*)state)[j++];
+    }
+    for (int i = 0; i < (int)((sizeof ann->lastAnnPfx) / 8); i++) {
+        ((uint64_t*) ann->lastAnnPfx)[i] ^= ((uint64_t*)state)[j++];
+    }
+}
 
 #endif

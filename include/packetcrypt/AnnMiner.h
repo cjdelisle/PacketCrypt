@@ -66,7 +66,7 @@ _Static_assert(sizeof(AnnMiner_Request_t) == 80, "");
  *        until after you have called AnnMiner_stop() AnnMiner_Free() or AnnMiner_start()
  *        again.
  */
-void AnnMiner_start(AnnMiner_t* ctx, AnnMiner_Request_t* req, uint8_t* content);
+void AnnMiner_start(AnnMiner_t* ctx, AnnMiner_Request_t* req, uint8_t* content, int version);
 
 /**
  * Stops the announcement miner.

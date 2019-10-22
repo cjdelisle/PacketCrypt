@@ -45,26 +45,54 @@ int Validate_checkAnn(
     CryptoCycle_Item_t item;
     CryptoCycle_State_t state;
     uint32_t softNonce = PacketCrypt_AnnounceHdr_softNonce(&ann->hdr);
-    uint32_t softNonceMax = Util_annSoftNonceMax(ann->hdr.workBits);
-    if (softNonce > softNonceMax) {
-#ifdef PCP2
-        return Validate_checkAnn_SOFT_NONCE_HIGH;
-#endif
+
+    Buf64_t v1Seed[2];
+    int randHashCycles = Conf_AnnHash_RANDHASH_CYCLES;
+    if (ann->hdr.version > 0) {
+        randHashCycles = 0;
+        uint32_t softNonceMax = Util_annSoftNonceMax(ann->hdr.workBits);
+        if (softNonce > softNonceMax) {
+            return Validate_checkAnn_SOFT_NONCE_HIGH;
+        }
+        Buf_OBJCPY(&v1Seed[0], &ann->merkleProof.sixtyfours[Announce_MERKLE_DEPTH]);
+        Buf_OBJCPY(&v1Seed[1], &annHash0);
+        Hash_COMPRESS64_OBJ(&v1Seed[0], &v1Seed);
+        Announce_createProg(vctx, &v1Seed[0].thirtytwos[0]);
     }
+
     CryptoCycle_init(&state, &annHash1.thirtytwos[0], softNonce);
     int itemNo = -1;
     for (int i = 0; i < 4; i++) {
         itemNo = (CryptoCycle_getItemNo(&state) % Announce_TABLE_SZ);
-        // only 32 bytes of the seed is used
-        Announce_mkitem(itemNo, &item, annHash0.bytes);
-        if (!CryptoCycle_update(&state, &item, NULL, Conf_AnnHash_RANDHASH_CYCLES, vctx)) {
+        if (ann->hdr.version > 0) {
+            Announce_mkitem2(itemNo, &item, &v1Seed[0].thirtytwos[1], vctx);
+        } else {
+            // only 32 bytes of the seed is used
+            Announce_mkitem(itemNo, &item, &annHash0.thirtytwos[0]);
+        }
+        if (!CryptoCycle_update(&state, &item, NULL, randHashCycles, vctx)) {
             return Validate_checkAnn_INVAL;
         }
     }
 
-    _Static_assert(sizeof ann->lastAnnPfx == Announce_lastAnnPfx_SZ, "");
-    if (memcmp(&item, ann->lastAnnPfx, sizeof ann->lastAnnPfx)) {
-        return Validate_checkAnn_INVAL_ITEM4;
+    CryptoCycle_final(&state);
+
+    if (ann->hdr.version > 0) {
+        Announce_crypt(ann, &state);
+        if (!Buf_IS_ZERO(ann->lastAnnPfx)) {
+            return Validate_checkAnn_INVAL_ITEM4;
+        }
+    } else {
+        _Static_assert(sizeof ann->lastAnnPfx == Announce_lastAnnPfx_SZ, "");
+        if (memcmp(&item, ann->lastAnnPfx, sizeof ann->lastAnnPfx)) {
+            return Validate_checkAnn_INVAL_ITEM4;
+        }
+    }
+
+    if (ann->hdr.version > 0) {
+        // Need to re-compute the item because we are proving the original value
+        Announce_createProg(vctx, &annHash0.thirtytwos[0]);
+        Announce_mkitem2(itemNo, &item, &annHash0.thirtytwos[1], vctx);
     }
 
     Buf64_t itemHash; Hash_COMPRESS64_OBJ(&itemHash, &item);
@@ -72,12 +100,8 @@ int Validate_checkAnn(
         return Validate_checkAnn_INVAL;
     }
 
-    uint32_t target = ann->hdr.workBits;
-    CryptoCycle_final(&state);
-
     if (annHashOut) { memcpy(annHashOut, state.bytes, 32); }
-
-    if (!Work_check(state.bytes, target)) { return Validate_checkAnn_INSUF_POW; }
+    if (!Work_check(state.bytes, ann->hdr.workBits)) { return Validate_checkAnn_INSUF_POW; }
 
     return Validate_checkAnn_OK;
 }

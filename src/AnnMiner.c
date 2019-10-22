@@ -132,19 +132,32 @@ static void freeCtx(AnnMiner_t* ctx)
 }
 
 static void populateTable(CryptoCycle_Item_t* table, Buf64_t* annHash0) {
-    for (int i = 0; i < Announce_TABLE_SZ; i++) { Announce_mkitem(i, &table[i], annHash0->bytes); }
+    for (int i = 0; i < Announce_TABLE_SZ; i++) {
+        Announce_mkitem(i, &table[i], &annHash0->thirtytwos[0]);
+    }
+}
+
+static int populateTable2(CryptoCycle_Item_t* table, Buf64_t* seed, PacketCrypt_ValidateCtx_t* prog) {
+    if (Announce_createProg(prog, &seed->thirtytwos[0])) {
+        return -1;
+    }
+    for (int i = 0; i < Announce_TABLE_SZ; i++) {
+        if (Announce_mkitem2(i, &table[i], &seed->thirtytwos[1], prog)) {
+            return -1;
+        }
+    }
+    return 0;
 }
 
 // 1 means success
 static int annHash(Worker_t* restrict w, uint32_t nonce) {
     CryptoCycle_init(&w->state, &w->job.annHash1.thirtytwos[0], nonce);
     int itemNo = -1;
+    int randHashCycles = (w->job.hah.annHdr.version > 0) ? 0 : Conf_AnnHash_RANDHASH_CYCLES;
     for (int i = 0; i < 4; i++) {
         itemNo = (CryptoCycle_getItemNo(&w->state) % Announce_TABLE_SZ);
         CryptoCycle_Item_t* restrict it = &w->job.table[itemNo];
-        if (Util_unlikely(!CryptoCycle_update(
-            &w->state, it, NULL, Conf_AnnHash_RANDHASH_CYCLES, &w->vctx)))
-        {
+        if (Util_unlikely(!CryptoCycle_update(&w->state, it, NULL, randHashCycles, &w->vctx))) {
             return 0;
         }
     }
@@ -157,7 +170,12 @@ static int annHash(Worker_t* restrict w, uint32_t nonce) {
     Buf_OBJCPY(&w->ann.hdr, &w->job.hah.annHdr);
     Buf_OBJCPY_LDST(w->ann.hdr.softNonce, &nonce);
     Announce_Merkle_getBranch(&w->ann.merkleProof, itemNo, &w->job.merkle);
-    Buf_OBJCPY_LDST(w->ann.lastAnnPfx, &w->job.table[itemNo]);
+    if (w->job.hah.annHdr.version > 0) {
+        Buf_OBJSET(w->ann.lastAnnPfx, 0);
+        Announce_crypt(&w->ann, &w->state);
+    } else {
+        Buf_OBJCPY_LDST(w->ann.lastAnnPfx, &w->job.table[itemNo]);
+    }
     //printf("itemNo %d\n", itemNo);
     return 1;
 }
@@ -240,8 +258,14 @@ static void getNextJob(Worker_t* w) {
     }
     Hash_COMPRESS64_OBJ(&w->job.annHash0, &w->job.hah);
 
-    populateTable(w->job.table, &w->job.annHash0);
-
+    if (w->job.hah.annHdr.version > 0) {
+        if (populateTable2(w->job.table, &w->job.annHash0, &w->vctx)) {
+            getNextJob(w);
+            return;
+        }
+    } else {
+        populateTable(w->job.table, &w->job.annHash0);
+    }
     Announce_Merkle_build(&w->job.merkle, (uint8_t*)w->job.table, sizeof *w->job.table);
 
     Buf64_t* root = Announce_Merkle_root(&w->job.merkle);
@@ -251,6 +275,16 @@ static void getNextJob(Worker_t* w) {
 
     w->softNonceMax = Util_annSoftNonceMax(w->job.hah.annHdr.workBits);
     w->softNonce = 0;
+    if (w->job.hah.annHdr.version > 0) {
+        Buf64_t b[2];
+        Buf_OBJCPY(&b[0], root);
+        Buf_OBJCPY(&b[1], &w->job.annHash0);
+        Hash_COMPRESS64_OBJ(&b[0], &b);
+        if (populateTable2(w->job.table, &b[0], &w->vctx)) {
+            getNextJob(w);
+            return;
+        }
+    }
 }
 
 static bool checkStop(Worker_t* worker) {
@@ -303,12 +337,14 @@ static void stopThreads(AnnMiner_t* ctx) {
     }
 }
 
-void AnnMiner_start(AnnMiner_t* ctx, AnnMiner_Request_t* req, uint8_t* content) {
+void AnnMiner_start(AnnMiner_t* ctx, AnnMiner_Request_t* req, uint8_t* content, int version) {
     stopThreads(ctx);
     while (!threadsStopped(ctx)) { Time_nsleep(100000); }
+    assert(version == 0 || version == 1);
 
     HeaderAndHash_t hah;
     Buf_OBJSET(&hah, 0);
+    hah.annHdr.version = version;
     hah.annHdr.hardNonce = ctx->minerId;
     hah.annHdr.workBits = req->workTarget;
     hah.annHdr.parentBlockHeight = req->parentBlockHeight;

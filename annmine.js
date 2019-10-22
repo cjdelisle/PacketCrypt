@@ -207,7 +207,8 @@ const refreshWorkLoop2 = (ctx) => {
 const mkMiner = (config, submitAnnUrls) => {
     const args = [
         '--threads', String(config.threads || 1),
-        '--minerId', String(config.minerId)
+        '--minerId', String(config.minerId),
+        '--version', String(1)
     ];
     submitAnnUrls.forEach((url, i) => {
         args.push('--out', getFileName(config, i));

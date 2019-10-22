@@ -33,6 +33,7 @@ static int usage() {
         "                      # numeric value of the first byte of the announcement hash\n"
         "        --threads <n> # specify number of threads to use (default: 1)\n"
         "        --minerId <n> # set the number of the miner to dupe announcements\n"
+        "        --version <n> # specify the version of announcements to mine\n"
         "\n"
         "    See: https://github.com/cjdelisle/PacketCrypt/blob/master/docs/pcann.md\n"
         "    for more information\n");
@@ -62,10 +63,12 @@ int main(int argc, const char** argv) {
     struct Files files = { .count = 0 };
     long threads = 1;
     uint32_t minerId = 0;
+    int version = 0;
     {
         bool out = false;
         bool t = false;
         bool mid = false;
+        bool ver = false;
         for (int i = 1; i < argc; i++) {
             const char* arg = argv[i];
             if (out) {
@@ -93,12 +96,22 @@ int main(int argc, const char** argv) {
                 }
                 minerId = lminerId;
                 mid = false;
+            } else if (ver) {
+                version = strtol(arg, NULL, 10);
+                if (version < 0 || version > 1) {
+                    DEBUGF("--version parameter [%s] could not be parsed\n", arg);
+                    DEBUGF("or was not either 0 or 1\n");
+                    return usage();
+                }
+                ver = false;
             } else if (!strcmp(arg, "--out")) {
                 out = true;
             } else if (!strcmp(arg, "--threads")) {
                 t = true;
             } else if (!strcmp(arg, "--minerId")) {
                 mid = true;
+            } else if (!strcmp(arg, "--version")) {
+                ver = true;
             } else {
                 DEBUGF("Invalid argument [%s]\n", arg);
                 return usage();
@@ -177,7 +190,7 @@ int main(int argc, const char** argv) {
             DEBUGF("Starting job with work target [%08x] and content length [%d]\n",
                 req.workTarget, req.contentLen);
         }
-        AnnMiner_start(annMiner, &req, content);
+        AnnMiner_start(annMiner, &req, content, version);
         free(pleaseFree);
         pleaseFree = NULL;
 
