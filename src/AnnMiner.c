@@ -57,6 +57,7 @@ struct AnnMiner_s {
     HeaderAndHash_t hah;
 
     int sendPtr;
+    bool paranoia;
     uint32_t minerId;
 
     int numOutFiles;
@@ -173,6 +174,7 @@ static int annHash(Worker_t* restrict w, uint32_t nonce) {
     if (w->job.hah.annHdr.version > 0) {
         Buf_OBJSET(w->ann.lastAnnPfx, 0);
         Announce_crypt(&w->ann, &w->state);
+        //Hash_eprintHex((uint8_t*)&w->ann, 1024);
     } else {
         Buf_OBJCPY_LDST(w->ann.lastAnnPfx, &w->job.table[itemNo]);
     }
@@ -190,16 +192,21 @@ static void search(Worker_t* restrict w)
     int nonce = w->softNonce;
     for (int i = 1; i < HASHES_PER_CYCLE; i++) {
         if (Util_likely(!annHash(w, nonce++))) { continue; }
-        // Found an ann!
-        int res = Validate_checkAnn(
-            NULL,
-            (PacketCrypt_Announce_t*)&w->ann,
-            w->job.parentBlockHash.bytes,
-            &w->vctx);
-        if (res) {
-            fprintf(stderr, "Validate_checkAnn returned [%s]\n",
-                Validate_checkAnn_outToString(res));
-            assert(0 && "Internal error: Validate_checkAnn() failed");
+        if (w->ctx->paranoia) {
+            // Found an ann!
+            PacketCrypt_Announce_t backup;
+            Buf_OBJCPY(&backup, &w->ann);
+            int res = Validate_checkAnn(
+                NULL,
+                (PacketCrypt_Announce_t*)&w->ann,
+                w->job.parentBlockHash.bytes,
+                &w->vctx);
+            if (res) {
+                fprintf(stderr, "Validate_checkAnn returned [%s]\n",
+                    Validate_checkAnn_outToString(res));
+                assert(0 && "Internal error: Validate_checkAnn() failed");
+            }
+            assert(!Buf_OBJCMP(&backup, &w->ann));
         }
 
         // Send the ann to an outfile segmented by it's hash so that if we are
@@ -386,7 +393,7 @@ AnnMiner_t* AnnMiner_create(
     int threads,
     int* outFiles,
     int numOutFiles,
-    int sendPtr)
+    enum AnnMiner_Flags flags)
 {
     assert(threads);
     AnnMiner_t* ctx = allocCtx(threads);
@@ -394,7 +401,8 @@ AnnMiner_t* AnnMiner_create(
     assert(ctx->outFiles);
     ctx->numOutFiles = numOutFiles;
     memcpy(ctx->outFiles, outFiles, sizeof(int) * numOutFiles);
-    ctx->sendPtr = sendPtr;
+    ctx->sendPtr = (flags & AnnMiner_Flags_SENDPTR) != 0;
+    ctx->paranoia = (flags & AnnMiner_Flags_PARANOIA) != 0;
     ctx->minerId = minerId;
 
     for (int i = 0; i < threads; i++) {

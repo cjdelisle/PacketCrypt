@@ -34,6 +34,8 @@ static int usage() {
         "        --threads <n> # specify number of threads to use (default: 1)\n"
         "        --minerId <n> # set the number of the miner to dupe announcements\n"
         "        --version <n> # specify the version of announcements to mine\n"
+        "        --paranoia    # if specified, every announcement will be checked after\n"
+        "                      # it is created\n"
         "\n"
         "    See: https://github.com/cjdelisle/PacketCrypt/blob/master/docs/pcann.md\n"
         "    for more information\n");
@@ -64,6 +66,7 @@ int main(int argc, const char** argv) {
     long threads = 1;
     uint32_t minerId = 0;
     int version = 0;
+    enum AnnMiner_Flags flags = 0;
     {
         bool out = false;
         bool t = false;
@@ -112,6 +115,8 @@ int main(int argc, const char** argv) {
                 mid = true;
             } else if (!strcmp(arg, "--version")) {
                 ver = true;
+            } else if (!strcmp(arg, "--paranoia")) {
+                flags |= AnnMiner_Flags_PARANOIA;
             } else {
                 DEBUGF("Invalid argument [%s]\n", arg);
                 return usage();
@@ -128,7 +133,7 @@ int main(int argc, const char** argv) {
         }
         files.fileNos[i] = outFileNo;
     }
-    AnnMiner_t* annMiner = AnnMiner_create(minerId, threads, files.fileNos, files.count, 0);
+    AnnMiner_t* annMiner = AnnMiner_create(minerId, threads, files.fileNos, files.count, flags);
 
     AnnMiner_Request_t req;
     char* content = NULL;

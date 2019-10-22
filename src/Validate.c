@@ -78,6 +78,8 @@ int Validate_checkAnn(
     CryptoCycle_final(&state);
 
     if (ann->hdr.version > 0) {
+        Buf_OBJCPY(&_ann, ann);
+        ann = &_ann;
         Announce_crypt(ann, &state);
         if (!Buf_IS_ZERO(ann->lastAnnPfx)) {
             return Validate_checkAnn_INVAL_ITEM4;

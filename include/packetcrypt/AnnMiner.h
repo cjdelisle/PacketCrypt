@@ -14,6 +14,14 @@
 
 typedef struct AnnMiner_s AnnMiner_t;
 
+enum AnnMiner_Flags {
+    // Send pointers to results rather than writing the results (for inter-thread comms over pipes)
+    AnnMiner_Flags_SENDPTR,
+
+    // Check every announcement after it is created
+    AnnMiner_Flags_PARANOIA
+};
+
 /**
  * Create a new announcement miner and allocate threads.
  *
@@ -30,7 +38,7 @@ AnnMiner_t* AnnMiner_create(
     int threads,
     int* outFiles,
     int numOutFiles,
-    int sendPtr);
+    enum AnnMiner_Flags flags);
 
 typedef struct AnnMiner_Request_s {
     // the bitcoin format hash target which must be beaten in order to

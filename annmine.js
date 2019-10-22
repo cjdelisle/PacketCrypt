@@ -208,8 +208,11 @@ const mkMiner = (config, submitAnnUrls) => {
     const args = [
         '--threads', String(config.threads || 1),
         '--minerId', String(config.minerId),
-        '--version', String(1)
+        '--version', String(config.version)
     ];
+    if (config.paranoia) {
+        args.push('--paranoia');
+    }
     submitAnnUrls.forEach((url, i) => {
         args.push('--out', getFileName(config, i));
     });
@@ -284,6 +287,9 @@ const usage = () => {
         "        --content     # specify announcement content\n" +
         "        --contentFile # specify announcement content in a file\n" +
         "        --randContent # mine many announcements, each with random content\n" +
+        "        --version     # generate announcements of this version\n" +
+        "        --paranoia    # if specified, pcann will validate each announcement after\n" +
+        "                      # it is generated\n" +
         "    <poolurl>         # the URL of the mining pool to connect to\n" +
         "\n" +
         "    See https://github.com/cjdelisle/PacketCrypt/blob/master/docs/annmine.md\n" +
@@ -321,9 +327,9 @@ const main = (argv) => {
         dir: './datastore/annmine',
         paymentAddr: DEFAULT_PAYMENT_ADDR,
         threads: 1,
-        minerId: Math.floor(Math.random()*(1<<30)*2)
+        minerId: Math.floor(Math.random()*(1<<30)*2),
     };
-    const a = Minimist(argv.slice(2), { boolean: ['randContent'] });
+    const a = Minimist(argv.slice(2), { boolean: ['randContent','paranoia'] });
     if (!/http(s)?:\/\/.*/.test(a._[0])) { process.exit(usage()); }
     const conf = {
         corePath: a.corePath || defaultConf.corePath,
@@ -333,7 +339,9 @@ const main = (argv) => {
         threads: a.threads || defaultConf.threads,
         minerId: a.minerId || defaultConf.minerId,
         content: undefined,
-        randContent: a.randContent || false
+        randContent: a.randContent || false,
+        version: a.version || 0,
+        paranoia: a.paranoia || false
     };
     if (!a.paymentAddr) {
         console.error("WARNING: You have not passed the --paymentAddr flag\n" +

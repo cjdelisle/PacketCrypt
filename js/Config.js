@@ -43,6 +43,8 @@ export type Config_BlkMiner_t = Config_Miner_t & {
 };
 export type Config_AnnMiner_t = Config_Miner_t & {
     content?: Config_Miner_Content_t,
-    randContent: bool
+    randContent: bool,
+    version: number,
+    paranoia: boolean
 }
 */
