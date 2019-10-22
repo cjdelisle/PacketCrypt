@@ -214,6 +214,8 @@ static int validateAnns(LocalWorker_t* lw, int annCount, Result_t* res) {
             // duplicate of the 0 hash or the pad
         } else if ((lw->dedupsIn[i].start % modulo) != lw->inBuf.hashNum) {
             // intended for a different validator node
+        } else if (lw->inBuf.anns[i].hdr.version != 0) {
+            // wrong version
         } else if (Validate_checkAnn(NULL, &lw->inBuf.anns[i], lw->inBuf.parentBlockHash.bytes, &lw->vctx)) {
             // doesn't check out
         } else {
