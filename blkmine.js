@@ -387,18 +387,21 @@ const convertShare = (
         contentProofs.push(mkMerkleProof(annContents[i], contentProofIdx));
     }
 
-    const versionBuf = Util.mkVarInt(version);
-
     const submission = [
         header,
         Util.mkVarInt(Protocol.PC_PCP_TYPE),
         Util.mkVarInt(proof.length),
-        proof,
-
-        Util.mkVarInt(Protocol.PC_VERSION_TYPE),
-        Util.mkVarInt(versionBuf.length),
-        versionBuf
+        proof
     ];
+
+    if (version > 1) {
+        const versionBuf = Util.mkVarInt(version);
+        submission.push(
+            Util.mkVarInt(Protocol.PC_VERSION_TYPE),
+            Util.mkVarInt(versionBuf.length),
+            versionBuf
+        );
+    }
 
     if (contentProofs.length) {
         const cp = Buffer.concat(contentProofs);
