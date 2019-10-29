@@ -58,6 +58,7 @@ struct AnnMiner_s {
 
     int sendPtr;
     bool paranoia;
+    bool active;
     uint32_t minerId;
 
     int numOutFiles;
@@ -85,9 +86,11 @@ struct Worker_s {
     pthread_t thread;
 
     // read by the main thread
-    sig_atomic_t hashesPerSecond;
+    sig_atomic_t microsPerAnn;
 
     uint32_t workerNum;
+
+    Time timeBetweenFinds;
 
     int softNonce;
     int softNonceMax;
@@ -186,11 +189,8 @@ static int annHash(Worker_t* restrict w, uint32_t nonce) {
 
 static void search(Worker_t* restrict w)
 {
-    Time t;
-    Time_BEGIN(t);
-
     int nonce = w->softNonce;
-    for (int i = 1; i < HASHES_PER_CYCLE; i++) {
+    for (int i = 0; i < HASHES_PER_CYCLE; i++) {
         if (Util_likely(!annHash(w, nonce++))) { continue; }
         if (w->ctx->paranoia) {
             // Found an ann!
@@ -244,14 +244,16 @@ static void search(Worker_t* restrict w)
             ssize_t ret = write(outFile, &w->ann, sizeof w->ann);
             assert(ret == sizeof w->ann || ret == -1);
         }
+
+        // update time since last find
+        Time_END(w->timeBetweenFinds);
+        uint64_t micros = Time_MICROS(w->timeBetweenFinds);
+        // IIR with alpha of 0.25
+        w->microsPerAnn = w->microsPerAnn * 3 / 4 + (micros / 4);
+        //fprintf(stderr, "Find in %llu micros (%u)\n", micros, w->microsPerAnn);
+        Time_NEXT(w->timeBetweenFinds);
     }
     w->softNonce = nonce;
-
-    Time_END(t);
-    w->hashesPerSecond = ((HASHES_PER_CYCLE * 1024) / (Time_MICROS(t) / 1024));
-    Time_NEXT(t);
-
-    //fprintf(stderr, "Cycle complete\n");
 
     return;
 }
@@ -320,9 +322,7 @@ static bool checkStop(Worker_t* worker) {
 static void* thread(void* vworker) {
     Worker_t* worker = vworker;
     for (;;) {
-        if (getRequestedState(worker) != ThreadState_RUNNING) {
-            if (checkStop(worker)) { return NULL; }
-        }
+        if (checkStop(worker)) { return NULL; }
         if (worker->softNonce + HASHES_PER_CYCLE > worker->softNonceMax) {
             getNextJob(worker);
         }
@@ -381,10 +381,14 @@ void AnnMiner_start(AnnMiner_t* ctx, AnnMiner_Request_t* req, uint8_t* content, 
     }
 
     for (int i = 0; i < ctx->numWorkers; i++) {
+        if (!ctx->active) {
+            Time_BEGIN(ctx->workers[i].timeBetweenFinds);
+        }
         setRequestedState(ctx, &ctx->workers[i], ThreadState_RUNNING);
     }
     pthread_cond_broadcast(&ctx->cond);
 
+    ctx->active = true;
     return;
 }
 
@@ -414,6 +418,7 @@ AnnMiner_t* AnnMiner_create(
 
 void AnnMiner_stop(AnnMiner_t* ctx)
 {
+    ctx->active = false;
     stopThreads(ctx);
     while (!threadsStopped(ctx)) { Time_nsleep(100000); }
 }
@@ -433,11 +438,13 @@ void AnnMiner_free(AnnMiner_t* ctx)
     freeCtx(ctx);
 }
 
-int64_t AnnMiner_getHashesPerSecond(AnnMiner_t* ctx)
+double AnnMiner_getAnnsPerSecond(const AnnMiner_t* ctx)
 {
-    int64_t out = 0;
+    double totalAnnsPerMicrosecond = 0.0;
     for (int i = 0; i < ctx->numWorkers; i++) {
-        out += ctx->workers[i].hashesPerSecond;
+        double mpa = ctx->workers[i].microsPerAnn;
+        if (mpa == 0) { continue; }
+        totalAnnsPerMicrosecond += (1.0 / mpa);
     }
-    return out;
+    return totalAnnsPerMicrosecond * 1000000.0;
 }

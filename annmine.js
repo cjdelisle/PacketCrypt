@@ -117,7 +117,8 @@ const rotateAndUpload = (ctx /*:Context_t*/, done) => {
             const contentLen = fileContent[i].readUInt32LE(20);
             const reqNum = ctx.reqNum++;
             console.error("[" + String(reqNum) + "] post [" + url + "] worknum [" +
-                String(parentBlockHeight) + "] content length [" + contentLen + "]");
+                String(parentBlockHeight) + "] anns [" + String(fileContent[i].length / 1024) +
+                    "] content length [" + contentLen + "]");
             const req = Util.httpPost(url, {
                 'Content-Type': 'application/octet-stream',
                 'x-pc-worknum': String(parentBlockHeight),

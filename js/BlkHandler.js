@@ -411,7 +411,7 @@ module.exports.create = (cfg /*:BlkHandler_Config_t*/) => {
         ctx.rpcClient.getBlock(hash, (err, ret) => {
             if (!err && ret && ret.error) { err = ret.error; }
             if (err) {
-                return void console.error("onWork unable to call getBlock [" + String(err) + "]");
+                return void console.error("onWork unable to call getBlock [" + JSON.stringify(err) + "]");
             }
             if (!ret) {
                 return void console.error("onWork ret missing without error");

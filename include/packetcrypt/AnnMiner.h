@@ -87,9 +87,8 @@ void AnnMiner_stop(AnnMiner_t* miner);
 void AnnMiner_free(AnnMiner_t* miner);
 
 /**
- * Get the number of hashes per second at which the miner is currently mining.
+ * Get the number of announcements per second at which the miner is currently mining.
  */
-#define AnnMiner_getHashesPerSecond_NOT_MINING -1
-int64_t AnnMiner_getHashesPerSecond(AnnMiner_t* miner);
+double AnnMiner_getAnnsPerSecond(const AnnMiner_t* ctx);
 
 #endif

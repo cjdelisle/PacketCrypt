@@ -23,6 +23,7 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <math.h>
 
 static int usage() {
     fprintf(stderr, "Usage: ./pcann OPTIONS\n"
@@ -199,8 +200,13 @@ int main(int argc, const char** argv) {
         free(pleaseFree);
         pleaseFree = NULL;
 
-        int64_t hps = AnnMiner_getHashesPerSecond(annMiner);
-        if (hps) { DEBUGF("%lu hashes per second\n", (unsigned long)hps); }
+        double bps = AnnMiner_getAnnsPerSecond(annMiner) * 8;
+        const char* letter = "KMGPYZ?";
+        while (bps > 1000 && *letter != '?') {
+            bps /= 1000;
+            letter = &letter[1];
+        }
+        DEBUGF("%.02f%cb/s\n", bps, *letter);
     }
 
     AnnMiner_free(annMiner);
