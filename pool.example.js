@@ -95,6 +95,12 @@ config.master = {
     // Minimum work for a block share
     shareMinWork: 0x20000fff,
 
+    // Which versions of announcements we will accept
+    annVersions: [0],
+
+    // Which versions of PacketCrypt proof we will accept
+    blkVersions: [0],
+
     root: config,
 };
 

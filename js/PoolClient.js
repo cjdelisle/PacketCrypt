@@ -103,6 +103,10 @@ const connectionChecker = (pool, first) => {
                 Protocol.VERSION + "] please upgrade");
             process.exit(100);
         }
+        const sv = typeof(config.softVersion) === 'undefined' ? undefined : config.softVersion;
+        if (sv && sv > Protocol.SOFT_VERSION) {
+            console.error("Pool soft version is [" + String(sv) + "], upgrading is recommended");
+        }
         if (!first && JSON.stringify(pool.config) !== JSON.stringify(config)) {
             delete pool.workByNum[config.currentHeight];
             pool.getWorkByNum(config.currentHeight, (work) => {

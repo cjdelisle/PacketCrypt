@@ -77,6 +77,9 @@ const onSubmit = (ctx, req, res) => {
         // we're not going to clear the payTo, we'll keep it anyway so that
         // we have it in the logs just in case.
     }
+    if (!req.headers['x-pc-sver']) {
+        warn.push("Your miner is out of date and will stop working soon, please update");
+    }
 
     let failed = false;
     const errorEnd = (code, message) => {

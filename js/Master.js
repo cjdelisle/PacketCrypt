@@ -26,7 +26,9 @@ export type Master_Config_t = {
     root: Config_t,
     port: number,
     annMinWork: number,
-    shareMinWork: number
+    shareMinWork: number,
+    annVersions: Array<number>,
+    blkVersions: Array<number>
 };
 
 type State_t = {
@@ -209,7 +211,10 @@ const configReq = (ctx, height, _req, res) => {
         downloadAnnUrls: cfg.root.annHandlers.map((x) => (x.url)),
         submitBlockUrls: cfg.root.blkHandlers.map((x) => (x.url + '/submit')),
         paymakerUrl: cfg.root.payMaker.url,
-        version: Protocol.VERSION
+        version: Protocol.VERSION,
+        softVersion: Protocol.SOFT_VERSION,
+        annVersions: cfg.annVersions || [0],
+        blkVersions: cfg.blkVersions || [0],
     };
     res.end(JSON.stringify(out, null, '\t'));
 };

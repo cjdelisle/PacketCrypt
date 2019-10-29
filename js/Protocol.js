@@ -16,6 +16,9 @@ export type Protocol_PcConfigJson_t = {
     submitBlockUrls: Array<string>,
     paymakerUrl: string,
     version: number,
+    annVersions?: Array<number>,
+    blkVersions?: Array<number>,
+    softVersion: ?number
 };
 
 export type Protocol_RawBlockTemplate_t = {
@@ -71,7 +74,16 @@ export type Protocol_BlockEvent_t = Protocol_Event_t & {
 
 */
 
+// This is the "hard" version, if there's a mismatch then the miner will refuse to start up.
 module.exports.VERSION = 3;
+// This is the "soft" version, if there's a mismatch,
+// the miner will start up but with an upgrade recommendation.
+module.exports.SOFT_VERSION = 1;
+
+// Ordered least preferential to most preferential
+// These are just the versions which this implementation is *capable* of mining
+// the versions which the pool will accept are defined in pool.example.js
+module.exports.SUPPORTED_ANN_VERSIONS = [0,1];
 
 module.exports.COINBASE_COMMIT_LEN = 48;
 

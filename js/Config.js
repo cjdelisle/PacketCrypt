@@ -22,7 +22,7 @@ export type Config_t = {
     blkHandlers: Array<BlkHandler_Config_t>,
     master: Master_Config_t,
     rpc: Rpc_Config_t,
-    payMaker: PayMaker_Config_t,
+    payMaker: PayMaker_Config_t
 };
 export type Config_Miner_Content_t = {
     type: number,

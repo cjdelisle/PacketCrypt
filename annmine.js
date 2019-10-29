@@ -13,6 +13,7 @@ const Minimist = require('minimist');
 
 const Pool = require('./js/PoolClient.js');
 const Util = require('./js/Util.js');
+const Protocol = require('./js/Protocol.js');
 
 const MAX_RAND_CONTENT_SZ = 2048;
 const REBUILD_JOB_EVERY_MS = 10000;
@@ -75,7 +76,30 @@ const httpRes = (ctx, res /*:IncomingMessage*/, reqNum) => {
             console.error("[" + reqNum +  "] WARNING: Pool replied without a result [" + d + "]");
             return;
         }
-        console.error("[" + reqNum +  "] RESULT: [" + JSON.stringify(result) + "]");
+        if (result.type !== 'anns') {
+        } else if (typeof(result.accepted) !== 'number') {
+        } else if (typeof(result.dup) !== 'number') {
+        } else if (typeof(result.inval) !== 'number') {
+        } else if (typeof(result.badHash) !== 'number') {
+        } else if (typeof(result.runt) !== 'number') {
+        } else if (typeof(result.internalErr) !== 'number') {
+        } else if (result.payTo !== ctx.config.paymentAddr) {
+        } else if (typeof(result.unsigned) !== 'number') {
+        } else if (typeof(result.totalLen) !== 'number') {
+        } else if (typeof(result.time) !== 'number') {
+        } else if (typeof(result.eventId) !== 'string') {
+        } else if (typeof(result.target) !== 'number') {
+        } else {
+            const invalid = result.inval + result.runt + result.badHash;
+            console.error("[" + reqNum +  "] Pool responded: accepted [" + String(result.accepted) + "]" +
+                ((result.dup > 0) ? " duplicated [" + String(result.dup) + "]" : "") +
+                ((invalid > 0) ? " invalid [" + String(invalid) + "]" : "") +
+                ((result.unsigned > 0) ? " accepted unsigned [" + String(result.unsigned) + "]" : "") +
+                ((result.totalLen > 0) ? " content length [" + String(result.totalLen) + "]" : "")
+            );
+            return;
+        }
+        console.error("[" + reqNum +  "] UNEXPECTED RESULT: [" + JSON.stringify(result) + "]");
     });
 };
 
@@ -116,13 +140,15 @@ const rotateAndUpload = (ctx /*:Context_t*/, done) => {
             const parentBlockHeight = fileContent[i].readUInt32LE(12) + 1;
             const contentLen = fileContent[i].readUInt32LE(20);
             const reqNum = ctx.reqNum++;
-            console.error("[" + String(reqNum) + "] post [" + url + "] worknum [" +
+            console.error("[" + String(reqNum) + "] worknum [" +
                 String(parentBlockHeight) + "] anns [" + String(fileContent[i].length / 1024) +
-                    "] content length [" + contentLen + "]");
+                    "] content length [" + contentLen + "] posted to [" + url + "]");
             const req = Util.httpPost(url, {
                 'Content-Type': 'application/octet-stream',
                 'x-pc-worknum': String(parentBlockHeight),
-                'x-pc-payto': ctx.config.paymentAddr
+                'x-pc-payto': ctx.config.paymentAddr,
+                'x-pc-sver': Protocol.SOFT_VERSION,
+                'x-pc-annver': String(fileContent[i][0]),
             }, (res) => { httpRes(ctx, res, reqNum); });
             req.on('error', (err) => {
                 console.error("[" + reqNum + "] Failed http post to [" + url + "] [" +
@@ -183,8 +209,44 @@ const rebuildJob = (ctx /*Context_t*/, w /*:Protocol_Work_t*/) => {
     ctx.lastWorkRefresh = +new Date();
 };
 
+const getAnnVersion = (ctx) => {
+    if (typeof(ctx.config.version) === 'number') {
+        if (Protocol.SUPPORTED_ANN_VERSIONS.indexOf(ctx.config.version) === -1) {
+            console.error("ERROR: Ann version specified [--version " + ctx.config.version +
+                "] is not supported by this version of the miner.\n" +
+                "Supported versions: " + JSON.stringify(Protocol.SUPPORTED_ANN_VERSIONS));
+            process.exit(100);
+        }
+        if (!ctx.pool.config.annVersions) {
+            return ctx.config.version;
+        }
+        if (ctx.pool.config.annVersions.indexOf(ctx.config.version) === -1) {
+            console.error("WARNING: Ann version specified [--version " + ctx.config.version +
+                "] is not supported by the pool.\n" +
+                "Supported versions: " + JSON.stringify(ctx.pool.config.annVersions || []));
+        }
+    }
+    let result = 0;
+    Protocol.SUPPORTED_ANN_VERSIONS.forEach((v) => {
+        if (!ctx.pool.config.annVersions) { return; }
+        if (ctx.pool.config.annVersions.indexOf(v) > -1) {
+            result = v;
+        }
+    });
+    return result;
+};
+
 const doRefreshWork = (ctx) => {
     if (ctx.requestsInFlight > MAX_REQUESTS_IN_FLIGHT) { return; }
+    const av = getAnnVersion(ctx);
+    if (av !== ctx.annVersion) {
+        console.error("INFO: Announcement version to mine has changed to [" +
+            String(av) + "], restarting miner...");
+        ctx.annVersion = av;
+        if (ctx.miner) {
+            ctx.miner.kill('SIGINT');
+        }
+    }
     ctx.inMutex((done) => {
         rotateAndUpload(ctx, (didUpload) => {
             const expired = (+new Date()) > (REBUILD_JOB_EVERY_MS + ctx.lastWorkRefresh);
@@ -205,20 +267,20 @@ const refreshWorkLoop2 = (ctx) => {
     doRefreshWork(ctx);
 };
 
-const mkMiner = (config, submitAnnUrls) => {
+const mkMiner = (ctx, submitAnnUrls) => {
     const args = [
-        '--threads', String(config.threads || 1),
-        '--minerId', String(config.minerId),
-        '--version', String(config.version)
+        '--threads', String(ctx.config.threads || 1),
+        '--minerId', String(ctx.config.minerId),
+        '--version', String(ctx.annVersion)
     ];
-    if (config.paranoia) {
+    if (ctx.config.paranoia) {
         args.push('--paranoia');
     }
     submitAnnUrls.forEach((url, i) => {
-        args.push('--out', getFileName(config, i));
+        args.push('--out', getFileName(ctx.config, i));
     });
-    console.error(config.corePath + ' ' + args.join(' '));
-    return Spawn(config.corePath, args, {
+    console.error(ctx.config.corePath + ' ' + args.join(' '));
+    return Spawn(ctx.config.corePath, args, {
         stdio: [ 'pipe', 1, 2 ]
     });
 };
@@ -239,21 +301,24 @@ const launch = (config /*:Config_AnnMiner_t*/) => {
         const ctx = {
             lastWorkRefresh: +new Date(),
             config: config,
-            miner: mkMiner(config, submitAnnUrls),
+            miner: undefined,
             submitAnnUrls: submitAnnUrls,
             pool: pool,
             inMutex: Util.createMutex(),
             uploads: [],
             reqNum: 0,
-            requestsInFlight: 0
+            requestsInFlight: 0,
+            annVersion: 0,
         };
+        ctx.annVersion = getAnnVersion(ctx);
+        ctx.miner = mkMiner(ctx, submitAnnUrls);
         const minerOnClose = () => {
             if (!ctx.miner) { throw new Error(); }
             ctx.miner.on('close', () => {
                 console.error("pcann has died, restarting in 1 second");
                 ctx.miner = undefined;
                 setTimeout(() => {
-                    ctx.miner = mkMiner(config, submitAnnUrls);
+                    ctx.miner = mkMiner(ctx, submitAnnUrls);
                     pool.getWork((w) => { rebuildJob(ctx, w); });
                     minerOnClose();
                 }, 1000);
@@ -341,7 +406,7 @@ const main = (argv) => {
         minerId: a.minerId || defaultConf.minerId,
         content: undefined,
         randContent: a.randContent || false,
-        version: a.version || 0,
+        version: a.version || undefined,
         paranoia: a.paranoia || false
     };
     if (!a.paymentAddr) {

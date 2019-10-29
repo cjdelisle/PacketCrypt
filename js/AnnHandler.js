@@ -79,6 +79,7 @@ const AnnPost_HEADER_SZ = 144;
 const onSubmit = (ctx, req, res) => {
     if (Util.badMethod('POST', req, res)) { return; }
     const worknum = Number(req.headers['x-pc-worknum']);
+    const annver = Number(req.headers['x-pc-annver']) || 0;
     const payTo = req.headers['x-pc-payto'] || '';
     const warn = [];
     if (!Util.isValidPayTo(payTo)) {
@@ -86,6 +87,9 @@ const onSubmit = (ctx, req, res) => {
             '] is not a valid pkt address, WORK WILL NOT BE CREDITED');
         // we're not going to clear the payTo, we'll keep it anyway so that
         // we have it in the logs just in case.
+    }
+    if (!req.headers['x-pc-sver']) {
+        warn.push("Your miner is out of date and will stop working soon, please update");
     }
     let failed = false;
     const errorEnd = (code, message) => {
@@ -98,6 +102,10 @@ const onSubmit = (ctx, req, res) => {
     }
     if (!ctx.poolClient.connected) {
         return void errorEnd(500, "disconnected from pool master");
+    }
+    const acceptableVersions = ctx.poolClient.config.annVersions || [0];
+    if (acceptableVersions.indexOf(annver) === -1) {
+        return void errorEnd(500, "announcement version is not accepted");
     }
     const currentWork = ctx.poolClient.work;
     if (!currentWork) {
@@ -117,6 +125,7 @@ const onSubmit = (ctx, req, res) => {
     }).nThen((w) => {
         const stream = Fs.createWriteStream(fileUploadPath);
         const post = {
+            version: annver,
             hashNum: ctx.mut.hashNum,
             hashMod: ctx.mut.hashMod,
             signingKey: work.signingKey,

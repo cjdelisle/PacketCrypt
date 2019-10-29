@@ -214,7 +214,7 @@ static int validateAnns(LocalWorker_t* lw, int annCount, Result_t* res) {
             // duplicate of the 0 hash or the pad
         } else if ((lw->dedupsIn[i].start % modulo) != lw->inBuf.hashNum) {
             // intended for a different validator node
-        } else if (lw->inBuf.anns[i].hdr.version != 0) {
+        } else if (lw->inBuf.anns[i].hdr.version != lw->inBuf.version) {
             // wrong version
         } else if (Validate_checkAnn(NULL, &lw->inBuf.anns[i], lw->inBuf.parentBlockHash.bytes, &lw->vctx)) {
             // doesn't check out
@@ -601,7 +601,7 @@ void* workerLoop(void* vWorker) {
         } else if ((size_t)bytes < AnnPost_HEADER_SZ + sizeof(PacketCrypt_Announce_t)) {
             DEBUGF("File [%s] is a runt\n", w->lw.inFile->path);
             continue;
-        } else if (w->lw.inBuf.version != 0) {
+        } else if (w->lw.inBuf.version > 1) {
             DEBUGF("File [%s] has incompatible version [%d]\n",
                 w->lw.inFile->path, w->lw.inBuf.version);
             continue;
