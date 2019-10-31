@@ -92,7 +92,7 @@ const httpRes = (ctx, res /*:IncomingMessage*/, reqNum) => {
         } else {
             const invalid = result.inval + result.runt + result.badHash;
             console.error("[" + reqNum +  "] Pool responded: accepted [" + String(result.accepted) + "]" +
-                ((result.dup > 0) ? " duplicated [" + String(result.dup) + "]" : "") +
+                ((result.dup > 0) ? " duplicates [" + String(result.dup) + "]" : "") +
                 ((invalid > 0) ? " invalid [" + String(invalid) + "]" : "") +
                 ((result.unsigned > 0) ? " accepted unsigned [" + String(result.unsigned) + "]" : "") +
                 ((result.totalLen > 0) ? " content length [" + String(result.totalLen) + "]" : "")
