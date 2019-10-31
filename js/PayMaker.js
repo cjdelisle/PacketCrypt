@@ -459,15 +459,24 @@ const sendUpdate = (ctx) => {
     }
     let failed = false;
     nThen((w) => {
-        ctx.rpcClient.configureMiningPayouts(whotopay.result, w((err, ret) => {
-            if (err) {
-                console.error("sendUpdate:", err);
-                failed = true;
-            } else if (!ret || ret.result !== null || ret.error !== null) {
-                console.error("sendUpdate: unexpected result:", ret);
-                failed = true;
-            }
-        }));
+        const again = (i) => {
+            console.error("configuring payouts");
+            ctx.rpcClient.configureMiningPayouts(whotopay.result, w((err, ret) => {
+                if (err) {
+                    if ((err /*:any*/).code === -32603 && i < 20) {
+                        // This is pktd being dumb
+                        setTimeout(() => { again(i+1); }, 1000);
+                        return;
+                    }
+                    console.error("sendUpdate:", err);
+                    failed = true;
+                } else if (!ret || ret.result !== null || ret.error !== null) {
+                    console.error("sendUpdate: unexpected result:", ret);
+                    failed = true;
+                }
+            }));
+        };
+        again(0);
     }).nThen((w) => {
         if (!failed) { return; }
         const wtp = {};
