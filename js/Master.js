@@ -200,11 +200,11 @@ const onBlock = (ctx /*:Context_t*/) => {
     });
 };
 
-const configReq = (ctx, height, _req, res) => {
-    res.setHeader('content-type', 'application/json');
-    res.setHeader('cache-control', 'max-age=8 stale-while-revalidate=2');
-    const cfg = ctx.mut.cfg;
-    const out /*:Protocol_PcConfigJson_t*/ = {
+const mkConfig = module.exports.mkConfig = (
+    cfg /*:Master_Config_t*/,
+    height /*:number*/
+) /*:Protocol_PcConfigJson_t*/ => {
+    return {
         currentHeight: height,
         masterUrl: cfg.root.masterUrl,
         submitAnnUrls: cfg.root.annHandlers.map((x) => (x.url + '/submit')),
@@ -216,7 +216,17 @@ const configReq = (ctx, height, _req, res) => {
         annVersions: cfg.annVersions || [0],
         blkVersions: cfg.blkVersions || [0],
     };
-    res.end(JSON.stringify(out, null, '\t'));
+};
+
+const configReq = module.exports.configReq = (
+    cfg /*:Master_Config_t*/,
+    height /*:number*/,
+    _req /*:IncomingMessage*/,
+    res /*:ServerResponse*/
+) => {
+    res.setHeader('content-type', 'application/json');
+    res.setHeader('cache-control', 'max-age=8 stale-while-revalidate=2');
+    res.end(JSON.stringify(mkConfig(cfg, height), null, '\t'));
 };
 
 const onReq = (ctx /*:Context_t*/, req, res) => {
@@ -227,7 +237,7 @@ const onReq = (ctx /*:Context_t*/, req, res) => {
     }
     const state = ctx.mut.state;
     if (req.url.endsWith('/config.json')) {
-        configReq(ctx, state.work.height, req, res);
+        configReq(ctx.mut.cfg, state.work.height, req, res);
         return;
     }
     let worknum = -1;

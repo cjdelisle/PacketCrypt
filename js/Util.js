@@ -579,7 +579,9 @@ module.exports.uploadPayLogs = (
             }).nThen((w) => {
                 if (failed || fileBuf.length === 0) { return; }
                 console.error("Posting [" + fileName + "] to paymaker [" + url + "]");
-                httpPost(url, { Authorization: authline }, w((res) => {
+                const done = w();
+                const req = httpPost(url, { Authorization: authline }, (res) => {
+                    if (failed) { return; }
                     const data = [];
                     res.on('data', (d) => { data.push(d); });
                     res.on('error', (e) => {
@@ -593,7 +595,14 @@ module.exports.uploadPayLogs = (
                             reply = data.join('');
                         }
                     }));
-                })).end(fileBuf);
+                    done();
+                }).end(fileBuf);
+                req.on('error', (e) => {
+                    if (failed) { return; }
+                    console.error("Unable to post file [" + fileName + "] because [" + e + "]");
+                    failed = true;
+                    done();
+                });
             }).nThen((w) => {
                 if (failed || fileBuf.length === 0) { return; }
                 const id = Crypto.createHash('sha256').update(fileBuf).digest('hex').slice(0,32);

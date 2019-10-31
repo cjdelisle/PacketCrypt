@@ -9,11 +9,13 @@ const Master = require('./js/Master.js');
 const PayMaker = require('./js/PayMaker.js');
 const AnnHandler = require('./js/AnnHandler.js');
 const BlkHandler = require('./js/BlkHandler.js');
+const Tracker = require('./js/Tracker.js');
 
 /*::
 import type { Master_Config_t } from './js/Master.js'
 import type { AnnHandler_Config_t } from './js/AnnHandler.js'
 import type { BlkHandler_Config_t } from './js/BlkHandler.js'
+import type { Tracker_Config_t } from './js/Tracker.js'
 import type { Config_t } from './js/Config.js'
 */
 
@@ -104,6 +106,20 @@ config.master = {
     root: config,
 };
 
+// Tracker config, for following the a remote master
+config.tracker = {
+    // Url of the remote master
+    masterUrl: 'http://example.pool.server/master',
+
+    // Config which will be used for generating master conf
+    masterConf: config.master,
+
+    // Port to bind to, attention: this is the same as the master
+    port: 8080,
+
+    root: config
+};
+
 // Paymaker config
 config.payMaker = {
     // How the miners should access the paymaker (external address)
@@ -154,6 +170,9 @@ const main = (argv, config) => {
     if (argv.indexOf('--payMaker') > -1) {
         return void PayMaker.create(config.payMaker);
     }
+    if (argv.indexOf('--tracker') > -1) {
+        return void Tracker.create(config.tracker);
+    }
     for (let i = 0; i < config.annHandlers.length; i++) {
         if (argv.indexOf('--ann' + i) === -1) { continue; }
         return void AnnHandler.create(config.annHandlers[i]);
@@ -166,6 +185,7 @@ const main = (argv, config) => {
     console.log("Usage:");
     console.log("    --master     # launch the master node");
     console.log("    --payMaker   # launch the paymaker on the master node server");
+    console.log("    --tracker    # launch a tracker which follows a remote master");
     console.log();
     console.log("    --ann<n>     # launch an announcement validator node");
     console.log("    --blk<n>     # launch a block validator node");
