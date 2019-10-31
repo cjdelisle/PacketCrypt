@@ -259,11 +259,15 @@ static void search(Worker_t* restrict w)
 }
 
 static void getNextJob(Worker_t* w) {
-    if (Buf_OBJCMP(&w->job.hah, &w->ctx->hah)) {
+    uint32_t hn = w->job.hah.annHdr.hardNonce;
+    w->job.hah.annHdr.hardNonce = w->ctx->hah.annHdr.hardNonce;
+    if (Buf_OBJCMP(&w->job.hah.annHdr, &w->ctx->hah.annHdr)) {
         Buf_OBJCPY(&w->job.hah, &w->ctx->hah);
         w->job.hah.annHdr.hardNonce += w->workerNum;
     } else {
-        w->job.hah.annHdr.hardNonce += w->ctx->numWorkers;
+        // Always put back the hash because it gets mangled during the mining process
+        Buf_OBJCPY(&w->job.hah.hash, &w->ctx->hah.hash);
+        w->job.hah.annHdr.hardNonce = hn + w->ctx->numWorkers;
     }
     Hash_COMPRESS64_OBJ(&w->job.annHash0, &w->job.hah);
 
