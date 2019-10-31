@@ -101,6 +101,8 @@ matrix:
             - nodejs
       env:
         - MATRIX_EVAL="export LINT=1"
-    - os: osx
-      env:
-        - MATRIX_EVAL="export CC=clang && export CXX=clang++"
+# Homebrew on travis-ci's OSX has been broken for a while
+# e.g. https://travis-ci.org/cjdelisle/PacketCrypt/jobs/605520153
+#    - os: osx
+#      env:
+#        - MATRIX_EVAL="export CC=clang && export CXX=clang++"
