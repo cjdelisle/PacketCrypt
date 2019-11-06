@@ -202,12 +202,14 @@ int main(int argc, const char** argv) {
         pleaseFree = NULL;
 
         double bps = AnnMiner_getAnnsPerSecond(annMiner) * 8;
-        const char* letter = "KMGPYZ?";
-        while (bps > 1000 && *letter != '?') {
-            bps /= 1000;
-            letter = &letter[1];
+        if (bps > 0.0) {
+            const char* letter = "KMGPYZ?";
+            while (bps > 1000 && *letter != '?') {
+                bps /= 1000;
+                letter = &letter[1];
+            }
+            DEBUGF("%.02f%cb/s\n", bps, *letter);
         }
-        DEBUGF("%.02f%cb/s\n", bps, *letter);
     }
 
     AnnMiner_free(annMiner);

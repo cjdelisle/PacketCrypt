@@ -364,6 +364,11 @@ const usage = () => {
         "        --version     # generate announcements of this version\n" +
         "        --paranoia    # if specified, pcann will validate each announcement after\n" +
         "                      # it is generated\n" +
+        "        --maxKbps     # adjust the bandwidth limit (in kilobits) for the miner,\n" +
+        "                      # default value is 1024 (a.k.a. one megabit)\n" +
+        "        --minerId     # an optional number which will be used when mining\n" +
+        "                      # in order to differentiate this miner from others.\n" +
+        "                      # if none is specified then a random one will be chosen.\n" +
         "    <poolurl>         # the URL of the mining pool to connect to\n" +
         "\n" +
         "    See https://github.com/cjdelisle/PacketCrypt/blob/master/docs/annmine.md\n" +
@@ -406,17 +411,17 @@ const main = (argv) => {
     const a = Minimist(argv.slice(2), { boolean: ['randContent','paranoia'] });
     if (!/http(s)?:\/\/.*/.test(a._[0])) { process.exit(usage()); }
     const conf = {
+        paymentAddr: a.paymentAddr || defaultConf.paymentAddr,
+        threads: a.threads || defaultConf.threads,
         corePath: a.corePath || defaultConf.corePath,
         dir: a.dir || defaultConf.dir,
-        paymentAddr: a.paymentAddr || defaultConf.paymentAddr,
-        poolUrl: a._[0],
-        threads: a.threads || defaultConf.threads,
-        minerId: a.minerId || defaultConf.minerId,
         content: undefined,
         randContent: a.randContent || false,
         version: a.version || undefined,
         paranoia: a.paranoia || false,
-        maxKbps: a.maxKbps || 1024
+        maxKbps: a.maxKbps || 1024,
+        minerId: a.minerId || defaultConf.minerId,
+        poolUrl: a._[0],
     };
     if (isNaN(conf.maxKbps / 1)) {
         console.error("ERROR: --maxKbps value [" + conf.maxKbps + "] is not a number");
