@@ -171,7 +171,8 @@ int main(int argc, const char** argv) {
             break;
         }
         if (files.count) {
-            AnnMiner_stop(annMiner);
+            // We don't really need to stop here and if we do so then we lose the kbps counter.
+            //AnnMiner_stop(annMiner);
             for (int i = 0; i < files.count; i++) {
                 //DEBUGF("Re-opening file [%s]\n", files.names[i]);
                 int newOutFileNo = open(files.names[i], O_WRONLY | O_CREAT | O_APPEND, 0666);

@@ -54,13 +54,16 @@ typedef struct AnnMiner_Request_s {
     // a 32 byte pubkey, if all zeros then it is considered that the ann need not be signed
     uint8_t signingKey[32];
 
+    // Limit the number of announcements generated per second
+    uint32_t maxAnnsPerSecond;
+
     // the type of the announcement content
     uint32_t contentType;
 
     // the length of the content
     uint32_t contentLen;
 } AnnMiner_Request_t;
-_Static_assert(sizeof(AnnMiner_Request_t) == 80, "");
+_Static_assert(sizeof(AnnMiner_Request_t) == 84, "");
 
 /**
  * Begin mining announcements with a particular hash and content type.

@@ -177,6 +177,9 @@ typedef struct AnnMiner_Request_s {
     // a 32 byte pubkey, if all zeros then it is considered that the ann need not be signed
     uint8_t signingKey[32];
 
+    // Limit the number of announcements generated per second
+    uint32_t maxAnnsPerSecond;
+
     // the type of the announcement content
     uint32_t contentType;
 
@@ -193,16 +196,19 @@ const rebuildJob = (ctx /*Context_t*/, w /*:Protocol_Work_t*/) => {
         content = { type: 0, val: hexContent };
     }
 
-    const request = Buffer.alloc(80 + (content ? content.val.length : 0));
+    const request = Buffer.alloc(84 + (content ? content.val.length : 0));
     request.writeUInt32LE(w.annTarget, 0);
     request.writeUInt32LE(w.height - 1, 4);
     w.lastHash.copy(request, 8);
     w.signingKey.copy(request, 40);
 
+    let maxAnnsPerSecond = Math.floor(ctx.maxKbps / 8);
+    request.writeUInt32LE(maxAnnsPerSecond, 72);
+
     if (content) {
-        request.writeUInt32LE(content.type, 72);
-        request.writeUInt32LE(content.val.length, 76);
-        content.val.copy(request, 80);
+        request.writeUInt32LE(content.type, 76);
+        request.writeUInt32LE(content.val.length, 80);
+        content.val.copy(request, 84);
     }
 
     messageMiner(ctx, request);
@@ -213,7 +219,7 @@ const getAnnVersion = (ctx) => {
     if (typeof(ctx.config.version) === 'number') {
         if (Protocol.SUPPORTED_ANN_VERSIONS.indexOf(ctx.config.version) === -1) {
             console.error("ERROR: Ann version specified [--version " + ctx.config.version +
-                "] is not supported by this version of the miner.\n" +
+                "] is not supported by this version of the miner. " +
                 "Supported versions: " + JSON.stringify(Protocol.SUPPORTED_ANN_VERSIONS));
             process.exit(100);
         }
@@ -222,8 +228,9 @@ const getAnnVersion = (ctx) => {
         }
         if (ctx.pool.config.annVersions.indexOf(ctx.config.version) === -1) {
             console.error("WARNING: Ann version specified [--version " + ctx.config.version +
-                "] is not supported by the pool.\n" +
+                "] is not supported by the pool. " +
                 "Supported versions: " + JSON.stringify(ctx.pool.config.annVersions || []));
+            return ctx.config.version;
         }
     }
     let result = 0;
@@ -309,6 +316,7 @@ const launch = (config /*:Config_AnnMiner_t*/) => {
             reqNum: 0,
             requestsInFlight: 0,
             annVersion: 0,
+            maxKbps: config.maxKbps
         };
         ctx.annVersion = getAnnVersion(ctx);
         ctx.miner = mkMiner(ctx, submitAnnUrls);
@@ -407,8 +415,21 @@ const main = (argv) => {
         content: undefined,
         randContent: a.randContent || false,
         version: a.version || undefined,
-        paranoia: a.paranoia || false
+        paranoia: a.paranoia || false,
+        maxKbps: a.maxKbps || 1024
     };
+    if (isNaN(conf.maxKbps / 1)) {
+        console.error("ERROR: --maxKbps value [" + conf.maxKbps + "] is not a number");
+        process.exit(100);
+    }
+    if (!a.maxKbps) {
+        console.error("WARNING: You have not passed the --maxKbps flag\n" +
+            "    as a default, mining will be limited to 1000kbps (1Mb).");
+    }
+    if (conf.maxKbps && conf.maxKbps < 8) {
+        console.error("WARNING: --maxKbps cannot be less than 8, defaulting to 8");
+        conf.maxKbps = 8;
+    }
     if (!a.paymentAddr) {
         console.error("WARNING: You have not passed the --paymentAddr flag\n" +
             "    as a default, " + DEFAULT_PAYMENT_ADDR + " will be used,\n" +

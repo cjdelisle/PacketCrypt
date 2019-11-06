@@ -92,6 +92,8 @@ struct Worker_s {
 
     Time timeBetweenFinds;
 
+    uint32_t threadMinMicrosPerAnn;
+
     int softNonce;
     int softNonceMax;
 
@@ -249,9 +251,23 @@ static void search(Worker_t* restrict w)
         Time_END(w->timeBetweenFinds);
         uint64_t micros = Time_MICROS(w->timeBetweenFinds);
         // IIR with alpha of 0.25
-        w->microsPerAnn = w->microsPerAnn * 3 / 4 + (micros / 4);
+        uint32_t mpa = w->microsPerAnn = w->microsPerAnn * 3 / 4 + (micros / 4);
         //fprintf(stderr, "Find in %llu micros (%u)\n", micros, w->microsPerAnn);
         Time_NEXT(w->timeBetweenFinds);
+
+        //fprintf(stderr, "mpa = %u min = %u\n", mpa, w->threadMinMicrosPerAnn);
+        if (mpa < w->threadMinMicrosPerAnn) {
+            // Experimentation has shown that sleeping for as much time as it would take
+            // to find another ann keeps the number about right.
+            uint32_t sleepMicros = w->threadMinMicrosPerAnn;
+            // fprintf(stderr, "Ann production too fast, sleeping for %u microseconds\n",
+            //     sleepMicros);
+            struct timespec ts;
+            ts.tv_sec = sleepMicros / 1000000;
+            sleepMicros -= ts.tv_sec * 1000000;
+            ts.tv_nsec = sleepMicros * 1000;
+            nanosleep(&ts, NULL);
+        }
     }
     w->softNonce = nonce;
 
@@ -384,10 +400,18 @@ void AnnMiner_start(AnnMiner_t* ctx, AnnMiner_Request_t* req, uint8_t* content, 
         }
     }
 
+    uint32_t threadMinMicrosPerAnn = 0;
+    if (req->maxAnnsPerSecond) {
+        uint32_t minMicrosPerAnn = 1000000 / req->maxAnnsPerSecond;
+        threadMinMicrosPerAnn = minMicrosPerAnn * ctx->numWorkers;
+        //fprintf(stderr, "maps %u tmmpa = %u\n", req->maxAnnsPerSecond, threadMinMicrosPerAnn);
+    }
+
     for (int i = 0; i < ctx->numWorkers; i++) {
         if (!ctx->active) {
             Time_BEGIN(ctx->workers[i].timeBetweenFinds);
         }
+        ctx->workers[i].threadMinMicrosPerAnn = threadMinMicrosPerAnn;
         setRequestedState(ctx, &ctx->workers[i], ThreadState_RUNNING);
     }
     pthread_cond_broadcast(&ctx->cond);
