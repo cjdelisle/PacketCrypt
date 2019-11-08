@@ -541,7 +541,8 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
                 console.error("Uploading share [" + filePath + "] [" + i + "] to [" + url + "]");
                 const req = Util.httpPost(url, {
                     'Content-Type': 'application/json',
-                    'x-pc-payto': ctx.config.paymentAddr
+                    'x-pc-payto': ctx.config.paymentAddr,
+                    'x-pc-sver': Protocol.SOFT_VERSION,
                 }, (res) => {
                     httpRes(ctx, res);
                 });
