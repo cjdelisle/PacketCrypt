@@ -18,7 +18,7 @@ export type Protocol_PcConfigJson_t = {
     version: number,
     annVersions?: Array<number>,
     blkVersions?: Array<number>,
-    softVersion: ?number
+    softVersion: ?number,
 };
 
 export type Protocol_RawBlockTemplate_t = {

@@ -349,10 +349,36 @@ const compactToDbl = (c) => {
     if (c < 1) { return 0; }
     return (c & 0x007fffff) * Math.pow(256, (c >> 24) - 3);
 };
+const dblToCompact = (d) => {
+    let exp = 3;
+    while (d > 0x007fffff) {
+        d /= 256;
+        exp++;
+    }
+    if (exp > 20) {
+        return 0x207fffff;
+    }
+    return exp << 24 | d;
+};
 
 // work = 2**256 / (target + 1)
 const TWO_TO_THE_256 = 1.157920892373162e+77;
 const workForTar = (target) => ( TWO_TO_THE_256 / (target + 1) );
+const tarForWork = (work) => {
+    if (work <= 0) {
+        return TWO_TO_THE_256;
+    }
+    return (TWO_TO_THE_256 - work) / work;
+};
+
+const annWorkToTarget = module.exports.annWorkToTarget = (work /*:number*/) => {
+  return dblToCompact(tarForWork(work));
+};
+
+const workMultipleToTarget = module.exports.workMultipleToTarget = (work /*:number*/) => {
+    const tar = tarForWork(work * 4096);
+    return dblToCompact(tar);
+};
 
 const getWorkMultiple = module.exports.getWorkMultiple = (target /*:number*/) => {
     return workForTar(compactToDbl(target)) / 4096;

@@ -10,6 +10,7 @@ const PayMaker = require('./js/PayMaker.js');
 const AnnHandler = require('./js/AnnHandler.js');
 const BlkHandler = require('./js/BlkHandler.js');
 const Tracker = require('./js/Tracker.js');
+const Util = require('./js/Util.js');
 
 /*::
 import type { Master_Config_t } from './js/Master.js'
@@ -92,16 +93,20 @@ config.master = {
     port: 8080,
 
     // Minimum work for an announcement
-    annMinWork:   0x20000fff,
+    // This number is effectively a bandwidth divisor, every time you
+    // double this number you will reduce your bandwidth by a factor of two.
+    annMinWork:   Util.annWorkToTarget(131076),
 
-    // Minimum work for a block share
-    shareMinWork: 0x20000fff,
+    // Average number of shares per block, reducing this number will reduce
+    // load on your block handlers, but increasing it will allow payment
+    // to be spread more evenly between block miners.
+    shareWorkDivisor: 128,
 
     // Which versions of announcements we will accept
-    annVersions: [0],
+    annVersions: [1],
 
     // Which versions of PacketCrypt proof we will accept
-    blkVersions: [0],
+    blkVersions: [2],
 
     root: config,
 };

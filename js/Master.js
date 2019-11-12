@@ -26,7 +26,8 @@ export type Master_Config_t = {
     root: Config_t,
     port: number,
     annMinWork: number,
-    shareMinWork: number,
+    shareWorkDivisor?: number,
+    shareMinWork?: number,
     annVersions: Array<number>,
     blkVersions: Array<number>
 };
@@ -47,7 +48,10 @@ type Context_t = {
     mut: {
         cfg: Master_Config_t,
         longPollId: void|string,
-        state: void|State_t
+        state: void|State_t,
+
+        blockTar: number,
+        shareTar: number
     }
 }
 */
@@ -61,6 +65,10 @@ const reverseBuffer = (buf) => {
     const out = Buffer.alloc(buf.length);
     for (let i = 0; i < buf.length; i++) { out[out.length-1-i] = buf[i]; }
     return out;
+};
+
+const computeShareTar = (blockTarget /*:number*/, divisor /*:number*/) => {
+    return Util.workMultipleToTarget( Util.getWorkMultiple(blockTarget) / divisor );
 };
 
 const onBlock = (ctx /*:Context_t*/) => {
@@ -81,8 +89,24 @@ const onBlock = (ctx /*:Context_t*/) => {
                 return;
             }
             const keyPair = Util.getKeypair(ctx.mut.cfg.root, ret.result.height);
+            const header = Util.bufFromHex(ret.result.header);
+            const blockTar = header.readUInt32LE(72);
+            if (blockTar !== ctx.mut.blockTar) {
+                if (typeof(ctx.mut.cfg.shareWorkDivisor) === 'number') {
+                    ctx.mut.shareTar = computeShareTar(blockTar, ctx.mut.cfg.shareWorkDivisor);
+                } else if (typeof(ctx.mut.cfg.shareMinWork) === 'number') {
+                    ctx.mut.shareTar = ctx.mut.cfg.shareMinWork;
+                } else {
+                    // nothing specified, pick a reasonable default.
+                    console.error("neither shareWorkDivisor nor shareMinWork were specified");
+                    console.error("defaulting to shareWorkDivisor = 64");
+                    ctx.mut.shareTar = computeShareTar(blockTar, 64);
+                }
+                ctx.mut.blockTar = blockTar;
+            }
+
             let work = Protocol.workFromRawBlockTemplate(ret.result, keyPair.publicKey,
-                ctx.mut.cfg.shareMinWork, ctx.mut.cfg.annMinWork);
+                ctx.mut.shareTar, ctx.mut.cfg.annMinWork);
             newState = Object.freeze({
                 work: work,
                 keyPair: keyPair,
@@ -294,7 +318,10 @@ module.exports.create = (cfg /*:Master_Config_t*/) => {
             mut: {
                 cfg: cfg,
                 longPollId: undefined,
-                state: undefined
+                state: undefined,
+
+                blockTar: 0,
+                shareTar: 0
             }
         });
         Http.createServer((req, res) => {
