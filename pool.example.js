@@ -105,9 +105,6 @@ config.master = {
     // Which versions of announcements we will accept
     annVersions: [1],
 
-    // Which versions of PacketCrypt proof we will accept
-    blkVersions: [2],
-
     root: config,
 };
 

@@ -17,7 +17,6 @@ export type Protocol_PcConfigJson_t = {
     paymakerUrl: string,
     version: number,
     annVersions?: Array<number>,
-    blkVersions?: Array<number>,
     softVersion: ?number,
 };
 
