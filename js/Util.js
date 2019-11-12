@@ -355,7 +355,7 @@ const dblToCompact = (d) => {
         d /= 256;
         exp++;
     }
-    if (exp > 20) {
+    if (exp > 0x20) {
         return 0x207fffff;
     }
     return exp << 24 | d;
