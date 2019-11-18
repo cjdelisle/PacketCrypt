@@ -133,7 +133,7 @@ const getDifficulty = (ctx, time) => {
 };
 
 const earliestValidTime = (ctx) => {
-    return (+new Date()) - (1000 * ctx.mut.cfg.historyDepth);
+    return ctx.mut.mostRecentEventTime - (1000 * ctx.mut.cfg.historyDepth);
 };
 
 const isRelevant = (ctx, elem) => {
@@ -153,6 +153,8 @@ const onShare = (ctx, elem /*:ShareEvent_t*/, warn) => {
             // we can't credit this share because we don't know the diff at that time
             elem.credit = null;
         } else {
+            // console.log("Difficulty: " + diff);
+            // console.log("ShareTarget: " + Util.getWorkMultiple(elem.target));
             elem.credit = Util.getWorkMultiple(elem.target) / diff;
         }
         ctx.dedupTable[elem.eventId] = true;
@@ -185,6 +187,8 @@ const onAnns = (ctx, elem /*:AnnsEvent_t*/, warn) => {
             elem.credit = null;
         } else {
             elem.credit = getPayableAnnWork(elem) / diff;
+            // console.log("ann payable work:", getPayableAnnWork(elem));
+            // console.log("difficulty:", diff);
         }
         ctx.dedupTable[elem.eventId] = true;
         ctx.anns.insert(elem);
@@ -395,7 +399,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         let toPay = s.credit / ctx.mut.cfg.pplnsBlkConstantX;
         if (toPay >= remaining) { toPay = remaining; }
         if (!mostRecentlySeen[s.payTo]) { mostRecentlySeen[s.payTo] = s.time; }
-        payoutShares[s.payTo] = (payoutShares[s.payTo] || 0) + s.credit;
+        payoutShares[s.payTo] = (payoutShares[s.payTo] || 0) + 1;
         payouts[s.payTo] = (payouts[s.payTo] || 0) + toPay;
         remaining -= toPay;
         if (remaining === 0) { return false; }
@@ -419,7 +423,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         let toPay = a.credit / ctx.mut.cfg.pplnsAnnConstantX;
         if (toPay >= remaining) { toPay = remaining; }
         if (!mostRecentlySeen[a.payTo]) { mostRecentlySeen[a.payTo] = a.time; }
-        payoutAnns[a.payTo] = (payoutAnns[a.payTo] || 0) + a.credit;
+        payoutAnns[a.payTo] = (payoutAnns[a.payTo] || 0) + a.accepted;
         payouts[a.payTo] = (payouts[a.payTo] || 0) + toPay;
         remaining -= toPay;
         if (remaining === 0) { return false; }
