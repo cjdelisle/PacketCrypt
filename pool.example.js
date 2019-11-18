@@ -171,6 +171,7 @@ config.payMaker.updateHook = (x /*:PayMaker_Result_t*/) => {
     Util.normalize(x.result, 4800000);
     Util.normalize(x.payoutAnns, 4800000 * config.payMaker.blockPayoutFraction);
     Util.normalize(x.payoutShares, 4800000 * (1 - config.payMaker.blockPayoutFraction));
+    return x;
 };
 
 const main = (argv, config) => {
