@@ -160,18 +160,12 @@ config.payMaker = {
 
     // A function which pre-treats updates before they're sent to pktd
     updateHook: (x /*:PayMaker_Result_t*/) => {
+        // Make the results reflect expected payout per day
+        Util.normalize(x.result, 4800000);
         return x;
     },
 
     root: config,
-};
-
-// Make the results reflect expected payout per day
-config.payMaker.updateHook = (x /*:PayMaker_Result_t*/) => {
-    Util.normalize(x.result, 4800000);
-    Util.normalize(x.payoutAnns, 4800000 * config.payMaker.blockPayoutFraction);
-    Util.normalize(x.payoutShares, 4800000 * (1 - config.payMaker.blockPayoutFraction));
-    return x;
 };
 
 const main = (argv, config) => {
