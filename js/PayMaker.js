@@ -378,6 +378,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
     let remaining = ctx.mut.cfg.blockPayoutFraction;
     const payouts = {};
     const payoutShares = {};
+    const mostRecentlySeen = {};
     const warn = [];
     let earliestBlockPayout = Infinity;
     ctx.shares.reach((s) => {
@@ -387,6 +388,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         earliestBlockPayout = s.time;
         let toPay = s.credit / ctx.mut.cfg.pplnsBlkConstantX;
         if (toPay >= remaining) { toPay = remaining; }
+        if (!mostRecentlySeen[s.payTo]) { mostRecentlySeen[s.payTo] = s.time; }
         payoutShares[s.payTo] = (payoutShares[s.payTo] || 0) + s.credit;
         payouts[s.payTo] = (payouts[s.payTo] || 0) + toPay;
         remaining -= toPay;
@@ -410,6 +412,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         earliestAnnPayout = a.time;
         let toPay = a.credit / ctx.mut.cfg.pplnsAnnConstantX;
         if (toPay >= remaining) { toPay = remaining; }
+        if (!mostRecentlySeen[a.payTo]) { mostRecentlySeen[a.payTo] = a.time; }
         payoutAnns[a.payTo] = (payoutAnns[a.payTo] || 0) + a.credit;
         payouts[a.payTo] = (payouts[a.payTo] || 0) + toPay;
         remaining -= toPay;
@@ -438,6 +441,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         latestPayout: latestPayout,
         payoutShares: payoutShares,
         payoutAnns: payoutAnns,
+        lastSubmissions: mostRecentlySeen,
         result: payouts
     });
 };
