@@ -674,4 +674,15 @@ module.exports.uploadPayLogs = (
     });
 };
 
+const normalize = module.exports.normalize = (
+  obj /*:{[string]:number}*/,
+  desiredSum /*:number*/
+) => {
+    let sum = 0;
+    Object.keys(obj).forEach((k) => { sum += obj[k]; });
+    if (sum === 0) { return; }
+    const multiplier = desiredSum / sum;
+    Object.keys(obj).forEach((k) => { obj[k] *= multiplier; });
+};
+
 Object.freeze(module.exports);

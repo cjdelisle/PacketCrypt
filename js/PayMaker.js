@@ -79,7 +79,13 @@ type BinTree_t<X> = {
 export type PayMaker_Result_t = {
     warn: Array<string>,
     error: Array<string>,
-    result: { [string]: number }
+    earliestBlockPayout: number,
+    earliestAnnPayout: number,
+    latestPayout: number,
+    payoutShares: { [string]: number },
+    payoutAnns: { [string]: number },
+    lastSubmissions: { [string]: number },
+    result: { [string]: number },
 };
 export type PayMaker_Config_t = {
     url: string,

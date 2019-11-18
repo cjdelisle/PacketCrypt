@@ -18,6 +18,7 @@ import type { AnnHandler_Config_t } from './js/AnnHandler.js'
 import type { BlkHandler_Config_t } from './js/BlkHandler.js'
 import type { Tracker_Config_t } from './js/Tracker.js'
 import type { Config_t } from './js/Config.js'
+import type { PayMaker_Result_t } from './js/PayMaker.js'
 */
 
 const config = {};
@@ -158,11 +159,18 @@ config.payMaker = {
     errorAddress: "pkt1q6hqsqhqdgqfd8t3xwgceulu7k9d9w5t2amath0qxyfjlvl3s3u4sjza2g2",
 
     // A function which pre-treats updates before they're sent to pktd
-    updateHook: (x) => {
+    updateHook: (x /*:PayMaker_Result_t*/) => {
         return x;
     },
 
     root: config,
+};
+
+// Make the results reflect expected payout per day
+config.payMaker.updateHook = (x /*:PayMaker_Result_t*/) => {
+    Util.normalize(x.result, 4800000);
+    Util.normalize(x.payoutAnns, 4800000 * config.payMaker.blockPayoutFraction);
+    Util.normalize(x.payoutShares, 4800000 * (1 - config.payMaker.blockPayoutFraction));
 };
 
 const main = (argv, config) => {
