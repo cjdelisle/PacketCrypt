@@ -580,7 +580,12 @@ const loadData = (ctx /*:Context_t*/, done) => {
         files.forEach((f) => {
             nt = nt((w) => {
                 const fileName = ctx.workdir + '/' + f;
-                console.error("Loading data from from [" + fileName + "]");
+                let dateFile = '<unknown date>';
+                fileName.replace(/paylog_[0-9]+_/, (all, x) => {
+                    dateFile = (new Date(Number(x))).toISOString();
+                });
+                console.error("Loading data from [" + fileName + "] [" +
+                    dateFile + "]");
                 Fs.readFile(fileName, 'utf8', w((err, ret) => {
                     // These files should not be deleted
                     if (err) { throw err; }
