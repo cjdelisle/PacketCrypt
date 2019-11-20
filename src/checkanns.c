@@ -33,9 +33,16 @@
 #include <math.h>
 #include <pthread.h>
 
-#define OUT_ANN_CAP (1024*16)
+#define OUT_ANN_CAP 1024
 #define DEDUPE_INITIAL_CAP (1024*1024)
-#define IN_ANN_CAP 1
+
+#ifdef PCP2
+    #define IN_ANN_CAP 1024
+#else
+    // packetcrypt 1 needed to send data with announcements
+    // so it was not safe to try reading more than one at a time.
+    #define IN_ANN_CAP 1
+#endif
 #define STATE_FILE_VERSION (0)
 
 #define WRITE_EVERY_SECONDS 60
@@ -379,10 +386,7 @@ static int dedupeCritical(Worker_t* w, int inCount) {
     return goodCount;
 }
 
-static bool processAnns1(Worker_t* w, Result_t* res, int fileNo) {
-    // We're setup for doing batches of announcements, but currently
-    // we're doing just one at a time.
-    int annCount = 1;
+static bool processAnns1(Worker_t* w, Result_t* res, int fileNo, int annCount) {
 
     mkDedupes(w->lw.dedupsIn, w->lw.inBuf.anns, annCount);
     int validCount = validateAnns(&w->lw, annCount, res);
@@ -422,7 +426,7 @@ static bool processAnns1(Worker_t* w, Result_t* res, int fileNo) {
     return goodCount > 0;
 }
 
-static void processAnns(Worker_t* w, int fileNo) {
+static void processAnns(Worker_t* w, int fileNo, int annCount) {
     Result_t res;
     Buf_OBJSET(&res, 0);
     Buf_OBJCPY(res.payTo, w->lw.inBuf.payTo);
@@ -431,6 +435,7 @@ static void processAnns(Worker_t* w, int fileNo) {
     Time_BEGIN(t);
     //DEBUGF("Processing ann file %s\n", w->lw.inFile->name);
     for (;;) {
+#ifndef PCP2
         uint8_t* contentBuf = NULL;
         uint32_t len = w->lw.inBuf.anns[0].hdr.contentLength;
         if (len > 32) {
@@ -475,7 +480,7 @@ static void processAnns(Worker_t* w, int fileNo) {
             }
             checkedWrite(w->lw.tmpFile.path, outFileNo, contentBuf, len);
             close(outFileNo);
-            if (processAnns1(w, &res, fileNo)) {
+            if (processAnns1(w, &res, fileNo, 1)) {
                 // We need to re-copy the filename over again because tmpFile might
                 // be used inside of processAnns1
                 strncpy(w->lw.tmpFile.name, w->lw.annContentFile.name, FilePath_NAME_SZ);
@@ -493,11 +498,13 @@ static void processAnns(Worker_t* w, int fileNo) {
                 }
             }
         } else {
-            processAnns1(w, &res, fileNo);
+            processAnns1(w, &res, fileNo, 1);
         }
 
         free(contentBuf);
-
+#else
+        processAnns1(w, &res, fileNo, annCount);
+#endif
         ssize_t bytes = read(fileNo, w->lw.inBuf.anns,
             sizeof(PacketCrypt_Announce_t) * IN_ANN_CAP);
         if (bytes < 0) {
@@ -511,6 +518,14 @@ static void processAnns(Worker_t* w, int fileNo) {
             res.runt++;
             break;
         }
+#ifdef PCP2
+        annCount = bytes / 1024;
+        if (annCount * 1024 != bytes) {
+            DEBUGF("File [%s] size is not an even multiple of 1024\n", w->lw.inFile->name);
+            res.runt++;
+            break;
+        }
+#endif
     }
     strncpy(w->lw.tmpFile.name, w->lw.inFile->name, FilePath_NAME_SZ);
     int outFileNo = open(w->lw.tmpFile.path, O_EXCL | O_CREAT | O_WRONLY, 0666);
@@ -601,7 +616,20 @@ void* workerLoop(void* vWorker) {
                 w->lw.inFile->path, w->lw.inBuf.version);
             continue;
         }
-        processAnns(w, inFileNo);
+        int annCount = 1;
+#ifdef PCP2
+        if (w->lw.inBuf.version < 1) {
+            DEBUGF("File [%s] has incompatible version [%d]\n",
+                w->lw.inFile->path, w->lw.inBuf.version);
+            continue;
+        }
+        annCount = bytes / 1024;
+        if (annCount / 1024 != bytes) {
+            DEBUGF("File [%s] size is not an even multiple of 1024\n", w->lw.inFile->name);
+            continue;
+        }
+#endif
+        processAnns(w, inFileNo, annCount);
     }
 }
 
