@@ -615,13 +615,14 @@ static void destroyMaster(MasterThread_t* mt) {
 // if mt->g.paylogFileNo > -1 then dup2 the file descriptor over this
 // otherwise mt->g.paylogFileNo is configured to the fileno
 // returns 0 on success, -1 on error
-static int openPayLog(MasterThread_t* mt, DIR* logDir) {
+static int openPayLog(MasterThread_t* mt, DIR* logDir, const char* paylogDir) {
     long biggestFile = 0;
     for (;;) {
         struct dirent* file = readdir(logDir);
         if (file == NULL) {
             if (errno != 0) {
-                DEBUGF("Error reading paylog dir errno=[%s]\n", strerror(errno));
+                DEBUGF("Error reading paylog dir [%s] errno=[%s]\n",
+                    paylogDir, strerror(errno));
                 return -1;
             }
             rewinddir(logDir);
@@ -695,7 +696,7 @@ int main(int argc, const char** argv) {
         DEBUGF("Could not access paylog directory [%s] errno=[%s]", paylogDir, strerror(errno));
         assert(0);
     }
-    if (openPayLog(mt, logdir)) {
+    if (openPayLog(mt, logdir, paylogDir)) {
         assert(0 && "Unable to open payLog");
     }
 
@@ -718,7 +719,7 @@ int main(int argc, const char** argv) {
         if (WorkQueue_masterScan(mt->g.q)) { sleep(1); }
         Time_END(mt->paylogCycleTime);
         if (Time_MICROS(mt->paylogCycleTime) > 60000000) {
-            openPayLog(mt, logdir);
+            openPayLog(mt, logdir, paylogDir);
         }
     }
 
