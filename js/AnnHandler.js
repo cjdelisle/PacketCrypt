@@ -370,6 +370,19 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
                             if (!err) { return; }
                             console.error("Failed to delete [" + path + "] [" + err.message + "]");
                         }));
+                    }).nThen((w) => {
+                        const haf = ctx.workdir + '/anndir/anns_' + ctx.mut.highestAnnFile + '.bin';
+                        Fs.stat(haf, w((err, _) => {
+                            if (err && err.code === 'ENOENT') {
+                                // Lets just have them restart the server in this case
+                                // There are no ann files left and it's better to reload from scratch.
+                                console.error("Please restart");
+                                if (ctx.mut.checkanns) { ctx.mut.checkanns.kill('SIGINT'); }
+                                process.exit(100);
+                            } else if (err) {
+                                console.error("Failed to stat [" + haf + "] [" + err.message + "]");
+                            }
+                        }));
                     }).nThen(done);
                 }, ()=>{});
             });
