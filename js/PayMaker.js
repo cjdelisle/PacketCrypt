@@ -583,6 +583,7 @@ const loadData = (ctx /*:Context_t*/, done) => {
                 let dateFile = '<unknown date>';
                 fileName.replace(/paylog_[0-9]+_/, (all, x) => {
                     dateFile = (new Date(Number(x))).toISOString();
+                    return '';
                 });
                 console.error("Loading data from [" + fileName + "] [" +
                     dateFile + "]");
