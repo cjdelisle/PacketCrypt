@@ -16,6 +16,9 @@ const Util = require('./Util.js');
 const Protocol = require('./Protocol.js');
 const PoolClient = require('./PoolClient.js');
 
+// Make sure this aligns with checkanns.c
+const STATE_OUTPUT_BITS = 2;
+
 /*::
 import type { WriteStream } from 'fs';
 import type { ChildProcess } from 'child_process';
@@ -59,9 +62,7 @@ const launchCheckanns = (ctx /*:Context_t*/) => {
         ctx.workdir + '/indir',
         ctx.workdir + '/outdir',
         ctx.workdir + '/anndir',
-        ctx.workdir + '/statedir',
         ctx.workdir + '/tmpdir',
-        ctx.workdir + '/contentdir',
         ctx.workdir + '/paylogdir',
     ];
     console.error(ctx.mut.cfg.root.checkannsPath + ' ' + args.join(' '));
@@ -111,9 +112,10 @@ const onSubmit = (ctx, req, res) => {
     if (!currentWork) {
         return void errorEnd(500, "currentWork is unknown");
     }
-    if (worknum > ctx.poolClient.currentHeight || worknum < ctx.poolClient.currentHeight-3) {
+    const oldestValid = ctx.poolClient.currentHeight - (1<<STATE_OUTPUT_BITS) + 1;
+    if (worknum > ctx.poolClient.currentHeight || worknum < oldestValid) {
         return void errorEnd(400, "x-pc-worknum out of range, range: [" +
-            (ctx.poolClient.currentHeight-3) + "] to [" + ctx.poolClient.currentHeight + "]");
+            oldestValid + "] to [" + ctx.poolClient.currentHeight + "]");
     }
     const fileName = 'annshare_' + worknum + '_' + Crypto.randomBytes(16).toString('hex') + '.bin';
     const fileUploadPath = ctx.workdir + '/uploaddir/' + fileName;
@@ -261,8 +263,8 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
             Util.checkMkdir(ctx.workdir + '/indir', w());
             Util.checkMkdir(ctx.workdir + '/outdir', w());
             Util.checkMkdir(ctx.workdir + '/anndir', w());
-            Util.checkMkdir(ctx.workdir + '/statedir', w());
-            Util.checkMkdir(ctx.workdir + '/contentdir', w());
+            //Util.checkMkdir(ctx.workdir + '/statedir', w());
+            //Util.checkMkdir(ctx.workdir + '/contentdir', w());
 
             Util.checkMkdir(ctx.workdir + '/tmpdir', w());
             Util.checkMkdir(ctx.workdir + '/uploaddir', w());

@@ -33,31 +33,30 @@
 #include <math.h>
 #include <pthread.h>
 
+// The initial capacity of the deduplication table, 8 times this number
+// times 2 to the power of STATE_OUTPUT_BITS will be allocated at the start
+// but if more is needed, it will be realloc'd
+#define DEDUPE_INITIAL_CAP (1024*16)
+
+// Maximum number of incoming announcements to process in one shot.
+// This is only a performance affecting number as a single file can
+// have as many announcements as you want, they will just be read
+// one block at a time.
+#define IN_ANN_CAP 256
+
+// Number of announcements to group before outputting a file, 1024 anns will make
+// the files coming from checkanns be 1MB each.
 #define OUT_ANN_CAP 1024
-#define DEDUPE_INITIAL_CAP (1024*1024)
 
-#ifdef PCP2
-    #define IN_ANN_CAP 1024
-#else
-    // packetcrypt 1 needed to send data with announcements
-    // so it was not safe to try reading more than one at a time.
-    #define IN_ANN_CAP 1
-#endif
-#define STATE_FILE_VERSION (0)
-
+// Every WRITE_EVERY_SECONDS seconds, we will output a (potentially very small)
+// file, even if the chain is not moving and announcements are coming in slowly.
 #define WRITE_EVERY_SECONDS 60
 
-typedef struct AnnEntry_s {
-    // beginning of the hash (for deduplication)
-    uint64_t start;
+// Number of previous blocks that we will accept announcements for
+// is 2 to the power of STATE_OUTPUT_BITS
+// Make sure this aligns with AnnHandler.js
+#define STATE_OUTPUT_BITS 2
 
-    // difficulty when mined
-    uint32_t diff;
-
-    // height of parent block
-    uint32_t height;
-} AnnEntry_t;
-_Static_assert(sizeof(AnnEntry_t) == 16, "");
 
 #define DEBUGF0(format) \
     fprintf(stderr, "checkanns: " format)
@@ -66,14 +65,12 @@ _Static_assert(sizeof(AnnEntry_t) == 16, "");
     fprintf(stderr, "checkanns: " format, __VA_ARGS__)
 
 static int usage() {
-    fprintf(stderr, "Usage: ./checkanns <indir> <outdir> <anndir> <statedir> <tmpdir> "
-            "<contentdir>\n"
+    fprintf(stderr, "Usage: ./checkanns <indir> <outdir> <anndir> <tmpdir> <paylogdir>\n"
         "    <indir>           # a dir which will be scanned for incoming ann files\n"
         "    <outdir>          # a dir where result files will be placed\n"
         "    <anndir>          # a dir where verified announcements will be placed\n"
-        "    <statedir>        # a dir which will be used for keeping track of duplicates\n"
         "    <tempdir>         # a dir which will be used for creating result files\n"
-        "    <contentdir>      # a dir where announcement headers+content will be placed\n"
+        "    <paylogdir>       # a dir to put logs of who should be paid for announcements\n"
         "\n"
         "    See https://github.com/cjdelisle/PacketCrypt/blob/master/docs/checkanns.md\n"
         "    for more information\n");
@@ -106,12 +103,6 @@ typedef struct StateFile_Header_s {
 } StateFile_Header_t;
 #define StateFile_Header_SZ 8
 _Static_assert(sizeof(StateFile_Header_t) == StateFile_Header_SZ, "");
-
-typedef struct StateFile_s {
-    StateFile_Header_t hdr;
-    AnnEntry_t dedups[OUT_ANN_CAP];
-} StateFile_t;
-_Static_assert(sizeof(StateFile_t) == StateFile_Header_SZ + sizeof(AnnEntry_t) * OUT_ANN_CAP, "");
 
 static void checkedWrite(const char* filename, int fileno, void* ptr, int len) {
     ssize_t written = write(fileno, ptr, len);
@@ -147,18 +138,29 @@ typedef struct Result_s {
     uint8_t payTo[64];
 } Result_t;
 
+typedef struct Dedup_s {
+    // Number of entries in dedupTable
+    int dedupTableLen;
+
+    // Number of entries which dedupTable can hold before it needs to be realloc()'d
+    int dedupTableCap;
+
+    // The dedup table
+    uint64_t entries[];
+} Dedup_t;
+#define Dedup_SIZE(entries) (sizeof(Dedup_t) + ((entries) * sizeof(uint64_t)))
+_Static_assert(Dedup_SIZE(0) == 8, "");
+_Static_assert(Dedup_SIZE(1) == 8 + sizeof(uint64_t), "");
+
 typedef struct StateAndOutput_s {
+    uint32_t parentBlockHeight;
+
     // Number of elements in dedupsOut and out (they are appended in lockstep)
     int outCount;
-
-    // Number which will be used in the name of the next ann/state file that is output
-    int nextStateFileNo;
 
     // Time when the last anns file was written (or when the daemon was started)
     uint64_t timeOfLastWrite;
 
-    // Outputs (will be written to the out directories)
-    StateFile_t state;
     PacketCrypt_Announce_t out[OUT_ANN_CAP];
 } StateAndOutput_t;
 
@@ -169,7 +171,7 @@ typedef struct LocalWorker_s {
     AnnPost_t inBuf;
 
     // Dedup entries created from inBuf
-    AnnEntry_t dedupsIn[IN_ANN_CAP];
+    uint64_t dedupsIn[IN_ANN_CAP];
 
     FilePath_t* inFile;
 
@@ -180,26 +182,23 @@ typedef struct LocalWorker_s {
     // its name can change at any time so it must be set just before opening it.
     FilePath_t tmpFile;
 
-    // This is a file which stores the deduplication table
-    FilePath_t stateFile;
-
     // This is a file which stores a batch of announcement headers for downloading by block miners.
     FilePath_t annFile;
 
-    // This file stores the header and content of a single announcement.
-    FilePath_t annContentFile;
+    // This is the SAO which we are currently writing to disk, we do a switcheroo between
+    // this and the active SAO so that we will not make a filesystem write call while holding
+    // the global lock.
+    StateAndOutput_t* backupSao;
 
     // Used for validation
     PacketCrypt_ValidateCtx_t vctx;
 } LocalWorker_t;
 
-static void mkDedupes(AnnEntry_t* dedupsOut, const PacketCrypt_Announce_t* annsIn, int annCount) {
+static void mkDedupes(uint64_t* dedupsOut, const PacketCrypt_Announce_t* annsIn, int annCount) {
     for (int i = 0; i < annCount; i++) {
         Buf32_t b;
         Hash_COMPRESS32_OBJ(&b, &annsIn[i]);
-        dedupsOut[i].start = b.longs[0];
-        dedupsOut[i].diff = annsIn[i].hdr.workBits;
-        dedupsOut[i].height = annsIn[i].hdr.parentBlockHeight;
+        dedupsOut[i] = b.longs[0];
     }
 }
 
@@ -215,9 +214,9 @@ static int validateAnns(LocalWorker_t* lw, int annCount, Result_t* res) {
             // wrong parent block height
         } else if (lw->inBuf.minWork < lw->inBuf.anns[i].hdr.workBits) {
             // not enough work
-        } else if (lw->dedupsIn[i].start == 0 || lw->dedupsIn[i].start == UINT64_MAX) {
+        } else if (lw->dedupsIn[i] == 0 || lw->dedupsIn[i] == UINT64_MAX) {
             // duplicate of the 0 hash or the pad
-        } else if ((lw->dedupsIn[i].start % modulo) != lw->inBuf.hashNum) {
+        } else if ((lw->dedupsIn[i] % modulo) != lw->inBuf.hashNum) {
             // intended for a different validator node
         } else if (lw->inBuf.anns[i].hdr.version != lw->inBuf.version) {
             // wrong version
@@ -234,43 +233,27 @@ static int validateAnns(LocalWorker_t* lw, int annCount, Result_t* res) {
             continue;
         }
         // Flag it as no-good, 0 is invalid by definition anyway
-        lw->dedupsIn[i].start = 0;
+        lw->dedupsIn[i] = 0;
     }
     return goodCount;
 }
 
-static void writeAnns(LocalWorker_t* lw, StateAndOutput_t* anns) {
+static void writeAnns(LocalWorker_t* lw, int annFileNo, StateAndOutput_t* anns) {
 
     if (anns->outCount == 0) { return; }
-    // Try to create the new state file, if we're unsuccessful (exists) then we
-    // bump the number. If anything else goes wrong then we crash so that we won't
-    // be collecting announcements, crediting people, then deleting them.
-    int stateFileno = -1;
-    for (;;) {
-        snprintf(lw->stateFile.name, FilePath_NAME_SZ, "state_%d.bin", anns->nextStateFileNo);
-        snprintf(lw->annFile.name, FilePath_NAME_SZ, "anns_%d.bin", anns->nextStateFileNo);
-        stateFileno = open(lw->stateFile.path, O_EXCL | O_CREAT | O_WRONLY, 0666);
-        if (stateFileno < 0) {
-            DEBUGF("Unable to open state file [%s] [%s]\n",
-                lw->stateFile.path, strerror(errno));
-            assert(0);
-        }
-        break;
-    }
+
+    snprintf(lw->annFile.name, FilePath_NAME_SZ, "anns_%d.bin", annFileNo);
     strcpy(lw->tmpFile.name, lw->annFile.name);
     int annFileno = open(lw->tmpFile.path, O_EXCL | O_CREAT | O_WRONLY, 0666);
     if (annFileno < 0) {
-        DEBUGF("Unable to open ann output file [%s] [%s]\n",
+        DEBUGF("Unable to open ann output temp file [%s] [%s]\n",
             lw->tmpFile.path, strerror(errno));
         assert(0);
     }
     DEBUGF("Writing ann file [%s]\n", lw->tmpFile.name);
 
-    checkedWrite(lw->stateFile.path, stateFileno, &anns->state,
-        StateFile_Header_SZ + anns->outCount * sizeof(anns->state.dedups[0]));
     checkedWrite(lw->tmpFile.path, annFileno, anns->out,
         anns->outCount * sizeof(anns->out[0]));
-    close(stateFileno);
     close(annFileno);
     if (rename(lw->tmpFile.path, lw->annFile.path)) {
         DEBUGF("error renaming temp file [%s] to ann file [%s] [%s]\n",
@@ -282,27 +265,19 @@ static void writeAnns(LocalWorker_t* lw, StateAndOutput_t* anns) {
 
 /// locks and such happen below here
 
-typedef struct Dedup_s {
-    // Number of entries in dedupTable
-    int dedupTableLen;
-
-    // Number of entries which dedupTable can hold before it needs to be realloc()'d
-    int dedupTableCap;
-
-    // The dedup table
-    AnnEntry_t entries[];
-} Dedup_t;
-#define Dedup_SIZE(entries) (sizeof(Dedup_t) + ((entries) * sizeof(AnnEntry_t)))
-_Static_assert(Dedup_SIZE(0) == 8, "");
-_Static_assert(Dedup_SIZE(1) == 8 + sizeof(AnnEntry_t), "");
-
 typedef struct Global_s {
     pthread_mutex_t deduplock;
 
     int paylogFileNo;
     WorkQueue_t* q;
-    StateAndOutput_t* sao;
-    Dedup_t* dedup;
+
+    // Number which will be used in the name of the next ann file that is output
+    int nextAnnFileNo;
+
+    StateAndOutput_t* stateAndOutput[1<<STATE_OUTPUT_BITS];
+
+    // Dedup table
+    Dedup_t* dedups[1<<STATE_OUTPUT_BITS];
 } Global_t;
 
 typedef struct Worker_s {
@@ -310,75 +285,76 @@ typedef struct Worker_s {
     LocalWorker_t lw;
 } Worker_t;
 
-// must be called with the dedup lock
-static void tryWriteAnnsCritical(Worker_t* w, uint32_t nextParentHeight) {
-    StateAndOutput_t* current = w->g->sao;
+#define SAO_CRITICAL(g, parentBlockHeight) \
+    (g)->stateAndOutput[(parentBlockHeight) & ((1<<STATE_OUTPUT_BITS)-1)]
 
+#define DEDUP_CRITICAL(g, parentBlockHeight) \
+    (g)->dedups[(parentBlockHeight) & ((1<<STATE_OUTPUT_BITS)-1)]
+
+// must be called with the dedup lock
+static void tryWriteAnnsCritical(Worker_t* w, uint32_t parentBlockHeight, bool newBlock) {
     // If we don't manage a write, it's because there was nothing to write.
     // in any case, we will update the time so as to avoid busy-looping on
     // attempts to write nothing.
-    current->timeOfLastWrite = nowSeconds();
-
-    if (current->outCount == 0) {
-        assert(current->state.hdr.parentBlockHeight <= nextParentHeight);
-        current->state.hdr.parentBlockHeight = nextParentHeight;
+    StateAndOutput_t* current = SAO_CRITICAL(w->g, parentBlockHeight);
+    if (!current->outCount && !newBlock) {
+        current->timeOfLastWrite = nowSeconds();
         return;
     }
 
-    StateAndOutput_t* next = malloc(sizeof(StateAndOutput_t));
-    assert(next);
-    next->state.hdr.version = 0;
-    next->state.hdr.parentBlockHeight = nextParentHeight;
+    int afn = w->g->nextAnnFileNo++;
+
+    StateAndOutput_t* next = w->lw.backupSao;
+    w->lw.backupSao = current;
+    next->parentBlockHeight = parentBlockHeight;
+    if (newBlock) {
+        next->parentBlockHeight++;
+        DEDUP_CRITICAL(w->g, parentBlockHeight)->dedupTableLen = 0;
+        // TODO(cjd): Perhaps we want to reduce the capacity somewhat in order
+        // that the dedup table will not fix itself at the largest size it has
+        // ever needed to be.
+    }
     next->outCount = 0;
-    next->nextStateFileNo = current->nextStateFileNo + 1;
     next->timeOfLastWrite = nowSeconds();
 
-    w->g->sao = next;
+    SAO_CRITICAL(w->g, parentBlockHeight) = next;
 
     assert(!pthread_mutex_unlock(&w->g->deduplock));
-    writeAnns(&w->lw, current);
-    free(current);
+    writeAnns(&w->lw, afn, current);
     assert(!pthread_mutex_lock(&w->g->deduplock));
 }
 
 // must be called with the dedup lock
 static int dedupeCritical(Worker_t* w, int inCount) {
-    Dedup_t* dedup = w->g->dedup;
     LocalWorker_t* lw = &w->lw;
+    Dedup_t* dedup = DEDUP_CRITICAL(w->g, lw->inBuf.parentBlockHeight);
     for (int x = 0; x < dedup->dedupTableLen; x++) {
-        AnnEntry_t* tblEntry = &dedup->entries[x];
+        uint64_t tblEntry = dedup->entries[x];
         for (int i = 0; i < inCount; i++) {
-            AnnEntry_t* td = &lw->dedupsIn[i];
-            if (td->start != tblEntry->start) { continue; }
-            // toDedup is a dupe but has less work done on it
-            td->start = 0;
+            if (lw->dedupsIn[i] != tblEntry) { continue; }
+            lw->dedupsIn[i] = 0;
         }
     }
     while (dedup->dedupTableLen + inCount > dedup->dedupTableCap) {
         dedup->dedupTableCap *= 2;
-        dedup = w->g->dedup = realloc(dedup, Dedup_SIZE(dedup->dedupTableCap));
+        dedup = DEDUP_CRITICAL(w->g, lw->inBuf.parentBlockHeight) =
+            realloc(dedup, Dedup_SIZE(dedup->dedupTableCap));
     }
     int x = dedup->dedupTableLen;
     int goodCount = 0;
     for (int i = 0; i < inCount; i++) {
-        AnnEntry_t* td = &lw->dedupsIn[i];
-        if (td->start == 0) { continue; }
+        uint64_t td = lw->dedupsIn[i];
+        if (td == 0) { continue; }
         goodCount++;
-        if (td->diff == 0) {
-            // It was flagged, we're not going to add it, but we need to un-flag it
-            td->diff = lw->inBuf.anns[i].hdr.workBits;
-            continue;
-        }
-        Buf_OBJCPY(&dedup->entries[x], td);
+        dedup->entries[x] = td;
         x++;
     }
     dedup->dedupTableLen = x;
 
-    StateAndOutput_t* sao = w->g->sao;
+    StateAndOutput_t* sao = SAO_CRITICAL(w->g, lw->inBuf.parentBlockHeight);
     for (int i = 0; i < inCount; i++) {
-        if (lw->dedupsIn[i].start == 0) { continue; }
+        if (lw->dedupsIn[i] == 0) { continue; }
         Buf_OBJCPY(&sao->out[sao->outCount], &lw->inBuf.anns[i]);
-        Buf_OBJCPY(&sao->state.dedups[sao->outCount], &lw->dedupsIn[i]);
         sao->outCount++;
         assert(sao->outCount < OUT_ANN_CAP);
     }
@@ -390,14 +366,18 @@ static bool processAnns1(Worker_t* w, Result_t* res, int fileNo, int annCount) {
 
     mkDedupes(w->lw.dedupsIn, w->lw.inBuf.anns, annCount);
     int validCount = validateAnns(&w->lw, annCount, res);
+    res->invalid += (annCount - validCount);
+    if (!validCount) {
+      return false;
+    }
 
     uint64_t now = nowSeconds();
     int goodCount = 0;
 
     assert(!pthread_mutex_lock(&w->g->deduplock));
     do {
-        StateAndOutput_t* sao = w->g->sao;
-        uint32_t cph = sao->state.hdr.parentBlockHeight;
+        StateAndOutput_t* sao = SAO_CRITICAL(w->g, w->lw.inBuf.parentBlockHeight);
+        uint32_t cph = sao->parentBlockHeight;
         int outCount = sao->outCount;
         uint64_t timeOfLastWrite = sao->timeOfLastWrite;
         if (w->lw.inBuf.parentBlockHeight != cph) {
@@ -407,13 +387,13 @@ static bool processAnns1(Worker_t* w, Result_t* res, int fileNo, int annCount) {
                 validCount = 0;
                 break;
             }
-            tryWriteAnnsCritical(w, w->lw.inBuf.parentBlockHeight);
+            tryWriteAnnsCritical(w, w->lw.inBuf.parentBlockHeight, true);
             DEBUGF("New parentBlockHeight [%u]\n", w->lw.inBuf.parentBlockHeight);
         } else if (outCount + validCount >= OUT_ANN_CAP ||
             (timeOfLastWrite + WRITE_EVERY_SECONDS < now))
         {
             // file is full (or WRITE_EVERY_SECONDS seconds have elapsed), write it out
-            tryWriteAnnsCritical(w, w->lw.inBuf.parentBlockHeight);
+            tryWriteAnnsCritical(w, w->lw.inBuf.parentBlockHeight, false);
         }
         goodCount = dedupeCritical(w, annCount);
     } while (0);
@@ -421,7 +401,6 @@ static bool processAnns1(Worker_t* w, Result_t* res, int fileNo, int annCount) {
 
     res->accepted += goodCount;
     res->duplicates += (validCount - goodCount);
-    res->invalid += (annCount - validCount);
 
     return goodCount > 0;
 }
@@ -435,76 +414,7 @@ static void processAnns(Worker_t* w, int fileNo, int annCount) {
     Time_BEGIN(t);
     //DEBUGF("Processing ann file %s\n", w->lw.inFile->name);
     for (;;) {
-#ifndef PCP2
-        uint8_t* contentBuf = NULL;
-        uint32_t len = w->lw.inBuf.anns[0].hdr.contentLength;
-        if (len > 32) {
-            // contentLength > 32 = Out-of-band content
-            // therefore the content should follow the announcement header
-            contentBuf = malloc(len);
-            assert(contentBuf);
-            ssize_t len2 = read(fileNo, contentBuf, len);
-            if (len2 < 0) {
-                DEBUGF("Error reading file content, errno=[%s]\n", strerror(errno));
-                res.internalError++;
-                break;
-            } else if (((size_t)len2) < len) {
-                DEBUGF("Runt announcement file [%s], content partially read\n",
-                    w->lw.inFile->name);
-                res.runt++;
-                break;
-            }
-            Buf32_t b;
-            ContentMerkle_compute(&b, contentBuf, len);
-            if (Buf_OBJCMP(&b, w->lw.inBuf.anns[0].hdr.contentHash)) {
-                DEBUGF("Announcement in file [%s] content doesn't match hash\n",
-                    w->lw.inFile->name);
-                res.badContentHash++;
-                break;
-            }
-
-            uint8_t hash[65];
-            for (int i = 0; i < 32; i++) {
-                sprintf(&hash[i*2], "%02x", b.bytes[i]);
-            }
-            hash[64] = '\0';
-            snprintf(w->lw.annContentFile.name, FilePath_NAME_SZ, "ann_%s.bin", hash);
-            strncpy(w->lw.tmpFile.name, w->lw.annContentFile.name, FilePath_NAME_SZ);
-            // DEBUGF("writing content to temp file [%s] for content file [%s]\n",
-            //             w->lw.tmpFile.path, w->lw.annContentFile.path);
-            int outFileNo = open(w->lw.tmpFile.path, O_CREAT | O_WRONLY, 0666);
-            if (outFileNo < 0) {
-                DEBUGF("Unable to open output file [%s] [%s]\n",
-                    w->lw.tmpFile.path, strerror(errno));
-                assert(0);
-            }
-            checkedWrite(w->lw.tmpFile.path, outFileNo, contentBuf, len);
-            close(outFileNo);
-            if (processAnns1(w, &res, fileNo, 1)) {
-                // We need to re-copy the filename over again because tmpFile might
-                // be used inside of processAnns1
-                strncpy(w->lw.tmpFile.name, w->lw.annContentFile.name, FilePath_NAME_SZ);
-                if (rename(w->lw.tmpFile.path, w->lw.annContentFile.path)) {
-                    DEBUGF("error renaming temp file [%s] to content file [%s] [%s]\n",
-                        w->lw.tmpFile.path, w->lw.annContentFile.path, strerror(errno));
-                    assert(0);
-                }
-            } else {
-                strncpy(w->lw.tmpFile.name, w->lw.annContentFile.name, FilePath_NAME_SZ);
-                if (unlink(w->lw.tmpFile.path)) {
-                    DEBUGF("error deleting temp file [%s] [%s]\n",
-                        w->lw.tmpFile.path, strerror(errno));
-                    assert(0);
-                }
-            }
-        } else {
-            processAnns1(w, &res, fileNo, 1);
-        }
-
-        free(contentBuf);
-#else
         processAnns1(w, &res, fileNo, annCount);
-#endif
         ssize_t bytes = read(fileNo, w->lw.inBuf.anns,
             sizeof(PacketCrypt_Announce_t) * IN_ANN_CAP);
         if (bytes < 0) {
@@ -518,14 +428,12 @@ static void processAnns(Worker_t* w, int fileNo, int annCount) {
             res.runt++;
             break;
         }
-#ifdef PCP2
         annCount = bytes / 1024;
         if (annCount * 1024 != bytes) {
             DEBUGF("File [%s] size is not an even multiple of 1024\n", w->lw.inFile->name);
             res.runt++;
             break;
         }
-#endif
     }
     strncpy(w->lw.tmpFile.name, w->lw.inFile->name, FilePath_NAME_SZ);
     int outFileNo = open(w->lw.tmpFile.path, O_EXCL | O_CREAT | O_WRONLY, 0666);
@@ -616,19 +524,16 @@ void* workerLoop(void* vWorker) {
                 w->lw.inFile->path, w->lw.inBuf.version);
             continue;
         }
-        int annCount = 1;
-#ifdef PCP2
         if (w->lw.inBuf.version < 1) {
             DEBUGF("File [%s] has incompatible version [%d]\n",
                 w->lw.inFile->path, w->lw.inBuf.version);
             continue;
         }
-        annCount = bytes / 1024;
+        int annCount = bytes / 1024;
         if (annCount / 1024 != bytes) {
             DEBUGF("File [%s] size is not an even multiple of 1024\n", w->lw.inFile->name);
             continue;
         }
-#endif
         processAnns(w, inFileNo, annCount);
     }
 }
@@ -651,23 +556,23 @@ static MasterThread_t* createMaster(
     const char* inDir,
     const char* outDir,
     const char* annDir,
-    const char* stateDir,
     const char* tmpDir,
-    const char* contentDir,
     const char* paylogDir
 ) {
     MasterThread_t* mt = calloc(sizeof(MasterThread_t), 1);
     assert(mt);
-    mt->g.dedup = malloc(Dedup_SIZE(DEDUPE_INITIAL_CAP));
-    assert(mt->g.dedup);
-    mt->g.dedup->dedupTableCap = DEDUPE_INITIAL_CAP;
-    mt->g.dedup->dedupTableLen = 0;
+    for (int i = 0; i < (1<<STATE_OUTPUT_BITS); i++) {
+        mt->g.dedups[i] = malloc(Dedup_SIZE(DEDUPE_INITIAL_CAP));
+        assert(mt->g.dedups[i]);
+        mt->g.dedups[i]->dedupTableCap = DEDUPE_INITIAL_CAP;
+        mt->g.dedups[i]->dedupTableLen = 0;
+
+        mt->g.stateAndOutput[i] = calloc(sizeof(StateAndOutput_t), 1);
+        mt->g.stateAndOutput[i]->timeOfLastWrite = nowSeconds();
+    }
     pthread_mutex_init(&mt->g.deduplock, NULL);
 
     mt->g.q = WorkQueue_create(inDir, "annshare_", threadCount);
-
-    mt->g.sao = calloc(sizeof(StateAndOutput_t), 1);
-    mt->g.sao->timeOfLastWrite = nowSeconds();
 
     FilePath_create(&mt->paylogFile, paylogDir);
     mt->g.paylogFileNo = -1;
@@ -679,11 +584,10 @@ static MasterThread_t* createMaster(
     for (int i = 0; i < threadCount; i++) {
         Worker_t* w = &mt->workers[i];
         w->g = &mt->g;
+        w->lw.backupSao = calloc(sizeof(StateAndOutput_t), 1);
         FilePath_create(&w->lw.outFile, outDir);
         FilePath_create(&w->lw.annFile, annDir);
-        FilePath_create(&w->lw.stateFile, stateDir);
         FilePath_create(&w->lw.tmpFile, tmpDir);
-        FilePath_create(&w->lw.annContentFile, contentDir);
     }
     return mt;
 }
@@ -691,106 +595,20 @@ static MasterThread_t* createMaster(
 static void destroyMaster(MasterThread_t* mt) {
     for (int i = 0; i < mt->threadCount; i++) {
         Worker_t* w = &mt->workers[i];
+        free(w->lw.backupSao);
         FilePath_destroy(&w->lw.outFile);
         FilePath_destroy(&w->lw.annFile);
-        FilePath_destroy(&w->lw.stateFile);
         FilePath_destroy(&w->lw.tmpFile);
-        FilePath_destroy(&w->lw.annContentFile);
     }
     free(mt->workers);
     FilePath_destroy(&mt->paylogFile);
-    free(mt->g.sao);
     WorkQueue_destroy(mt->g.q);
     pthread_mutex_destroy(&mt->g.deduplock);
-    free(mt->g.dedup);
-    free(mt);
-}
-
-static void loadState(MasterThread_t* mt, DIR* stateDir) {
-    int highestFileNo = -1;
-    int stateFileDesc = -1;
-    for (;;) {
-        if (stateFileDesc > -1) {
-            close(stateFileDesc);
-            stateFileDesc = -1;
-        }
-        errno = 0;
-        struct dirent* file = readdir(stateDir);
-        if (file == NULL) {
-            if (errno != 0) {
-                DEBUGF("Error reading state. errno=[%s]\n", strerror(errno));
-            }
-            break;
-        }
-        if (file->d_name[0] == '.') { continue; }
-        if (strncmp(file->d_name, "state_", 6) != 0) {
-            DEBUGF("Unexpected file in state dir [%s]\n", file->d_name);
-            continue;
-        }
-        int num = strtol(&file->d_name[6], NULL, 10);
-        if (num > highestFileNo) { highestFileNo = num; }
-
-        // Workers are not yet started so we can just use the context from one of them.
-        FilePath_t* stateFile = &mt->workers[0].lw.stateFile;
-
-        strncpy(stateFile->name, file->d_name, FilePath_NAME_SZ);
-        stateFileDesc = open(stateFile->path, O_RDONLY);
-        if (stateFileDesc < 0) {
-            DEBUGF("Error opening state file [%s]. errno=[%s]\n",
-                stateFile->path, strerror(errno));
-            continue;
-        }
-        struct stat st;
-        if (fstat(stateFileDesc, &st)) {
-            DEBUGF("Failed to stat file [%s]. errno=[%s]\n",
-                stateFile->path, strerror(errno));
-            continue;
-        }
-        if (st.st_size < StateFile_Header_SZ) {
-            DEBUGF("Error runt state file [%s]. length=[%ld]\n",
-                stateFile->path, (long)st.st_size);
-            continue;
-        }
-        size_t numAnns = (st.st_size - StateFile_Header_SZ) / sizeof(AnnEntry_t);
-        if (numAnns * sizeof(AnnEntry_t) != (unsigned long)(st.st_size - StateFile_Header_SZ)) {
-            DEBUGF("Error oddly sized state file [%s]. length=[%ld]\n",
-                stateFile->path, (long)st.st_size);
-            continue;
-        }
-        StateFile_Header_t hdr;
-        if (StateFile_Header_SZ != read(stateFileDesc, &hdr, StateFile_Header_SZ)) {
-            DEBUGF("Error reading state file [%s]. errno=[%s]\n",
-                stateFile->path, strerror(errno));
-            continue;
-        } else if (hdr.version != STATE_FILE_VERSION) {
-            DEBUGF("Got state file [%s] with unexpected version [%u]\n",
-                stateFile->path, hdr.version);
-            continue;
-        }
-        if (mt->g.sao->state.hdr.parentBlockHeight < hdr.parentBlockHeight) {
-            mt->g.sao->state.hdr.parentBlockHeight = hdr.parentBlockHeight;
-        }
-
-        ssize_t remainingAnns = mt->g.dedup->dedupTableCap - mt->g.dedup->dedupTableLen;
-        while ((ssize_t)numAnns > remainingAnns) {
-            mt->g.dedup->dedupTableCap *= 2;
-            mt->g.dedup = realloc(mt->g.dedup, Dedup_SIZE(mt->g.dedup->dedupTableCap));
-            remainingAnns = mt->g.dedup->dedupTableCap - mt->g.dedup->dedupTableLen;
-        }
-        ssize_t bytes = read(stateFileDesc, &mt->g.dedup->entries[mt->g.dedup->dedupTableLen],
-            remainingAnns * sizeof(AnnEntry_t));
-        if (bytes < 0) {
-            DEBUGF("Error reading state file [%s]. errno=[%s]\n",
-                stateFile->path, strerror(errno));
-            continue;
-        }
-        if (numAnns * sizeof(AnnEntry_t) != (size_t)bytes) {
-            DEBUGF("Error partial read of state file [%s]\n", stateFile->path);
-            continue;
-        }
-        mt->g.dedup->dedupTableLen += numAnns;
+    for (int i = 0; i < (1<<STATE_OUTPUT_BITS); i++) {
+        free(mt->g.dedups[i]);
+        free(mt->g.stateAndOutput[i]);
     }
-    mt->g.sao->nextStateFileNo = highestFileNo + 1;
+    free(mt);
 }
 
 // Open the highest numbered file in the logdir
@@ -845,7 +663,7 @@ int main(int argc, const char** argv) {
     int threads = 1;
     int arg = 1;
 
-    if ((argc - arg) < 7) { return usage(); }
+    if ((argc - arg) < 5) { return usage(); }
 
     if (!strcmp(argv[arg], "--threads")) {
         arg++;
@@ -856,39 +674,21 @@ int main(int argc, const char** argv) {
         }
         arg++;
     }
-    if ((argc - arg) < 7) { return usage(); }
+    if ((argc - arg) < 5) { return usage(); }
 
     const char* inDir = argv[arg++];
     const char* outDir = argv[arg++];
     const char* annDir = argv[arg++];
-    const char* stateDir = argv[arg++];
     const char* tmpDir = argv[arg++];
-    const char* contentDir = argv[arg++];
     const char* paylogDir = argv[arg++];
 
     FileUtil_checkDir("input", inDir);
     FileUtil_checkDir("output", outDir);
     FileUtil_checkDir("announcement", annDir);
-    FileUtil_checkDir("state", stateDir);
     FileUtil_checkDir("temp", tmpDir);
-    FileUtil_checkDir("content", contentDir);
     FileUtil_checkDir("paylog", paylogDir);
 
-    MasterThread_t* mt =
-        createMaster(threads, inDir, outDir, annDir, stateDir, tmpDir, contentDir, paylogDir);
-
-    {
-        DIR* d = opendir(stateDir);
-        if (!d) {
-            DEBUGF("Could not access state directory [%s] errno=[%s]", stateDir, strerror(errno));
-            assert(0);
-        }
-        DEBUGF0("Loading state...\n");
-        loadState(mt, d);
-        DEBUGF("Loaded [%d] dedup entries successfully, current parentBlockHeight [%u]\n",
-            mt->g.dedup->dedupTableLen, mt->g.sao->state.hdr.parentBlockHeight);
-        closedir(d);
-    }
+    MasterThread_t* mt = createMaster(threads, inDir, outDir, annDir, tmpDir, paylogDir);
 
     DIR* logdir = opendir(paylogDir);
     if (!logdir) {
@@ -926,14 +726,14 @@ int main(int argc, const char** argv) {
 
     WorkQueue_stop(mt->g.q);
 
-    // we're using a worker context to write the anns, it doesn't matter which hardware
-    // thread we're in, all of the workers are dead. Even though we don't need the lock
-    // for mutual exclusion, it's going to get unlocked inside of tryWriteAnnsCritical
-    // so we should have it locked first in order to avoid putting it in a bad state.
-    assert(!pthread_mutex_lock(&mt->g.deduplock));
-    DEBUGF("Writing [%d] anns to disk\n", mt->g.sao->outCount);
-    tryWriteAnnsCritical(&mt->workers[0], 0);
-    assert(!pthread_mutex_unlock(&mt->g.deduplock));
+    // We just use a local worker in order to have access to the FilePath_t
+    // We are in the main thread though.
+    for (int i = 0; i < (1<<STATE_OUTPUT_BITS); i++) {
+        StateAndOutput_t* sao = mt->g.stateAndOutput[i];
+        DEBUGF("Writing [%d] anns to disk for block [%d]\n",
+            sao->outCount, sao->parentBlockHeight);
+        writeAnns(&mt->workers[0].lw, mt->g.nextAnnFileNo++, sao);
+    }
 
     destroyMaster(mt);
     DEBUGF0("Graceful shutdown complete\n");
