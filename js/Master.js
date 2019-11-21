@@ -29,6 +29,7 @@ export type Master_Config_t = {
     shareWorkDivisor?: number,
     shareMinWork?: number,
     annVersions: Array<number>,
+    mineOldAnns?: number,
 };
 
 type State_t = {
@@ -237,6 +238,7 @@ const mkConfig = module.exports.mkConfig = (
         version: Protocol.VERSION,
         softVersion: Protocol.SOFT_VERSION,
         annVersions: cfg.annVersions || [0],
+        mineOldAnns: cfg.mineOldAnns || 0,
     };
 };
 

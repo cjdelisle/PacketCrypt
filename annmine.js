@@ -36,15 +36,25 @@ type Context_t = {
     submitAnnUrls: Array<string>,
     config: Config_AnnMiner_t,
     reqNum: number,
-    requestsInFlight: number,
+    requestsInFlight: ClientRequest[],
+    mineOld: .,
 };
 */
 
-const httpRes = (ctx, res /*:IncomingMessage*/, reqNum) => {
+const dropRequest = (ctx, req) => {
+    const idx = ctx.requestsInFlight.indexOf(req);
+    if (idx < 0) {
+        console.error("Request was forgotten before it ended");
+        return;
+    }
+    ctx.requestsInFlight.splice(idx, 1);
+};
+
+const httpRes = (ctx, req, res /*:IncomingMessage*/, reqNum) => {
     const data = [];
     res.on('data', (d) => { data.push(d.toString('utf8')); });
     res.on('end', () => {
-        ctx.requestsInFlight--;
+        dropRequest(ctx, req);
         if (res.statusCode !== 200) {
             // if (res.statusCode === 400) {
             //     console.error("Pool replied with error 400 [" + data.join('') + "] stopping");
@@ -149,13 +159,14 @@ const rotateAndUpload = (ctx /*:Context_t*/, done) => {
                 'x-pc-payto': ctx.config.paymentAddr,
                 'x-pc-sver': Protocol.SOFT_VERSION,
                 'x-pc-annver': String(fileContent[i][0]),
-            }, (res) => { httpRes(ctx, res, reqNum); });
+            }, (res) => { httpRes(ctx, req, res, reqNum); });
             req.on('error', (err) => {
                 console.error("[" + reqNum + "] Failed http post to [" + url + "] [" +
                     JSON.stringify(err) + "]");
+                dropRequest(ctx, req);
             });
             req.end(fileContent[i]);
-            ctx.requestsInFlight++;
+            ctx.requestsInFlight.push(req);
         });
     }).nThen((_w) => {
         done(uploaded);
@@ -244,7 +255,11 @@ const getAnnVersion = (ctx) => {
 };
 
 const doRefreshWork = (ctx) => {
-    if (ctx.requestsInFlight > MAX_REQUESTS_IN_FLIGHT) { return; }
+    if (ctx.requestsInFlight.length > MAX_REQUESTS_IN_FLIGHT) {
+        console.error('WARN: doRefreshWork() too many requests in flight: ' +
+            ctx.requestsInFlight.length);
+        return;
+    }
     const av = getAnnVersion(ctx);
     if (av !== ctx.annVersion) {
         console.error("INFO: Announcement version to mine has changed to [" +
@@ -254,13 +269,20 @@ const doRefreshWork = (ctx) => {
             ctx.miner.kill('SIGINT');
         }
     }
+    if (typeof(ctx.config.mineOldAnns) === 'number') {
+        ctx.mineOld = ctx.config.mineOldAnns|0;
+    } else if (ctx.pool.config && typeof(ctx.pool.config.mineOldAnns) === 'number') {
+        ctx.mineOld = ctx.pool.config.mineOldAnns;
+    } else {
+        ctx.mineOld = 0;
+    }
     ctx.inMutex((done) => {
         rotateAndUpload(ctx, (didUpload) => {
             const expired = (+new Date()) > (REBUILD_JOB_EVERY_MS + ctx.lastWorkRefresh);
-            if (!ctx.pool.work) {
-                console.error('no work');
-            } else if (didUpload || expired) {
-                rebuildJob(ctx, ctx.pool.work);
+            if (didUpload || expired) {
+                ctx.pool.getWorkByNum(ctx.pool.currentHeight - ctx.mineOld, (w) => {
+                    rebuildJob(ctx, w);
+                });
             }
             done();
         });
@@ -314,9 +336,10 @@ const launch = (config /*:Config_AnnMiner_t*/) => {
             inMutex: Util.createMutex(),
             uploads: [],
             reqNum: 0,
-            requestsInFlight: 0,
+            requestsInFlight: [],
             annVersion: 0,
-            maxKbps: config.maxKbps
+            maxKbps: config.maxKbps,
+            mineOld: config.mineOldAnns,
         };
         ctx.annVersion = getAnnVersion(ctx);
         ctx.miner = mkMiner(ctx, submitAnnUrls);
@@ -422,6 +445,7 @@ const main = (argv) => {
         maxKbps: a.maxKbps || 1024,
         minerId: a.minerId || defaultConf.minerId,
         poolUrl: a._[0],
+        mineOldAnns: typeof(a.mineOldAnns) === 'number' ? a.mineOldAnns : null,
     };
     if (isNaN(conf.maxKbps / 1)) {
         console.error("ERROR: --maxKbps value [" + conf.maxKbps + "] is not a number");

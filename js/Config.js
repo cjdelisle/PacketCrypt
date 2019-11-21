@@ -48,6 +48,7 @@ export type Config_AnnMiner_t = Config_Miner_t & {
     randContent: bool,
     version: number,
     paranoia: boolean,
-    maxKbps: number
+    maxKbps: number,
+    mineOldAnns: number|null,
 }
 */

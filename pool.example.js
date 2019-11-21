@@ -106,6 +106,12 @@ config.master = {
     // Which versions of announcements we will accept
     annVersions: [1],
 
+    // Request that ann miners mine announcements that are this many blocks old.
+    // Fresh new announcements are not usable until they are 2 blocks old, putting
+    // a 3 here will make announcement miners mine announcements which are immediately
+    // usable.
+    mineOldAnns: 2,
+
     root: config,
 };
 
