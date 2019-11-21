@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdatomic.h>
 
 // The initial capacity of the deduplication table, 8 times this number
 // times 2 to the power of STATE_OUTPUT_BITS will be allocated at the start
@@ -265,19 +266,25 @@ static void writeAnns(LocalWorker_t* lw, int annFileNo, StateAndOutput_t* anns) 
 
 /// locks and such happen below here
 
+typedef struct Output_s {
+    StateAndOutput_t* stateAndOutput;
+    Dedup_t* dedup;
+    pthread_mutex_t lock;
+} Output_t;
+
 typedef struct Global_s {
     pthread_mutex_t deduplock;
 
+    // Read by workers, updated by master only
     int paylogFileNo;
+
     WorkQueue_t* q;
 
     // Number which will be used in the name of the next ann file that is output
-    int nextAnnFileNo;
+    // Incremented by everyone.
+    _Atomic int nextAnnFileNo;
 
-    StateAndOutput_t* stateAndOutput[1<<STATE_OUTPUT_BITS];
-
-    // Dedup table
-    Dedup_t* dedups[1<<STATE_OUTPUT_BITS];
+    Output_t output[1<<STATE_OUTPUT_BITS];
 } Global_t;
 
 typedef struct Worker_s {
@@ -285,18 +292,20 @@ typedef struct Worker_s {
     LocalWorker_t lw;
 } Worker_t;
 
-#define SAO_CRITICAL(g, parentBlockHeight) \
-    (g)->stateAndOutput[(parentBlockHeight) & ((1<<STATE_OUTPUT_BITS)-1)]
+#define OUTPUT(g, parentBlockHeight) \
+    (&(g)->output[(parentBlockHeight) & ((1<<STATE_OUTPUT_BITS)-1)])
 
-#define DEDUP_CRITICAL(g, parentBlockHeight) \
-    (g)->dedups[(parentBlockHeight) & ((1<<STATE_OUTPUT_BITS)-1)]
-
-// must be called with the dedup lock
-static void tryWriteAnnsCritical(Worker_t* w, uint32_t parentBlockHeight, bool newBlock) {
+// must be called with the output lock held
+static void tryWriteAnnsCritical(
+  Worker_t* w,
+  Output_t* output,
+  uint32_t parentBlockHeight,
+  bool newBlock
+) {
     // If we don't manage a write, it's because there was nothing to write.
     // in any case, we will update the time so as to avoid busy-looping on
     // attempts to write nothing.
-    StateAndOutput_t* current = SAO_CRITICAL(w->g, parentBlockHeight);
+    StateAndOutput_t* current = output->stateAndOutput;
     if (!current->outCount && !newBlock) {
         current->timeOfLastWrite = nowSeconds();
         return;
@@ -306,10 +315,11 @@ static void tryWriteAnnsCritical(Worker_t* w, uint32_t parentBlockHeight, bool n
 
     StateAndOutput_t* next = w->lw.backupSao;
     w->lw.backupSao = current;
+    output->stateAndOutput = next;
+
     next->parentBlockHeight = parentBlockHeight;
     if (newBlock) {
-        next->parentBlockHeight++;
-        DEDUP_CRITICAL(w->g, parentBlockHeight)->dedupTableLen = 0;
+        output->dedup->dedupTableLen = 0;
         // TODO(cjd): Perhaps we want to reduce the capacity somewhat in order
         // that the dedup table will not fix itself at the largest size it has
         // ever needed to be.
@@ -317,17 +327,15 @@ static void tryWriteAnnsCritical(Worker_t* w, uint32_t parentBlockHeight, bool n
     next->outCount = 0;
     next->timeOfLastWrite = nowSeconds();
 
-    SAO_CRITICAL(w->g, parentBlockHeight) = next;
-
-    assert(!pthread_mutex_unlock(&w->g->deduplock));
+    assert(!pthread_mutex_unlock(&output->lock));
     writeAnns(&w->lw, afn, current);
-    assert(!pthread_mutex_lock(&w->g->deduplock));
+    assert(!pthread_mutex_lock(&output->lock));
 }
 
 // must be called with the dedup lock
-static int dedupeCritical(Worker_t* w, int inCount) {
+static int dedupeCritical(Worker_t* w, Output_t* output, int inCount) {
     LocalWorker_t* lw = &w->lw;
-    Dedup_t* dedup = DEDUP_CRITICAL(w->g, lw->inBuf.parentBlockHeight);
+    Dedup_t* dedup = output->dedup;
     for (int x = 0; x < dedup->dedupTableLen; x++) {
         uint64_t tblEntry = dedup->entries[x];
         for (int i = 0; i < inCount; i++) {
@@ -337,8 +345,7 @@ static int dedupeCritical(Worker_t* w, int inCount) {
     }
     while (dedup->dedupTableLen + inCount > dedup->dedupTableCap) {
         dedup->dedupTableCap *= 2;
-        dedup = DEDUP_CRITICAL(w->g, lw->inBuf.parentBlockHeight) =
-            realloc(dedup, Dedup_SIZE(dedup->dedupTableCap));
+        dedup = output->dedup = realloc(dedup, Dedup_SIZE(dedup->dedupTableCap));
     }
     int x = dedup->dedupTableLen;
     int goodCount = 0;
@@ -351,7 +358,7 @@ static int dedupeCritical(Worker_t* w, int inCount) {
     }
     dedup->dedupTableLen = x;
 
-    StateAndOutput_t* sao = SAO_CRITICAL(w->g, lw->inBuf.parentBlockHeight);
+    StateAndOutput_t* sao = output->stateAndOutput;
     for (int i = 0; i < inCount; i++) {
         if (lw->dedupsIn[i] == 0) { continue; }
         Buf_OBJCPY(&sao->out[sao->outCount], &lw->inBuf.anns[i]);
@@ -374,9 +381,10 @@ static bool processAnns1(Worker_t* w, Result_t* res, int fileNo, int annCount) {
     uint64_t now = nowSeconds();
     int goodCount = 0;
 
-    assert(!pthread_mutex_lock(&w->g->deduplock));
+    Output_t* output = OUTPUT(w->g, w->lw.inBuf.parentBlockHeight);
+    assert(!pthread_mutex_lock(&output->lock));
     do {
-        StateAndOutput_t* sao = SAO_CRITICAL(w->g, w->lw.inBuf.parentBlockHeight);
+        StateAndOutput_t* sao = output->stateAndOutput;
         uint32_t cph = sao->parentBlockHeight;
         int outCount = sao->outCount;
         uint64_t timeOfLastWrite = sao->timeOfLastWrite;
@@ -387,17 +395,17 @@ static bool processAnns1(Worker_t* w, Result_t* res, int fileNo, int annCount) {
                 validCount = 0;
                 break;
             }
-            tryWriteAnnsCritical(w, w->lw.inBuf.parentBlockHeight, true);
+            tryWriteAnnsCritical(w, output, w->lw.inBuf.parentBlockHeight, true);
             DEBUGF("New parentBlockHeight [%u]\n", w->lw.inBuf.parentBlockHeight);
         } else if (outCount + validCount >= OUT_ANN_CAP ||
             (timeOfLastWrite + WRITE_EVERY_SECONDS < now))
         {
             // file is full (or WRITE_EVERY_SECONDS seconds have elapsed), write it out
-            tryWriteAnnsCritical(w, w->lw.inBuf.parentBlockHeight, false);
+            tryWriteAnnsCritical(w, output, w->lw.inBuf.parentBlockHeight, false);
         }
-        goodCount = dedupeCritical(w, annCount);
+        goodCount = dedupeCritical(w, output, annCount);
     } while (0);
-    assert(!pthread_mutex_unlock(&w->g->deduplock));
+    assert(!pthread_mutex_unlock(&output->lock));
 
     res->accepted += goodCount;
     res->duplicates += (validCount - goodCount);
@@ -529,9 +537,10 @@ void* workerLoop(void* vWorker) {
                 w->lw.inFile->path, w->lw.inBuf.version);
             continue;
         }
+        bytes -= AnnPost_HEADER_SZ;
         int annCount = bytes / 1024;
-        if (annCount / 1024 != bytes) {
-            DEBUGF("File [%s] size is not an even multiple of 1024\n", w->lw.inFile->name);
+        if (annCount * 1024 != bytes) {
+            DEBUGF("File [%s] first read is not an even multiple of 1024\n", w->lw.inFile->name);
             continue;
         }
         processAnns(w, inFileNo, annCount);
@@ -551,6 +560,49 @@ typedef struct MasterThread_s {
     Worker_t* workers;
 } MasterThread_t;
 
+static void* checkmem(void* mem) {
+    assert(mem && "Not enough memory");
+    return mem;
+}
+
+static void initOutput(Output_t* out) {
+    out->dedup = checkmem(malloc(Dedup_SIZE(DEDUPE_INITIAL_CAP)));
+    out->dedup->dedupTableCap = DEDUPE_INITIAL_CAP;
+    out->dedup->dedupTableLen = 0;
+
+    out->stateAndOutput = checkmem(calloc(sizeof(StateAndOutput_t), 1));
+    out->stateAndOutput->timeOfLastWrite = nowSeconds();
+
+    assert(!pthread_mutex_init(&out->lock, NULL));
+}
+
+static void destroyOutput(Output_t* out) {
+    pthread_mutex_destroy(&out->lock);
+    free(out->dedup);
+    free(out->stateAndOutput);
+}
+
+static void initWorker(
+    Worker_t* w,
+    Global_t* g,
+    const char* outDir,
+    const char* annDir,
+    const char* tmpDir
+) {
+    w->g = g;
+    w->lw.backupSao = checkmem(calloc(sizeof(StateAndOutput_t), 1));
+    FilePath_create(&w->lw.outFile, outDir);
+    FilePath_create(&w->lw.annFile, annDir);
+    FilePath_create(&w->lw.tmpFile, tmpDir);
+}
+
+static void destroyWorker(Worker_t* w) {
+    free(w->lw.backupSao);
+    FilePath_destroy(&w->lw.outFile);
+    FilePath_destroy(&w->lw.annFile);
+    FilePath_destroy(&w->lw.tmpFile);
+}
+
 static MasterThread_t* createMaster(
     int threadCount,
     const char* inDir,
@@ -559,18 +611,10 @@ static MasterThread_t* createMaster(
     const char* tmpDir,
     const char* paylogDir
 ) {
-    MasterThread_t* mt = calloc(sizeof(MasterThread_t), 1);
-    assert(mt);
+    MasterThread_t* mt = checkmem(calloc(sizeof(MasterThread_t), 1));
     for (int i = 0; i < (1<<STATE_OUTPUT_BITS); i++) {
-        mt->g.dedups[i] = malloc(Dedup_SIZE(DEDUPE_INITIAL_CAP));
-        assert(mt->g.dedups[i]);
-        mt->g.dedups[i]->dedupTableCap = DEDUPE_INITIAL_CAP;
-        mt->g.dedups[i]->dedupTableLen = 0;
-
-        mt->g.stateAndOutput[i] = calloc(sizeof(StateAndOutput_t), 1);
-        mt->g.stateAndOutput[i]->timeOfLastWrite = nowSeconds();
+        initOutput(&mt->g.output[i]);
     }
-    pthread_mutex_init(&mt->g.deduplock, NULL);
 
     mt->g.q = WorkQueue_create(inDir, "annshare_", threadCount);
 
@@ -578,35 +622,23 @@ static MasterThread_t* createMaster(
     mt->g.paylogFileNo = -1;
 
     mt->threadCount = threadCount;
-    mt->workers = calloc(sizeof(Worker_t), threadCount);
-    assert(mt->workers);
+    mt->workers = checkmem(calloc(sizeof(Worker_t), threadCount));
 
     for (int i = 0; i < threadCount; i++) {
-        Worker_t* w = &mt->workers[i];
-        w->g = &mt->g;
-        w->lw.backupSao = calloc(sizeof(StateAndOutput_t), 1);
-        FilePath_create(&w->lw.outFile, outDir);
-        FilePath_create(&w->lw.annFile, annDir);
-        FilePath_create(&w->lw.tmpFile, tmpDir);
+        initWorker(&mt->workers[i], &mt->g, outDir, annDir, tmpDir);
     }
     return mt;
 }
 
 static void destroyMaster(MasterThread_t* mt) {
     for (int i = 0; i < mt->threadCount; i++) {
-        Worker_t* w = &mt->workers[i];
-        free(w->lw.backupSao);
-        FilePath_destroy(&w->lw.outFile);
-        FilePath_destroy(&w->lw.annFile);
-        FilePath_destroy(&w->lw.tmpFile);
+        destroyWorker(&mt->workers[i]);
     }
     free(mt->workers);
     FilePath_destroy(&mt->paylogFile);
     WorkQueue_destroy(mt->g.q);
-    pthread_mutex_destroy(&mt->g.deduplock);
     for (int i = 0; i < (1<<STATE_OUTPUT_BITS); i++) {
-        free(mt->g.dedups[i]);
-        free(mt->g.stateAndOutput[i]);
+        destroyOutput(&mt->g.output[i]);
     }
     free(mt);
 }
@@ -617,6 +649,7 @@ static void destroyMaster(MasterThread_t* mt) {
 // returns 0 on success, -1 on error
 static int openPayLog(MasterThread_t* mt, DIR* logDir, const char* paylogDir) {
     long biggestFile = 0;
+    errno = 0;
     for (;;) {
         struct dirent* file = readdir(logDir);
         if (file == NULL) {
@@ -730,7 +763,7 @@ int main(int argc, const char** argv) {
     // We just use a local worker in order to have access to the FilePath_t
     // We are in the main thread though.
     for (int i = 0; i < (1<<STATE_OUTPUT_BITS); i++) {
-        StateAndOutput_t* sao = mt->g.stateAndOutput[i];
+        StateAndOutput_t* sao = mt->g.output[i].stateAndOutput;
         DEBUGF("Writing [%d] anns to disk for block [%d]\n",
             sao->outCount, sao->parentBlockHeight);
         writeAnns(&mt->workers[0].lw, mt->g.nextAnnFileNo++, sao);
