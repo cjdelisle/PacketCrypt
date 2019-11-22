@@ -581,7 +581,7 @@ const loadData = (ctx /*:Context_t*/, done) => {
             nt = nt((w) => {
                 const fileName = ctx.workdir + '/' + f;
                 let dateFile = '<unknown date>';
-                fileName.replace(/paylog_[0-9]+_/, (all, x) => {
+                fileName.replace(/paylog_([0-9]+)_/, (all, x) => {
                     dateFile = (new Date(Number(x))).toISOString();
                     return '';
                 });
