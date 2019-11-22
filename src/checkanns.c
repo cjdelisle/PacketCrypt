@@ -686,6 +686,28 @@ static int openPayLog(MasterThread_t* mt, DIR* logDir, const char* paylogDir) {
     return 0;
 }
 
+static int getNextAnn(MasterThread_t* mt, DIR* anndir, const char* annDir) {
+    long biggestFile = 0;
+    errno = 0;
+    for (;;) {
+        struct dirent* file = readdir(anndir);
+        if (file == NULL) {
+            if (errno != 0) {
+                DEBUGF("Error reading anndir [%s] errno=[%s]\n",
+                    annDir, strerror(errno));
+                return -1;
+            }
+            rewinddir(anndir);
+            break;
+        }
+        if (strncmp(file->d_name, "ann_", 4)) { continue; }
+        long fileNum = strtol(&file->d_name[7], NULL, 10);
+        if (fileNum > biggestFile) { biggestFile = fileNum; }
+    }
+    mt->g.nextAnnFileNo = biggestFile + 1;
+    return 0;
+}
+
 static volatile bool g_pleaseStop = false;
 void sigHandler(int sig) {
     g_pleaseStop = true;
@@ -731,6 +753,15 @@ int main(int argc, const char** argv) {
     }
     if (openPayLog(mt, logdir, paylogDir)) {
         assert(0 && "Unable to open payLog");
+    }
+
+    DIR* anndir = opendir(annDir);
+    if (!anndir) {
+        DEBUGF("Could not access announcement output directory [%s] errno=[%s]", annDir, strerror(errno));
+        assert(0);
+    }
+    if (getNextAnn(mt, anndir, annDir)) {
+        assert(0 && "Unable to open annDir");
     }
 
     // Attach sig handler as late as possible before we start touching things that can
