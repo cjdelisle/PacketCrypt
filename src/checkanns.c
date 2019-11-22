@@ -700,8 +700,8 @@ static int getNextAnn(MasterThread_t* mt, DIR* anndir, const char* annDir) {
             rewinddir(anndir);
             break;
         }
-        if (strncmp(file->d_name, "ann_", 4)) { continue; }
-        long fileNum = strtol(&file->d_name[4], NULL, 10);
+        if (strncmp(file->d_name, "anns_", 5)) { continue; }
+        long fileNum = strtol(&file->d_name[5], NULL, 10);
         if (fileNum > biggestFile) { biggestFile = fileNum; }
     }
     mt->g.nextAnnFileNo = biggestFile + 1;
