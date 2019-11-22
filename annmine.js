@@ -37,7 +37,7 @@ type Context_t = {
     config: Config_AnnMiner_t,
     reqNum: number,
     requestsInFlight: ClientRequest[],
-    mineOld: .,
+    mineOld: number,
 };
 */
 
@@ -270,7 +270,7 @@ const doRefreshWork = (ctx) => {
         }
     }
     if (typeof(ctx.config.mineOldAnns) === 'number') {
-        ctx.mineOld = ctx.config.mineOldAnns|0;
+        ctx.mineOld = ctx.config.mineOldAnns;
     } else if (ctx.pool.config && typeof(ctx.pool.config.mineOldAnns) === 'number') {
         ctx.mineOld = ctx.pool.config.mineOldAnns;
     } else {
@@ -339,7 +339,7 @@ const launch = (config /*:Config_AnnMiner_t*/) => {
             requestsInFlight: [],
             annVersion: 0,
             maxKbps: config.maxKbps,
-            mineOld: config.mineOldAnns,
+            mineOld: config.mineOldAnns || 0,
         };
         ctx.annVersion = getAnnVersion(ctx);
         ctx.miner = mkMiner(ctx, submitAnnUrls);
