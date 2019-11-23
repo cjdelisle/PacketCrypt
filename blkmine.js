@@ -830,6 +830,7 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
         deleteUselessAnns(config, pool.work.height, w());
     }).nThen((w) => {
         if (!pool.work) { throw new Error(); }
+        if (config.noInitialDl) { return; }
         downloadOldAnns(config, pool.work.height, masterConf, w());
     }).nThen((w) => {
         const ctx = {
@@ -917,6 +918,7 @@ const usage = () => {
         "                      # default is ./datastore/blkmine\n" +
         "        --slowStart   # wait 10 seconds when starting pcblk to allow time for gdb\n" +
         "                      # to be attached.\n" +
+        "        --noInitialDl # don't perform initial download of anns before mining\n" +
         "    <poolurl>         # the URL of the mining pool to connect to\n" +
         "\n" +
         "    See https://github.com/cjdelisle/PacketCrypt/blob/master/docs/blkmine.md\n" +
@@ -948,7 +950,8 @@ const main = (argv) => {
         threads: a.threads || defaultConf.threads,
         minerId: a.minerId || defaultConf.minerId,
         slowStart: a.slowStart === true || defaultConf.slowStart,
-        version: defaultConf.version
+        version: defaultConf.version,
+        noInitialDl: a.noInitialDl || false,
     };
     if (!a.paymentAddr) {
         console.error("WARNING: You have not passed the --paymentAddr flag\n" +
