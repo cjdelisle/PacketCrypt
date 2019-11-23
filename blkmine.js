@@ -939,7 +939,7 @@ const main = (argv) => {
         slowStart: false,
         version: 1
     };
-    const a = Minimist(argv.slice(2), { boolean: [ 'slowStart' ] });
+    const a = Minimist(argv.slice(2), { boolean: [ 'slowStart', 'noInitialDl' ] });
     if (!/http(s)?:\/\/.*/.test(a._[0])) { process.exit(usage()); }
     const conf = {
         corePath: a.corePath || defaultConf.corePath,
