@@ -33,11 +33,11 @@ type Context_t = {
     pool: PoolClient_t,
     inMutex: Util_Mutex_t,
     uploads: Array<{ url: string, req: ClientRequest, reqNum: number }>,
-    submitAnnUrls: Array<string>,
     config: Config_AnnMiner_t,
     reqNum: number,
     requestsInFlight: ClientRequest[],
     mineOld: number,
+    _submitAnnUrls: Array<string>,
 };
 */
 
@@ -125,8 +125,21 @@ const rotateAndUpload = (ctx /*:Context_t*/, done) => {
     const files = [];
     const fileContent = [];
     let uploaded = false;
+    const submitAnnUrls = ctx.pool.config.submitAnnUrls;
+    if (JSON.stringify(submitAnnUrls) !== JSON.stringify(ctx._submitAnnUrls)) {
+        const oldSubmitAnnUrls = ctx._submitAnnUrls;
+        ctx._submitAnnUrls = submitAnnUrls;
+        if (submitAnnUrls.length !== oldSubmitAnnUrls.length) {
+            // The number of annhandlers has changed, this means we need to kill
+            // the miner process because it is creating the wrong number of files.
+            if (ctx.miner) { ctx.miner.kill('SIGINT'); }
+            return void done();
+        }
+        // The annhandlers have changed but there are the same number of them which
+        // means the files are still good, we can continue with the new ones.
+    }
     nThen((w) => {
-        ctx.submitAnnUrls.forEach((url, i) => {
+        submitAnnUrls.forEach((url, i) => {
             const file = getFileName(ctx.config, i);
             Fs.readFile(file, w((err, ret) => {
                 // we just received new work right after uploading, pcann hasn't yet made a new file.
@@ -145,7 +158,7 @@ const rotateAndUpload = (ctx /*:Context_t*/, done) => {
             }));
         });
     }).nThen((w) => {
-        ctx.submitAnnUrls.forEach((url, i) => {
+        submitAnnUrls.forEach((url, i) => {
             if (!files[i]) { return; }
             const parentBlockHeight = fileContent[i].readUInt32LE(12) + 1;
             const contentLen = fileContent[i].readUInt32LE(20);
@@ -296,7 +309,7 @@ const refreshWorkLoop2 = (ctx) => {
     doRefreshWork(ctx);
 };
 
-const mkMiner = (ctx, submitAnnUrls) => {
+const mkMiner = (ctx) => {
     const args = [
         '--threads', String(ctx.config.threads || 1),
         '--minerId', String(ctx.config.minerId),
@@ -305,7 +318,7 @@ const mkMiner = (ctx, submitAnnUrls) => {
     if (ctx.config.paranoia) {
         args.push('--paranoia');
     }
-    submitAnnUrls.forEach((url, i) => {
+    ctx._submitAnnUrls.forEach((_, i) => {
         args.push('--out', getFileName(ctx.config, i));
     });
     console.error(ctx.config.corePath + ' ' + args.join(' '));
@@ -326,12 +339,11 @@ const launch = (config /*:Config_AnnMiner_t*/) => {
         Util.clearDir(config.dir, w());
         pool.getMasterConf(w());
     }).nThen((_w) => {
-        const submitAnnUrls = pool.config.submitAnnUrls;
         const ctx = {
             lastWorkRefresh: +new Date(),
             config: config,
             miner: undefined,
-            submitAnnUrls: submitAnnUrls,
+            _submitAnnUrls: pool.config.submitAnnUrls,
             pool: pool,
             inMutex: Util.createMutex(),
             uploads: [],
@@ -342,17 +354,20 @@ const launch = (config /*:Config_AnnMiner_t*/) => {
             mineOld: config.mineOldAnns || 0,
         };
         ctx.annVersion = getAnnVersion(ctx);
-        ctx.miner = mkMiner(ctx, submitAnnUrls);
+        ctx.miner = mkMiner(ctx);
         const minerOnClose = () => {
             if (!ctx.miner) { throw new Error(); }
             ctx.miner.on('close', () => {
                 console.error("pcann has died, restarting in 1 second");
                 ctx.miner = undefined;
-                setTimeout(() => {
-                    ctx.miner = mkMiner(ctx, submitAnnUrls);
-                    pool.getWork((w) => { rebuildJob(ctx, w); });
-                    minerOnClose();
-                }, 1000);
+                Util.clearDir(config.dir, () => {
+                    setTimeout(() => {
+                        ctx._submitAnnUrls = pool.config.submitAnnUrls;
+                        ctx.miner = mkMiner(ctx);
+                        pool.getWork((w) => { rebuildJob(ctx, w); });
+                        minerOnClose();
+                    }, 1000);
+                });
             });
         };
         minerOnClose();

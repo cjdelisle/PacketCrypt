@@ -34,7 +34,6 @@ type Context_t = {
     config: Config_BlkMiner_t,
     miner: void|ChildProcess,
     pool: PoolClient_t,
-    masterConf: Protocol_PcConfigJson_t,
     lock: Saferphore_t,
     minerLastSignaled: number
 };
@@ -536,8 +535,8 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
             }).nThen((w) => {
                 if (failed) { return; }
                 const shr = convertShare(share, annContents, ctx.config.version);
-                const handlerNum = shr.contentProofIdx % ctx.masterConf.submitBlockUrls.length;
-                const url = ctx.masterConf.submitBlockUrls[handlerNum];
+                const handlerNum = shr.contentProofIdx % ctx.pool.config.submitBlockUrls.length;
+                const url = ctx.pool.config.submitBlockUrls[handlerNum];
                 console.error("Uploading share [" + filePath + "] [" + i + "] to [" + url + "]");
                 const req = Util.httpPost(url, {
                     'Content-Type': 'application/json',
@@ -803,7 +802,7 @@ const pollAnnHandlers = (ctx) => {
             return true;
         });
     };
-    ctx.masterConf.downloadAnnUrls.forEach((server, i) => {
+    ctx.pool.config.downloadAnnUrls.forEach((server, i) => {
         getAnnFileNum(server, (num) => { again(server, i, num+1); });
     });
 };
@@ -817,7 +816,7 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
     const pool = Pool.create(config.poolUrl);
     let masterConf;
     nThen((w) => {
-        pool.getMasterConf(w((conf) => { masterConf = conf; }));
+        pool.getMasterConf(w());
         Util.checkMkdir(config.dir + '/wrkdir', w());
         Util.checkMkdir(config.dir + '/anndir', w());
         if (config.version === 1) {
@@ -830,20 +829,19 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
         deleteUselessAnns(config, pool.work.height, w());
     }).nThen((w) => {
         if (!pool.work) { throw new Error(); }
-        if (config.noInitialDl) { return; }
-        downloadOldAnns(config, pool.work.height, masterConf, w());
+        if (!config.initialDl) { return; }
+        downloadOldAnns(config, pool.work.height, pool.config, w());
     }).nThen((w) => {
         const ctx = {
             config: config,
             miner: undefined,
             pool: pool,
-            masterConf: masterConf,
             lock: Saferphore.create(1),
             work: undefined,
             minerLastSignaled: +new Date()
         };
         mkMiner(ctx);
-        console.error("Got [" + masterConf.downloadAnnUrls.length + "] AnnHandlers");
+        console.error("Got [" + pool.config.downloadAnnUrls.length + "] AnnHandlers");
         pollAnnHandlers(ctx);
         pool.onWork((work) => {
             ctx.work = work;
@@ -918,7 +916,7 @@ const usage = () => {
         "                      # default is ./datastore/blkmine\n" +
         "        --slowStart   # wait 10 seconds when starting pcblk to allow time for gdb\n" +
         "                      # to be attached.\n" +
-        "        --noInitialDl # don't perform initial download of anns before mining\n" +
+        "        --initialDl   # perform an initial download of anns before mining\n" +
         "    <poolurl>         # the URL of the mining pool to connect to\n" +
         "\n" +
         "    See https://github.com/cjdelisle/PacketCrypt/blob/master/docs/blkmine.md\n" +
@@ -939,7 +937,7 @@ const main = (argv) => {
         slowStart: false,
         version: 1
     };
-    const a = Minimist(argv.slice(2), { boolean: [ 'slowStart', 'noInitialDl' ] });
+    const a = Minimist(argv.slice(2), { boolean: [ 'slowStart', 'initialDl' ] });
     if (!/http(s)?:\/\/.*/.test(a._[0])) { process.exit(usage()); }
     const conf = {
         corePath: a.corePath || defaultConf.corePath,
@@ -951,7 +949,7 @@ const main = (argv) => {
         minerId: a.minerId || defaultConf.minerId,
         slowStart: a.slowStart === true || defaultConf.slowStart,
         version: defaultConf.version,
-        noInitialDl: a.noInitialDl || false,
+        initialDl: a.initialDl || false,
     };
     if (!a.paymentAddr) {
         console.error("WARNING: You have not passed the --paymentAddr flag\n" +
