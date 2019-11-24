@@ -797,13 +797,22 @@ const pollAnnHandlers = (ctx) => {
                 // throw new Error("Failed to download ann file to [" + path +
                 //     "] file already exists, please delete it and restart");
             }
+            if ((err /*:any*/).statusCode === 404) {
+                // This might mean we are not able to download ann files fast enough
+                // to keep up with the server, in this case lets just figure out where
+                // the server is and update num to that number and start downloading
+                // the most recent anns.
+                console.error("Requesting ann file [" + num + "] from [" + server + "] " +
+                    "got a 404, re-requesting the index");
+                return void getAnnFileNum(server, (num) => { again(server, i, num); });
+            }
             console.error("Requesting ann file [" + num + "] from [" + server + "]" +
                 "got [" + JSON.stringify(err || null) + "] retrying...");
             return true;
         });
     };
     ctx.pool.config.downloadAnnUrls.forEach((server, i) => {
-        getAnnFileNum(server, (num) => { again(server, i, num+1); });
+        getAnnFileNum(server, (num) => { again(server, i, num); });
     });
 };
 
