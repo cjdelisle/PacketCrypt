@@ -66,14 +66,16 @@ type ShareEvent_t = Protocol_ShareEvent_t & {
 type AnnsEvent_t = Protocol_AnnsEvent_t & {
     credit: number|null
 };
+type Event_t = ShareEvent_t & AnnsEvent_t & Protocol_BlockEvent_t;
 
 type BinTree_t<X> = {
     insert: (x:X) => bool,
-    remove: (x:X) => bool,
+    gcOld: (x:number) => void,
     min: () => ?X,
     max: () => ?X,
     each: ((x:X) => ?bool)=>void,
     reach: ((x:X) => ?bool)=>void,
+    size: ()=>number,
 };
 
 export type PayMaker_Result_t = {
@@ -107,8 +109,8 @@ type Context_t = {
     blocks: BinTree_t<Protocol_BlockEvent_t>,
     anns: BinTree_t<AnnsEvent_t>,
     shares: BinTree_t<ShareEvent_t>,
-    dedupTable: {[string]:bool},
     oes: typeof _flow_typeof_saferphore,
+    startTime: number,
     mut: {
         mostRecentEventTime: number,
         cfg: PayMaker_Config_t,
@@ -136,14 +138,6 @@ const earliestValidTime = (ctx) => {
     return ctx.mut.mostRecentEventTime - (1000 * ctx.mut.cfg.historyDepth);
 };
 
-const isRelevant = (ctx, elem) => {
-    // Is it outdated ?
-    if (elem.time < earliestValidTime(ctx)) { return false; }
-    // Is it a dupe ?
-    if (ctx.dedupTable[elem.eventId]) { return false; }
-    return true;
-};
-
 const onShare = (ctx, elem /*:ShareEvent_t*/, warn) => {
     if (!Util.isValidPayTo(elem.payTo)) {
         warn("Invalid payTo address [" + elem.payTo + "]");
@@ -157,7 +151,6 @@ const onShare = (ctx, elem /*:ShareEvent_t*/, warn) => {
             // console.log("ShareTarget: " + Util.getWorkMultiple(elem.target));
             elem.credit = Util.getWorkMultiple(elem.target) / diff;
         }
-        ctx.dedupTable[elem.eventId] = true;
         ctx.shares.insert(elem);
     }
 };
@@ -190,7 +183,6 @@ const onAnns = (ctx, elem /*:AnnsEvent_t*/, warn) => {
             // console.log("ann payable work:", getPayableAnnWork(elem));
             // console.log("difficulty:", diff);
         }
-        ctx.dedupTable[elem.eventId] = true;
         ctx.anns.insert(elem);
     }
 };
@@ -201,7 +193,6 @@ const onBlock = (ctx, elem /*:Protocol_BlockEvent_t*/, warn) => {
     } else if (typeof(elem.difficulty) !== 'number') {
         warn("difficulty is missing or not a number");
     } else {
-        ctx.dedupTable[elem.eventId] = true;
         ctx.blocks.insert(elem);
     }
 };
@@ -227,14 +218,19 @@ const handleEvents = (ctx, fileName, dataStr) => {
         if (elem.accepted) {
             elem.type = 'anns';
         }
+
+        // Reduce memory usage
+        // Commented out because in testing it didn't reduce anything.
+        //elem.eventId = Buffer.from(elem.eventId, 'hex').toString('base64');
+
         if (typeof(elem.type) !== 'string') {
             warn("type field is missing or not a string");
         } else if (typeof(elem.eventId) !== 'string') {
             warn("eventId is missing or not a string");
         } else if (typeof(elem.time) !== 'number') {
             warn("time is missing or not a number");
-        } else if (!isRelevant(ctx, elem)) {
-            // too old or is a duplicate, we will be quiet
+        } else if (elem.time < earliestValidTime(ctx)) {
+            // too old
             continue;
         } else if (elem.type === 'share') {
             if (!elem.target) {
@@ -254,23 +250,11 @@ const handleEvents = (ctx, fileName, dataStr) => {
     }
 };
 
-const garbageCollectEvents = (ctx, tree) => {
-    const toRemove = [];
-    const evt = earliestValidTime(ctx);
-    tree.each((ev) => {
-        if (ev.time >= evt) { return false; }
-        toRemove.push(ev);
-    });
-    toRemove.forEach((ev) => {
-        delete ctx.dedupTable[ev.eventId];
-        // We hit the limits of what flow can reason about
-        tree.remove((ev /*:any*/));
-    });
-};
 const garbageCollect = (ctx) => {
-    garbageCollectEvents(ctx, ctx.blocks);
-    garbageCollectEvents(ctx, ctx.anns);
-    garbageCollectEvents(ctx, ctx.shares);
+    const evt = earliestValidTime(ctx);
+    ctx.blocks.gcOld(evt);
+    ctx.anns.gcOld(evt);
+    ctx.shares.gcOld(evt);
 };
 
 const getNewestTimestamp = (dataStr) => {
@@ -299,6 +283,12 @@ const getNewestTimestamp = (dataStr) => {
         // Failed to parse, try looking backward
         dataStr = dataStr.slice(0, i);
     }
+};
+
+const stats = (ctx) => {
+  return 'anns:' + ctx.anns.size() +
+  ' shares:' + ctx.shares.size() +
+  ' blocks:' + ctx.blocks.size();
 };
 
 const onEvents = (ctx, req, res, done) => {
@@ -332,7 +322,7 @@ const onEvents = (ctx, req, res, done) => {
     }).nThen((w) => {
         if (failed) { return; }
         hash = Crypto.createHash('sha256').update(dataStr).digest('hex').slice(0,32);
-        console.error("/events Processing file [" + hash + "]");
+        console.error("/events Processing file [" + hash + "] [" + stats(ctx) + "]");
         const d = getNewestTimestamp(dataStr);
         if (d === null) {
             return void errorEnd(400, "could not get most recent timestamp from file");
@@ -474,7 +464,7 @@ const sendUpdate = (ctx) => {
     let failed = false;
     nThen((w) => {
         const again = (i) => {
-            console.error("configuring payouts");
+            console.error("configuring payouts [" + stats(ctx) + "]");
             ctx.rpcClient.configureMiningPayouts(whotopay.result, w((err, ret) => {
                 if (err) {
                     if ((err /*:any*/).code === -32603 && i < 20) {
@@ -518,7 +508,17 @@ const onWhoToPay = (ctx, req, res) => {
         }
     }
     const result = computeWhoToPay(ctx, maxtime);
-    res.end(JSON.stringify(result));
+    res.end(JSON.stringify(result, null, '\t'));
+};
+
+const onStats = (ctx /*:Context_t*/, req, res) => {
+    if (Util.badMethod('GET', req, res)) { return; }
+    res.end(JSON.stringify({
+        blocks: ctx.blocks.size(),
+        anns: ctx.anns.size(),
+        shares: ctx.shares.size(),
+        memory: process.memoryUsage(),
+    }, null, '\t'));
 };
 
 const onReq = (ctx /*:Context_t*/, req, res) => {
@@ -529,6 +529,9 @@ const onReq = (ctx /*:Context_t*/, req, res) => {
         res.writeHead(401);
         res.end("401 Unauthorized");
         return;
+    }
+    if (req.url.endsWith('/stats')) {
+        return void onStats(ctx, req, res);
     }
     if (!ctx.mut.ready) {
         res.writeHead(500);
@@ -586,7 +589,7 @@ const loadData = (ctx /*:Context_t*/, done) => {
                     return '';
                 });
                 console.error("Loading data from [" + fileName + "] [" +
-                    dateFile + "]");
+                    dateFile + "] [" + stats(ctx) +"]");
                 Fs.readFile(fileName, 'utf8', w((err, ret) => {
                     // These files should not be deleted
                     if (err) { throw err; }
@@ -597,14 +600,55 @@ const loadData = (ctx /*:Context_t*/, done) => {
         nt(w());
     }).nThen((_) => {
         garbageCollect(ctx);
-        console.error("Ready");
+        console.error("Ready (in " + (((+new Date()) - ctx.startTime) / 1000) + " seconds)");
         done();
+    });
+};
+
+const mkTree = /*::<X:{time:number,eventId:string}>*/() /*:BinTree_t<X>*/ => {
+    const tree = new RBTree((a,b) => {
+        if (a === b) { return 0; }
+        if (a.time === b.time) {
+            if (a.eventId < b.eventId) { return -1; }
+            if (a.eventId > b.eventId) { return 1; }
+            return 0;
+        }
+        return a.time - b.time;
+    });
+    //const dedup = new RBTree((a,b) => ( (a < b) ? -1 : ((a>b) ? 1 : 0) ));
+    const dedup = {};
+
+    return Object.freeze({
+        insert: (x /*:X*/) => {
+            if (x.eventId in dedup) { return false; }
+            dedup[x.eventId] = true;
+            return tree.insert(x);
+        },
+        gcOld: (beforeTime /*:number*/) => {
+            const toRemove = [];
+            tree.each((x) => {
+                if (x.time >= beforeTime) { return; }
+                toRemove.push(x);
+            });
+            for (let i = 0; i < toRemove.length; i++) {
+                delete dedup[toRemove[i].eventId];
+                tree.remove(toRemove[i]);
+            }
+        },
+        has: (x /*:X*/) => {
+            return x.eventId in dedup;
+        },
+        each: (x) => tree.each(x),
+        reach: (x) => tree.reach(x),
+        min: () => tree.min(),
+        max: () => tree.max(),
+        size: () => tree.size,
     });
 };
 
 module.exports.create = (cfg /*:PayMaker_Config_t*/) => {
     const workdir = cfg.root.rootWorkdir + '/paymaker_' + String(cfg.port);
-    let ctx;
+    let ctx /*:Context_t*/;
     if (typeof(cfg.blockPayoutFraction) !== 'number' ||
         cfg.blockPayoutFraction > 1 ||
         cfg.blockPayoutFraction < 0)
@@ -619,11 +663,11 @@ module.exports.create = (cfg /*:PayMaker_Config_t*/) => {
         ctx = Object.freeze({
             workdir: workdir,
             rpcClient: Rpc.create(cfg.root.rpc),
-            dedupTable: {},
-            blocks: new RBTree((a, b) => (a.time - b.time)),
-            anns: new RBTree((a, b) => (a.time - b.time)),
-            shares: new RBTree((a, b) => (a.time - b.time)),
+            blocks: mkTree/*::<Protocol_BlockEvent_t>*/(),
+            anns: mkTree/*::<AnnsEvent_t>*/(),
+            shares: mkTree/*::<ShareEvent_t>*/(),
             oes: Saferphore.create(1),
+            startTime: +new Date(),
             mut: {
                 mostRecentEventTime: 0,
                 cfg: cfg,
