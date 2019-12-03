@@ -325,7 +325,7 @@ const onEvents = (ctx, req, res, done) => {
         if (failed) { return; }
         hash = Crypto.createHash('sha256').update(dataStr).digest('hex').slice(0,32);
         console.error("/events Processing file [" + hash + "] [" + stats(ctx) + "]");
-        const newestTimestamp = getNewestTimestamp(dataStr);
+        newestTimestamp = getNewestTimestamp(dataStr);
         if (newestTimestamp === null) {
             return void errorEnd(400, "could not get most recent timestamp from file");
         }
