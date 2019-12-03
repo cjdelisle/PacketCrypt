@@ -70,7 +70,7 @@ type Event_t = ShareEvent_t & AnnsEvent_t & Protocol_BlockEvent_t;
 
 type BinTree_t<X> = {
     insert: (x:X) => bool,
-    gcOld: (x:number) => void,
+    gcOld: (x:number) => number,
     min: () => ?X,
     max: () => ?X,
     each: ((x:X) => ?bool)=>void,
@@ -252,9 +252,10 @@ const handleEvents = (ctx, fileName, dataStr) => {
 
 const garbageCollect = (ctx) => {
     const evt = earliestValidTime(ctx);
-    ctx.blocks.gcOld(evt);
-    ctx.anns.gcOld(evt);
-    ctx.shares.gcOld(evt);
+    const b = ctx.blocks.gcOld(evt);
+    const a = ctx.anns.gcOld(evt);
+    const s = ctx.shares.gcOld(evt);
+    console.error(`Garbage collected [blocks:${b} anns:${a} shares:${s}]`);
 };
 
 const getNewestTimestamp = (dataStr) => {
@@ -305,6 +306,7 @@ const onEvents = (ctx, req, res, done) => {
     let dataStr;
     let fileName;
     let hash;
+    let newestTimestamp;
     nThen((w) => {
         const data = [];
         req.on('data', (d) => { data.push(d); });
@@ -323,11 +325,11 @@ const onEvents = (ctx, req, res, done) => {
         if (failed) { return; }
         hash = Crypto.createHash('sha256').update(dataStr).digest('hex').slice(0,32);
         console.error("/events Processing file [" + hash + "] [" + stats(ctx) + "]");
-        const d = getNewestTimestamp(dataStr);
-        if (d === null) {
+        const newestTimestamp = getNewestTimestamp(dataStr);
+        if (newestTimestamp === null) {
             return void errorEnd(400, "could not get most recent timestamp from file");
         }
-        fileName = ctx.workdir + '/paylog_' + String(d) + '_' + hash + '.bin';
+        fileName = ctx.workdir + '/paylog_' + String(newestTimestamp) + '_' + hash + '.bin';
         const again = () => {
             Fs.writeFile(fileName, dataStr, { flag: 'ax' }, w((err) => {
                 if (!err) { return; }
@@ -359,6 +361,9 @@ const onEvents = (ctx, req, res, done) => {
             error: []
         }));
         handleEvents(ctx, fileName, dataStr);
+        if (ctx.mut.mostRecentEventTime < newestTimestamp) {
+          ctx.mut.mostRecentEventTime = newestTimestamp;
+        }
         garbageCollect(ctx);
         console.error("/events done processing [" + hash + "]");
         done();
@@ -580,7 +585,7 @@ const loadData = (ctx /*:Context_t*/, done) => {
             return num >= (ctx.mut.mostRecentEventTime - (1000 * ctx.mut.cfg.historyDepth));
         });
         let nt = nThen;
-        files.forEach((f) => {
+        files.forEach((f, i) => {
             nt = nt((w) => {
                 const fileName = ctx.workdir + '/' + f;
                 let dateFile = '<unknown date>';
@@ -589,7 +594,7 @@ const loadData = (ctx /*:Context_t*/, done) => {
                     return '';
                 });
                 console.error("Loading data from [" + fileName + "] [" +
-                    dateFile + "] [" + stats(ctx) +"]");
+                    dateFile + "] [" + Math.floor(i * 100 / files.length) + "%] [" + stats(ctx) +"]");
                 Fs.readFile(fileName, 'utf8', w((err, ret) => {
                     // These files should not be deleted
                     if (err) { throw err; }
@@ -624,8 +629,9 @@ const mkTree = /*::<X:{time:number,eventId:string}>*/() /*:BinTree_t<X>*/ => {
             dedup[x.eventId] = true;
             return tree.insert(x);
         },
-        gcOld: (beforeTime /*:number*/) => {
+        gcOld: (beforeTime /*:number*/) /*:number*/ => {
             const toRemove = [];
+            const oldSize = tree.size;
             tree.each((x) => {
                 if (x.time >= beforeTime) { return; }
                 toRemove.push(x);
@@ -634,6 +640,11 @@ const mkTree = /*::<X:{time:number,eventId:string}>*/() /*:BinTree_t<X>*/ => {
                 delete dedup[toRemove[i].eventId];
                 tree.remove(toRemove[i]);
             }
+            if (oldSize - tree.size !== toRemove.length) {
+                console.error(`WARNING: removed [${toRemove.length}] items but only ` +
+                  `[${oldSize - tree.size}] items actually were removed`);
+            }
+            return oldSize - tree.size;
         },
         has: (x /*:X*/) => {
             return x.eventId in dedup;
