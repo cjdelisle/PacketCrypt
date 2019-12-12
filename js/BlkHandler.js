@@ -10,6 +10,7 @@ const Crypto = require('crypto');
 
 const nThen = require('nthen');
 const Tweetnacl = require('tweetnacl');
+const Sema = require('saferphore');
 
 const Protocol = require('./Protocol.js');
 const Util = require('./Util.js');
@@ -29,6 +30,7 @@ import type { Rpc_Client_t } from './Rpc.js';
 export type BlkHandler_Config_t = {
     url: string,
     port: number,
+    maxConnections?: number,
     root: Config_t
 }
 type Context_t = {
@@ -36,6 +38,7 @@ type Context_t = {
     poolClient: PoolClient_t,
     rpcClient: Rpc_Client_t,
     mut: {
+        connections: number,
         hashNum: number,
         hashMod: number,
         logStream: ?WriteStream,
@@ -337,11 +340,23 @@ const onSubmit = (ctx, req, res) => {
     });
 };
 
+const maxConnections = (ctx) => {
+  return ctx.mut.cfg.maxConnections || 50;
+};
+
 const onReq = (ctx, req, res) => {
     if (!ctx.mut.ready) {
         res.statusCode = 500;
         return void res.end("server not ready");
     }
+    if (ctx.mut.connections > maxConnections(ctx)) {
+        res.statusCode = 501;
+        return void res.end("overloaded");
+    }
+    ctx.mut.connections++;
+    res.on('close', () => {
+        ctx.mut.connections--;
+    });
     if (req.url === '/submit') { return void onSubmit(ctx, req, res); }
     res.statusCode = 404;
     return void res.end(JSON.stringify({ error: "not found" }));
@@ -356,6 +371,7 @@ module.exports.create = (cfg /*:BlkHandler_Config_t*/) => {
             ready: false,
             lastBlockHash: undefined,
             logStream: undefined,
+            connections: 0,
 
             hashNum: -1,
             hashMod: -1
