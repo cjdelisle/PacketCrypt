@@ -630,35 +630,37 @@ module.exports.uploadPayLogs = (
                     done();
                 });
             }).nThen((w) => {
-                if (failed || fileBuf.length === 0) { return; }
-                const id = Crypto.createHash('sha256').update(fileBuf).digest('hex').slice(0,32);
-                let c;
-                try {
-                    c = JSON.parse(reply);
-                } catch (e) {
-                    console.error("Posting [" + fileName + "] unable to parse reply [" + reply + "]");
-                    failed = true;
-                    return;
-                }
-                c.error.forEach((e) => {
-                    console.error("ERROR Posting [" + fileName + "] paymaker [" + e + "]");
-                });
-                if (c.error.length) {
-                    failed = true;
-                    return;
-                }
-                c.warn.forEach((e) => {
-                    console.error("WARN Posting [" + fileName + "] paymaker [" + e + "]");
-                });
-                const eid = c.result.eventId;
-                if (eid !== id) {
-                    console.error("ERROR Posting [" + fileName + "] paymaker eventID mismatch " +
-                        "computed [" + id + "] got back [" + eid + "]");
-                    failed = true;
-                    return;
-                }
-            }).nThen((w) => {
                 if (failed) { return; }
+                if (fileBuf.length > 0) {
+                    const id = Crypto.createHash('sha256').update(fileBuf).digest('hex').slice(0,32);
+                    let c;
+                    try {
+                        c = JSON.parse(reply);
+                    } catch (e) {
+                        console.error("Posting [" + fileName + "] unable to parse reply [" + reply + "]");
+                        failed = true;
+                        return;
+                    }
+                    c.error.forEach((e) => {
+                        console.error("ERROR Posting [" + fileName + "] paymaker [" + e + "]");
+                    });
+                    if (c.error.length) {
+                        failed = true;
+                        return;
+                    }
+                    c.warn.forEach((e) => {
+                        console.error("WARN Posting [" + fileName + "] paymaker [" + e + "]");
+                    });
+                    const eid = c.result.eventId;
+                    if (eid !== id) {
+                        console.error("ERROR Posting [" + fileName + "] paymaker eventID mismatch " +
+                            "computed [" + id + "] got back [" + eid + "]");
+                        failed = true;
+                        return;
+                    }
+                }
+
+                console.error("Deleting [" + fileName + "]");
                 Fs.unlink(fileName, w((err) => {
                     if (err) {
                         console.error("ERROR deleting [" + fileName + "]");
