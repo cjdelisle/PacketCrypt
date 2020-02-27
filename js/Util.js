@@ -15,6 +15,14 @@ const Blake2b = require('blake2b');
 const nThen = require('nthen');
 const Bs58Check = require('bs58check');
 const Bech32 = require('bech32');
+const Agent = require('agentkeepalive');
+
+const keepaliveAgent = new Agent({
+  maxSockets: 500,
+  maxFreeSockets: 10,
+  timeout: 60000, // 60 seconds
+  freeSocketTimeout: 30000, // 30 seconds
+});
 
 /*::
 import type { IncomingMessage, ServerResponse } from 'http'
@@ -124,7 +132,7 @@ const httpGet = module.exports.httpGet = (
                 reconnects++;
             }
         };
-        const h = Http.get(url, (res) => {
+        const h = Http.get(url, { agent: keepaliveAgent }, (res) => {
             if (res.statusCode !== 200) {
                 if (res.statusCode === 300 && res.headers['x-pc-longpoll'] === 'try-again') {
                     ended = true;
@@ -251,7 +259,8 @@ const httpPost = module.exports.httpPost = (
         path: path,
         port: port,
         method: 'POST',
-        headers: headers
+        headers: headers,
+        agent: keepaliveAgent
     }, cb);
 };
 
