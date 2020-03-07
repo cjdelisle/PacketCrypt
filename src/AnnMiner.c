@@ -97,8 +97,8 @@ struct Worker_s {
     int softNonce;
     int softNonceMax;
 
-    enum ThreadState reqState;
-    enum ThreadState workerState;
+    _Atomic enum ThreadState reqState;
+    _Atomic enum ThreadState workerState;
 };
 
 static inline void setRequestedState(AnnMiner_t* ctx, Worker_t* w, enum ThreadState ts) {
@@ -143,12 +143,15 @@ static void populateTable(CryptoCycle_Item_t* table, Buf64_t* annHash0) {
     }
 }
 
-static int populateTable2(CryptoCycle_Item_t* table, Buf64_t* seed, PacketCrypt_ValidateCtx_t* prog) {
-    if (Announce_createProg(prog, &seed->thirtytwos[0])) {
+// -1 means try again
+static int populateTable2(Worker_t* w, Buf64_t* seed) {
+    if (Announce_createProg(&w->vctx, &seed->thirtytwos[0])) {
         return -1;
     }
     for (int i = 0; i < Announce_TABLE_SZ; i++) {
-        if (Announce_mkitem2(i, &table[i], &seed->thirtytwos[1], prog)) {
+        // Allow this to be interrupted in case we should stop
+        if (getRequestedState(w) != ThreadState_RUNNING) { return -1; }
+        if (Announce_mkitem2(i, &w->job.table[i], &seed->thirtytwos[1], &w->vctx)) {
             return -1;
         }
     }
@@ -187,7 +190,7 @@ static int annHash(Worker_t* restrict w, uint32_t nonce) {
     return 1;
 }
 
-#define HASHES_PER_CYCLE 512
+#define HASHES_PER_CYCLE 8
 
 static void search(Worker_t* restrict w)
 {
@@ -274,7 +277,8 @@ static void search(Worker_t* restrict w)
     return;
 }
 
-static void getNextJob(Worker_t* w) {
+// If this returns non-zero then it failed, -1 means try again
+static int getNextJob(Worker_t* w) {
     uint32_t hn = w->job.hah.annHdr.hardNonce;
     w->job.hah.annHdr.hardNonce = w->ctx->hah.annHdr.hardNonce;
     if (Buf_OBJCMP(&w->job.hah.annHdr, &w->ctx->hah.annHdr)) {
@@ -288,10 +292,8 @@ static void getNextJob(Worker_t* w) {
     Hash_COMPRESS64_OBJ(&w->job.annHash0, &w->job.hah);
 
     if (w->job.hah.annHdr.version > 0) {
-        if (populateTable2(w->job.table, &w->job.annHash0, &w->vctx)) {
-            getNextJob(w);
-            return;
-        }
+        int pt = populateTable2(w, &w->job.annHash0);
+        if (pt) { return pt; }
     } else {
         populateTable(w->job.table, &w->job.annHash0);
     }
@@ -309,11 +311,10 @@ static void getNextJob(Worker_t* w) {
         Buf_OBJCPY(&b[0], root);
         Buf_OBJCPY(&b[1], &w->job.annHash0);
         Hash_COMPRESS64_OBJ(&b[0], &b);
-        if (populateTable2(w->job.table, &b[0], &w->vctx)) {
-            getNextJob(w);
-            return;
-        }
+        int pt = populateTable2(w, &b[0]);
+        if (pt) { return pt; }
     }
+    return 0;
 }
 
 static bool checkStop(Worker_t* worker) {
@@ -344,7 +345,11 @@ static void* thread(void* vworker) {
     for (;;) {
         if (checkStop(worker)) { return NULL; }
         if (worker->softNonce + HASHES_PER_CYCLE > worker->softNonceMax) {
-            getNextJob(worker);
+            int x = 0;
+            do {
+                x = getNextJob(worker);
+                if (checkStop(worker)) { return NULL; }
+            } while (x);
         }
         search(worker);
     }
