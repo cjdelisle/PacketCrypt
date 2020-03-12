@@ -146,6 +146,14 @@ config.payMaker = {
     // How many seconds backward to keep history in memory
     historyDepth: 60*60*24*30,
 
+    annCompressor: {
+        // Store data in 1 minute aggregations
+        timespanMs: 1000*60,
+
+        // Allow data to be submitted to any of the last 10 aggregations
+        slotsToKeepEvents: 10,
+    },
+
     // What fraction of the payout to pay to block miners (the rest will be paid to ann miners)
     blockPayoutFraction: 0.5,
 
