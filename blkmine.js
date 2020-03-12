@@ -10,7 +10,7 @@ const Fs = require('fs');
 const nThen = require('nthen');
 const Minimist = require('minimist');
 const MerkleTree = require('merkletreejs').MerkleTree;
-const Saferphore = require('saferphore');
+const Saferphore /*:any*/ = require('saferphore'); // flow doesn't like how saferphore exports
 
 const Pool = require('./js/PoolClient.js');
 const Util = require('./js/Util.js');

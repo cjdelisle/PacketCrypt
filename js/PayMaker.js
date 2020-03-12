@@ -12,7 +12,7 @@ const Querystring = require('querystring');
 
 const RBTree = require('bintrees').RBTree;
 const nThen = require('nthen');
-const Saferphore = require('saferphore');
+const Saferphore /*:any*/ = require('saferphore'); // flow doesn't like how saferphore exports
 
 const Util = require('./Util.js');
 const Rpc = require('./Rpc.js');
@@ -361,7 +361,7 @@ const onEvents = (ctx, req, res, done) => {
             error: []
         }));
         handleEvents(ctx, fileName, dataStr);
-        if (ctx.mut.mostRecentEventTime < newestTimestamp) {
+        if (newestTimestamp && ctx.mut.mostRecentEventTime < newestTimestamp) {
           ctx.mut.mostRecentEventTime = newestTimestamp;
         }
         garbageCollect(ctx);
