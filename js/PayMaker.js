@@ -718,7 +718,7 @@ const mkCompressor = /*::<X:{time:number,eventId:string,payTo:string,credit:numb
                         credits: { },
                         eventIds: { },
                         count: 0,
-                    }
+                    };
                     cctx.anns.insert(newerDs);
                     return false;
                 }
