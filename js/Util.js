@@ -151,9 +151,24 @@ const httpGet = module.exports.httpGet = (
                 });
             }
         });
-        h.on('error', (e) => { cb1(e); });
+        h.on('error', (e) => {
+            if ((h /*:any*/).reusedSocket && e.code === 'ECONNRESET') {
+                // We're trying to reuse a connection but the server had other plans
+                // https://github.com/node-modules/agentkeepalive#support-reqreusedsocket
+                ended = true;
+                return void again();
+            }
+            cb1(e);
+        });
+        const l = () => { ee.emit('connection'); };
         h.on('socket', (s) => {
-            s.on('connect', () => { ee.emit('connection'); });
+            // cleanup the socket after use because they're reused
+            s.on('connect', l);
+            const cleanup = () => s.removeListener('connect', l);
+            h.on('response', cleanup);
+            h.on('error', cleanup);
+            h.on('abort', cleanup);
+            h.on('end', cleanup);
         });
     };
     again();

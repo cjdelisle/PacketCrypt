@@ -283,6 +283,7 @@ static bool loadWork(Context_t* ctx) {
     ctx->currentWorkProofSz = proofSz;
     ctx->coinbaseCommit = (PacketCrypt_Coinbase_t*) (&ptr[COMMIT_PATTERN_OS]);
     ctx->mining = false;
+    DEBUGF("Loaded new work (height: [%d])\n", work->height);
     return true;
 }
 
@@ -290,6 +291,7 @@ static void beginMining(Context_t* ctx)
 {
     assert(ctx->currentWork);
     ctx->coinbaseCommit->annLeastWorkTarget = 0xffffffff;
+    DEBUGF("Begin BlockMiner_lockForMining()\n");
     int res = BlockMiner_lockForMining(ctx->bm, ctx->coinbaseCommit,
         ctx->currentWork->height, ctx->currentWork->shareTarget);
     uint64_t hrm = Difficulty_getHashRateMultiplier(
@@ -501,6 +503,7 @@ int main(int argc, char** argv) {
         // block by scooping up any announcements which will be usable by that block.
         int files = 0;
         int announcements = 0;
+        DEBUGF("Loading announcements\n");
         for (;;) {
             errno = 0;
             struct dirent* file = readdir(wrkdir);
@@ -521,12 +524,16 @@ int main(int argc, char** argv) {
             } else if (fileNum >= (ctx->currentWork->height - 2 - (!ctx->mining))) {
                 continue;
             }
-            announcements += loadFile(ctx, file->d_name);
+            int anns = loadFile(ctx, file->d_name);
+            announcements += anns;
+            // DEBUGF("Loaded [%d] announcements from [%s]\n", anns, file->d_name);
             files++;
+            if (ctx->availableAnns < 0) {
+                DEBUGF("We have reached our --maxAnns limit\n");
+                break;
+            }
         }
-        if (announcements > 0) {
-            DEBUGF("Loaded [%d] announcements from [%d] files\n", announcements, files);
-        }
+        DEBUGF("Loaded [%d] announcements from [%d] files\n", announcements, files);
 
         if (!ctx->mining) { beginMining(ctx); }
 
