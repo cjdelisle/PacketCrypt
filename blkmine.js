@@ -41,19 +41,74 @@ type Context_t = {
 
 const getAnnFileParentNum = (filePath, _cb) => {
     const cb = Util.once(_cb);
-    const stream = Fs.createReadStream(filePath, { end: 16 });
-    const data = [];
-    stream.on('data', (d) => { data.push(d); });
-    stream.on('end', () => {
-        const buf = Buffer.concat(data);
-        if (buf.length < 16) { return void cb(new Error("Could not read file [" + filePath + "]")); }
-        const blockNo = buf.readUInt32LE(12);
-        //console.error("Got announcements with parent block number [" + blockNo + "]");
-        cb(undefined, blockNo);
-    });
-    stream.on('error', (err) => {
-        cb(err);
-    });
+    const again = (i) => {
+        let error = (w, err) => {
+            error = (_w, _e) => {};
+            w.abort();
+            if (i > 5) {
+                cb(err);
+            } else {
+                setTimeout(()=> {
+                    if (i > 3) {
+                        console.error('getAnnFileParentNum [' + String(err) +
+                            '] (attempt [' + i + '])');
+                    }
+                    again(i+1);
+                }, (i > 0) ? 5000 : 500);
+            }
+        };
+        nThen((w) => {
+            Fs.stat(filePath, w((err, st) => {
+                if (err) {
+                    error(w, "stat error " + String(err));
+                } else if (st.size < 16) {
+                    error(w, "short stat " + st.size);
+                }
+            }))
+        }).nThen((w) => {
+            const stream = Fs.createReadStream(filePath, { end: 16 });
+            const data = [];
+            stream.on('data', (d) => { data.push(d); });
+            stream.on('end', () => {
+                const buf = Buffer.concat(data);
+                if (buf.length < 16) {
+                    return void error(w, "short read " + buf.length);
+                }
+                const blockNo = buf.readUInt32LE(12);
+                //console.error("Got announcements with parent block number [" + blockNo + "]");
+                error = (_w, _e) => {};
+                cb(undefined, blockNo);
+            });
+            stream.on('error', (err) => { error(w, err); });
+        });
+    };
+    again(0);
+};
+
+// returns filenames ranked worst to best
+const rankAnnFiles = (fileNames) => {
+    const handlers = {};
+    for (const fn of fileNames) {
+        if (!/^anns_/.test(fn)) { continue; }
+        const h = fn.slice(0, fn.lastIndexOf('_'));
+        const num = fn.replace(/^.*_([0-9]+)\.bin$/, (_, x) => x);
+        const handler = handlers[h] = (handlers[h] || []);
+        handler.push(num);
+    }
+    for (const hn in handlers) { handlers[hn].sort(); }
+    const out = [];
+    let cont;
+    do {
+        cont = false;
+        for (const hn in handlers) {
+            const f = handlers[hn].shift()
+            if (typeof(f) === 'undefined') { continue; }
+            const file = hn + '_' + f + '.bin';
+            out.push(file);
+            cont = true;
+        }
+    } while (cont);
+    return out;
 };
 
 /*::
@@ -88,9 +143,9 @@ const downloadAnnFile = (
                 return void cb({ code: 'EEXIST', annPath: annPath });
             }));
         }).nThen((w) => {
-            console.error("Get announcements [" + url + "] -> [" + annPath + "]");
+            // console.error("Get announcements [" + url + "] -> [" + annPath + "]");
             Util.httpGetBin(url, w((err, res) => {
-                if (!res) {
+                if (!res || res.length < 1024 || res.length % 1024) {
                     if (!err) { err = new Error("unknown error"); }
                     w.abort();
                     if (cb(err)) { setTimeout(again, 5000); }
@@ -160,6 +215,21 @@ const downloadAnnFile = (
         }).nThen((w) => {
             if (!annBin) { return; }
             wrkPath = wrkdir + '/wrkdir/anns_' + parentBlockNum + fileSuffix;
+            Fs.readdir(wrkdir + '/wrkdir/', (err, files) => {
+                if (err) { throw err; }
+                if (files.length > config.maxAnns * 1024) {
+                    console.log('Deleting old announcements');
+                    const ranked = rankAnnFiles(files);
+                    for (let i = 0; i < 1000; i++) {
+                        //console.log('Deleting ' + ranked[i]);
+                        Fs.unlink(wrkdir + '/wrkdir/' + ranked[i], (err) => {
+                            if (err) {
+                                //console.log('Failed to delete ' + ranked[i]);
+                            }
+                        });
+                    }
+                }
+            });
             Fs.link(annPath, wrkPath, w((err) => {
                 if (err && err.code === 'EEXIST') {
                     // Just ignore if the file already exists
@@ -618,7 +688,7 @@ const checkShares = (ctx /*:Context_t*/, done) => {
 
 const deleteUselessAnns = (config, height, done) => {
     Util.deleteUselessAnns(config.dir + '/anndir', height, (f, done2) => {
-        console.error("Deleted expired announcements [" + f + "]");
+        //console.error("Deleted expired announcements [" + f + "]");
         const path = config.dir + '/anndir/' + f;
         Fs.unlink(path, (err) => {
             done2();
@@ -632,26 +702,33 @@ const mkLinks = (config, done) => {
     Fs.readdir(config.dir + '/anndir', (err, files) => {
         if (err) { throw err; }
         let nt = nThen;
-        files.forEach((f) => {
+        const ranked = rankAnnFiles(files);
+        ranked.reverse();
+        files.forEach((f, i) => {
             nt = nt((w) => {
-                Fs.link(
-                    config.dir + '/anndir/' + f,
-                    config.dir + '/wrkdir/' + f,
-                    w((err) =>
-                {
-                    if (!err) {
-                        return;
-                    }
-                    if (err.code === 'EEXIST') {
-                        return;
-                    }
-                    if (err.code === 'ENOENT') {
-                        // this is a race against deleteUselessAnns
-                        console.error("Failed to link [" + f + "] because file is missing");
-                        return;
-                    }
-                    throw err;
-                }));
+                // consider each file contains about 1000 anns
+                if (i < config.maxAnns * 1024) {
+                    Fs.link(
+                        config.dir + '/anndir/' + f,
+                        config.dir + '/wrkdir/' + f,
+                        w((err) =>
+                    {
+                        if (!err) {
+                            return;
+                        }
+                        if (err.code === 'EEXIST') {
+                            return;
+                        }
+                        if (err.code === 'ENOENT') {
+                            // this is a race against deleteUselessAnns
+                            console.error("Failed to link [" + f + "] because file is missing");
+                            return;
+                        }
+                        throw err;
+                    }));
+                } else {
+                    Fs.unlink(config.dir + '/anndir/' + f, w());
+                }
             }).nThen;
         });
         nt(() => {
@@ -802,8 +879,8 @@ const pollAnnHandlers = (ctx) => {
                 // to keep up with the server, in this case lets just figure out where
                 // the server is and update num to that number and start downloading
                 // the most recent anns.
-                console.error("Requesting ann file [" + num + "] from [" + server + "] " +
-                    "got a 404, re-requesting the index");
+                // console.error("Requesting ann file [" + num + "] from [" + server + "] " +
+                //     "got a 404, re-requesting the index");
                 return void getAnnFileNum(server, (num) => { again(server, i, num); });
             }
             console.error("Requesting ann file [" + num + "] from [" + server + "]" +
@@ -833,9 +910,12 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
         }
         Util.clearDir(config.dir + '/wrkdir', w());
     }).nThen((w) => {
-        mkLinks(config, w());
+        console.log('Deleting expired announcements');
         if (!pool.work) { throw new Error(); }
         deleteUselessAnns(config, pool.work.height, w());
+    }).nThen((w) => {
+        console.log('Hardlinking announcements to workdir');
+        mkLinks(config, w());
     }).nThen((w) => {
         if (!pool.work) { throw new Error(); }
         if (!config.initialDl) { return; }
