@@ -70,8 +70,12 @@ static int usage() {
 typedef struct Context_s {
     // Only read 1/2 the total possible anns in one cycle, this way we avoid
     // using too much memory.
-    int64_t availableAnns;
     int64_t maxAnns;
+
+    PacketCrypt_Announce_t* annBuf;
+    int64_t annBufSz;
+    int64_t nextAnn;
+    int full;
 
     FilePath_t filepath;
 #ifndef PCP2
@@ -85,9 +89,17 @@ typedef struct Context_s {
     int currentWorkProofSz;
 } Context_t;
 
+static PacketCrypt_Announce_t* nextBuf(Context_t* ctx, int count) {
+    if (ctx->nextAnn < 0 || ctx->nextAnn + count > ctx->annBufSz) {
+        ctx->nextAnn = -1;
+        return NULL;
+    }
+    PacketCrypt_Announce_t* out = &ctx->annBuf[ctx->nextAnn];
+    ctx->nextAnn += count;
+    return out;
+}
 
 static int loadFile(Context_t* ctx, const char* fileName) {
-    if (ctx->availableAnns < 0) { return 0; }
     strncpy(ctx->filepath.name, fileName, FilePath_NAME_SZ);
 
     int fileno = open(ctx->filepath.path, O_RDONLY);
@@ -113,109 +125,29 @@ static int loadFile(Context_t* ctx, const char* fileName) {
         }
         return 0;
     }
-    PacketCrypt_Announce_t* anns = malloc(st.st_size);
+    PacketCrypt_Announce_t* anns = nextBuf(ctx, numAnns);
     if (!anns) {
-        DEBUGF("Unable to allocate memory for [%s], will be skipped\n", ctx->filepath.path);
+        // This is a really common occurrance
         close(fileno);
         return 0;
     }
     if (st.st_size != read(fileno, anns, st.st_size)) {
         DEBUGF("Failed to read [%s] errno=[%s]\n", ctx->filepath.path, strerror(errno));
         close(fileno);
-        free(anns);
+        ctx->nextAnn -= st.st_size;
         return 0;
     }
 
     close(fileno);
 
-#ifndef PCP2
-    size_t numContents = 0;
-    for (size_t i = 0; i < numAnns; i++) {
-        numContents += (anns[i].hdr.contentLength > 32);
-    }
-
-    uint8_t** contents = NULL;
-    ssize_t bytes = st.st_size;
-    bool missingContent = false;
-
-    if (numContents) {
-        contents = calloc(sizeof(uint8_t*), numContents);
-        assert(contents);
-    }
-    for (size_t i = 0, c = 0; numContents && i < numAnns; i++) {
-        if (anns[i].hdr.contentLength <= 32) { continue; }
-        uint8_t* content = contents[c++] = malloc(anns[i].hdr.contentLength);
-        assert(content);
-        bytes += anns[i].hdr.contentLength;
-        uint8_t b[65];
-        for (int j = 0; j < 32; j++) {
-            sprintf(&b[j*2], "%02x", anns[i].hdr.contentHash[j]);
-        }
-        snprintf(ctx->contentpath.name, FilePath_NAME_SZ, "ann_%s.bin", b);
-        fileno = open(ctx->contentpath.path, O_RDONLY);
-        if (fileno < 0) {
-            if (errno == ENOENT) {
-                missingContent = true;
-                // we're going to fail the entire group of anns as one
-                DEBUGF("Content [%s] for announcement file [%s] idx [%d] is missing\n",
-                    ctx->contentpath.path, ctx->filepath.path, (int)i);
-                break;
-            } else {
-                DEBUGF("Failed to open announcement content [%s] for [%s] errno=[%s]\n",
-                    ctx->contentpath.path, ctx->filepath.path, strerror(errno));
-                free(anns);
-                return 0;
-            }
-        }
-        ssize_t ret = read(fileno, content, anns[i].hdr.contentLength);
-        if (ret == (ssize_t)anns[i].hdr.contentLength) {
-            close(fileno);
-            continue;
-        }
-        DEBUGF("Failed to read announcement content [%s] for [%s] errno=[%s]\n",
-            ctx->contentpath.path, ctx->filepath.path, strerror(errno));
-        free(anns);
-        return 0;
-    }
-#endif
     if (unlink(ctx->filepath.path)) {
         // make sure we can delete it before we add the announcements,
         // better to lose the announcements than to fill the miner to the moon with garbage.
         DEBUGF("Failed to delete [%s] errno=[%s]\n", ctx->filepath.path, strerror(errno));
-        free(anns);
+        ctx->nextAnn -= st.st_size;
         return 0;
-    }
-
-#ifndef PCP2
-    if (missingContent) {
-        free(anns);
-        return 0;
-    }
-
-    // DEBUGF("Loading [%llu] announcements from [%s]\n",
-    //     (unsigned long long)numAnns, ctx->filepath.path);
-    int ret = BlockMiner_addAnns(ctx->bm, anns, contents, numAnns, true);
-#else
-    int ret = BlockMiner_addAnns(ctx->bm, anns, NULL, numAnns, false);
-#endif
-    if (ret) {
-        if (ret == BlockMiner_addAnns_LOCKED) {
-            DEBUGF("Could not add announcements, miner is locked\n");
-        } else {
-            DEBUGF("Could not add announcements, unknown error [%d]\n", ret);
-        }
-    } else {
-        ctx->availableAnns -= numAnns;
     }
     return numAnns;
-}
-
-static void resetAvailableAnns(Context_t* ctx) {
-    // keep reading directories until at least half of maxAnns have been loaded
-    // this isn't perfect because there might be one block period which creates more
-    // than maxAnns and then there will be more than max memory used but it should be ok
-    // in most cases...
-    ctx->availableAnns = ctx->maxAnns / 2;
 }
 
 static const char* COMMIT_PATTERN =
@@ -301,17 +233,13 @@ static void beginMining(Context_t* ctx)
         (long)ctx->coinbaseCommit->numAnns, ctx->coinbaseCommit->annLeastWorkTarget,
         (long)hrm);
 
-    // Even if it failed, we can safely begin allocating announcements again
-    // because all of the to-be-added announcements were freed, or will be when
-    // BlockMiner_start() is called.
-    resetAvailableAnns(ctx);
-
     if (res) {
         if (res == BlockMiner_lockForMining_NO_ANNS) {
             DEBUGF("Unable to begin mining because we have no valid announcements\n");
         } else {
             DEBUGF("Failed BlockMiner_lockForMining() error [%d]", res);
         }
+        ctx->nextAnn = 0;
         return;
     }
 
@@ -342,6 +270,7 @@ static void beginMining(Context_t* ctx)
         assert(0 && "error from blockminer");
     }
     ctx->mining = true;
+    ctx->nextAnn = 0;
 }
 
 int main(int argc, char** argv) {
@@ -351,9 +280,6 @@ int main(int argc, char** argv) {
     int64_t minerId = 0;
     bool slowStart = false;
     const char* wrkdirName = NULL;
-#ifndef PCP2
-    const char* contentdirName = NULL;
-#endif
     for (int i = 1; i < argc; i++) {
         if (maxAnns < 0) {
             maxAnns = strtoll(argv[i], NULL, 10);
@@ -383,10 +309,6 @@ int main(int argc, char** argv) {
             slowStart = true;
         } else if (!wrkdirName) {
             wrkdirName = argv[i];
-#ifndef PCP2
-        } else if (!contentdirName) {
-            contentdirName = argv[i];
-#endif
         } else {
             DEBUGF("I do not understand the argument %s\n", argv[i]);
             return usage();
@@ -394,10 +316,6 @@ int main(int argc, char** argv) {
     }
 
     if (!wrkdirName || maxAnns < 1 || threads < 1) { return usage(); }
-
-#ifndef PCP2
-    if (!contentdirName) { return usage(); }
-#endif
 
     if (slowStart) {
         for (int i = 0; i < 10; i++) {
@@ -419,19 +337,11 @@ int main(int argc, char** argv) {
 
     Context_t* ctx = calloc(sizeof(Context_t), 1);
     assert(ctx);
-
-    // keep reading directories until at least half of maxAnns have been loaded
-    // this isn't perfect because there might be one block period which creates more
-    // than maxAnns and then there will be more than max memory used but it should be ok
-    // in most cases...
-    ctx->maxAnns = maxAnns;
-    resetAvailableAnns(ctx);
+    ctx->annBufSz = maxAnns / 2;
+    ctx->annBuf = malloc(sizeof(PacketCrypt_Announce_t) * ctx->annBufSz);
 
     // for the specific numbered directories inside of the input dir
     FilePath_create(&ctx->filepath, wrkdirName);
-#ifndef PCP2
-    FilePath_create(&ctx->contentpath, contentdirName);
-#endif
 
     snprintf(ctx->filepath.name, FilePath_NAME_SZ, "shares_0.bin");
     int outfile = open(ctx->filepath.path, O_WRONLY | O_CREAT | O_EXCL, 0666);
@@ -444,6 +354,7 @@ int main(int argc, char** argv) {
 
     int top = 100;
     int32_t outFileNo = 1;
+    int files = 0;
     for (uint32_t i = 0;; i++) {
         uint32_t command = 0;
         for (int j = 0; j < top; j++) {
@@ -452,6 +363,8 @@ int main(int argc, char** argv) {
             } else if (EAGAIN != errno) {
                 DEBUGF("Stdin is nolonger connected, exiting\n");
                 return 0;
+            } else if (files > 100) {
+                // drop out, get more files...
             } else {
                 struct timespec ts = { .tv_sec = 0, .tv_nsec = 10000 };
                 nanosleep(&ts, NULL);
@@ -479,32 +392,16 @@ int main(int argc, char** argv) {
             DEBUGF("Created new file [%s]\n", ctx->filepath.path);
         }
 
-        // Check if there's a work.bin file for us
-        if (!loadWork(ctx)) {
-            // no new work, we potentially swapped files because of a signal but we
-            // need not restart the miner.
-            continue;
-        }
-
-        // Only applicable before we receive our first work, we can't really load
-        // any anns because we don't know which ones might be useful.
-        if (!ctx->currentWork) {
-            continue;
-        }
-
-        // Stop mining ASAP, it will take some time before the miner threads realize they
-        // need to stop so while they're doing that, we can be loading anns in.
-        if (!ctx->mining) { BlockMiner_stop(ctx->bm); }
-
         // Load whatever anns we can use in the next mining cycle
         // If mining == false then we're not yet locked, quickly grab up
         // all of the announcements which are usable in the block and then lock and mine.
         // If mining == true then we're currently mining but we can prepare for the next
         // block by scooping up any announcements which will be usable by that block.
-        int files = 0;
+        files = 0;
         int announcements = 0;
-        DEBUGF("Loading announcements\n");
-        for (;;) {
+        PacketCrypt_Announce_t* annsBuf = nextBuf(ctx, 0);
+        // DEBUGF("Loading announcements\n");
+        while (ctx->nextAnn >= 0) {
             errno = 0;
             struct dirent* file = readdir(wrkdir);
             if (file == NULL) {
@@ -519,7 +416,9 @@ int main(int argc, char** argv) {
             // height (next block) 5
             // any announcement with parent < 3 is valid for 5
             // but if we're already mining 5, anything with parent < 4 is valid for next block
-            if (ctx->currentWork->height <= Conf_PacketCrypt_ANN_WAIT_PERIOD) {
+            if (!ctx->currentWork) {
+                // no current work
+            } else if (ctx->currentWork->height <= Conf_PacketCrypt_ANN_WAIT_PERIOD) {
                 // first 3 blocks are special
             } else if (fileNum >= (ctx->currentWork->height - 2 - (!ctx->mining))) {
                 continue;
@@ -528,30 +427,51 @@ int main(int argc, char** argv) {
             announcements += anns;
             // DEBUGF("Loaded [%d] announcements from [%s]\n", anns, file->d_name);
             files++;
-            if (ctx->availableAnns < 0) {
-                DEBUGF("We have reached our --maxAnns limit\n");
-                break;
+        }
+        if (files) {
+            DEBUGF("Loaded [%d] announcements from [%d] files\n", announcements, files);
+            int ret = BlockMiner_addAnns(ctx->bm, annsBuf, announcements, true);
+            if (ret) {
+                if (ret == BlockMiner_addAnns_LOCKED) {
+                    DEBUGF("Could not add announcements, miner is locked\n");
+                } else {
+                    DEBUGF("Could not add announcements, unknown error [%d]\n", ret);
+                }
             }
         }
-        DEBUGF("Loaded [%d] announcements from [%d] files\n", announcements, files);
+        uint64_t hps = BlockMiner_getHashesPerSecond(ctx->bm);
+        if (hps) {
+            double ehps = BlockMiner_getEffectiveHashRate(ctx->bm);
+            int i = 0;
+            for (; ehps > 10000; i++) { ehps = floor(ehps / 1000); }
+            const char* xx[] = { "h", "Kh", "Mh", "Gh", "Th", "Ph", "Zh", "??" };
+            if (i > 7) { i = 7; }
+            DEBUGF("%luh real hashrate - %.f%s effective hashrate\n",
+                (unsigned long)hps, ehps, xx[i]);
+        }
+
+        // Check if there's a work.bin file for us
+        if (!loadWork(ctx)) {
+            // no new work, we potentially swapped files because of a signal but we
+            // need not restart the miner.
+            //DEBUGF("No new work\n");
+            continue;
+        }
+
+        // Only applicable before we receive our first work, we can't really load
+        // any anns because we don't know which ones might be useful.
+        if (!ctx->currentWork) {
+            continue;
+        }
+
+        // Stop mining ASAP, it will take some time before the miner threads realize they
+        // need to stop so while they're doing that, we can be loading anns in.
+        if (!ctx->mining) { BlockMiner_stop(ctx->bm); }
 
         if (!ctx->mining) { beginMining(ctx); }
 
         // wait for announcements and don't spam the logs too hard...
         // wait 6 seconds
         if (!ctx->mining) { top = 600; }
-
-        if (!(i % 4)) {
-            uint64_t hps = BlockMiner_getHashesPerSecond(ctx->bm);
-            if (hps) {
-                double ehps = BlockMiner_getEffectiveHashRate(ctx->bm);
-                int i = 0;
-                for (; ehps > 10000; i++) { ehps = floor(ehps / 1000); }
-                const char* xx[] = { "h", "Kh", "Mh", "Gh", "Th", "Ph", "Zh", "??" };
-                if (i > 7) { i = 7; }
-                DEBUGF("%luh real hashrate - %.f%s effective hashrate\n",
-                    (unsigned long)hps, ehps, xx[i]);
-            }
-        }
     }
 }

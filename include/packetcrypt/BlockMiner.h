@@ -61,12 +61,15 @@ void BlockMiner_free(BlockMiner_t* bm);
  * Add one or more announcements to a block miner, if the number of announcements goes over
  * maxAnns, the least valuable announcements will be deleted.
  * You cannot add announcements while the miner is locked but you can once it begins mining.
+ *
+ * If noCopy is true then anns will be taken in-place, you must not free it until after you
+ * have called BlockMiner_lockForMining() and either it has failed, or it has succeeded and
+ * you have called BlockMiner_start(), or after you have called BlockMiner_free().
  */
 #define BlockMiner_addAnns_LOCKED 1
 int BlockMiner_addAnns(
     BlockMiner_t* bm,
     PacketCrypt_Announce_t* anns,
-    uint8_t** contents,
     uint64_t count,
     int noCopy);
 

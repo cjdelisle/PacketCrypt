@@ -80,10 +80,11 @@ union AnnounceEffectiveWorkLike {
 
 typedef struct AnnounceList_s AnnounceList_t;
 struct AnnounceList_s {
-    PacketCrypt_Announce_t* anns;
+    PacketCrypt_Announce_t* someAnns;
     #ifndef PCP2
         uint8_t** contents;
     #endif
+    int noCopy;
     uint64_t count;
     AnnounceList_t* next;
 };
@@ -360,7 +361,9 @@ static void freeQueue(BlockMiner_t* ctx)
         #ifndef PCP2
             free(l->contents);
         #endif
-        free(l->anns);
+        if (!l->noCopy) {
+            free(l->someAnns); 
+        }
         free(l);
         l = ll;
     }
@@ -452,7 +455,7 @@ static void prepareAnns(BlockMiner_t* bm, AnnounceList_t* list, uint32_t nextBlo
         size_t k = 0;
     #endif
     for (size_t i = 0, j = bm->nextAewLen; i < list->count; i++, j++) {
-        PacketCrypt_Announce_t* ann = &list->anns[i];
+        PacketCrypt_Announce_t* ann = &list->someAnns[i];
         NextAnnounceEffectiveWork_t* aew = &bm->nextAew[j];
         aew->initialWork = ann->hdr.workBits;
         aew->parentBlock = ann->hdr.parentBlockHeight;
@@ -472,54 +475,29 @@ static void prepareAnns(BlockMiner_t* bm, AnnounceList_t* list, uint32_t nextBlo
 int BlockMiner_addAnns(
     BlockMiner_t* bm,
     PacketCrypt_Announce_t* anns,
-    uint8_t** contents,
     uint64_t count,
     int noCopy)
 {
-#ifdef PCP2
-    noCopy = true;
-    contents = NULL;
-#endif
     if (bm->state == State_LOCKED) { return BlockMiner_addAnns_LOCKED; }
     AnnounceList_t* l = calloc(sizeof(AnnounceList_t), 1);
     assert(l && anns);
     PacketCrypt_Announce_t* annsCpy = anns;
-    uint8_t** contentsCpy = contents;
     if (!noCopy) {
         annsCpy = malloc(sizeof(PacketCrypt_Announce_t) * count);
         assert(annsCpy);
         memcpy(annsCpy, anns, sizeof(PacketCrypt_Announce_t) * count);
-        if (contents) {
-            int contentCount = 0;
-            for (size_t i = 0; i < count; i++) {
-                contentCount += (anns[i].hdr.contentLength > 32);
-            }
-            contentsCpy = malloc(sizeof(char*) * contentCount);
-            assert(contentsCpy);
-            for (size_t i = 0, j = 0; i < count; i++) {
-                if (anns[i].hdr.contentLength <= 32) { continue; }
-                contentsCpy[j] = malloc(anns[i].hdr.contentLength);
-                assert(contentsCpy[j]);
-                memcpy(contentsCpy[j], contents[j], anns[i].hdr.contentLength);
-                j++;
-            }
-        }
     }
     for (size_t i = 0; i < count; i++) {
         // sanity
         assert(annsCpy[i].hdr.workBits);
-#ifdef PCP2
         uint32_t softNonce = PacketCrypt_AnnounceHdr_softNonce(&annsCpy[i].hdr);
         if (softNonce > Util_annSoftNonceMax(annsCpy[i].hdr.workBits)) {
             // Kill the announcement because its softNonce is too high
             annsCpy[i].hdr.workBits = 0xffffffff;
         }
-#endif
     }
-    l->anns = annsCpy;
-    #ifndef PCP2
-        l->contents = contentsCpy;
-    #endif
+    l->someAnns = annsCpy;
+    l->noCopy = noCopy;
     l->count = count;
     l->next = bm->queue;
     bm->queue = l;
@@ -650,11 +628,6 @@ int BlockMiner_lockForMining(
         // copy the ann into the table
         Buf_OBJCPY(&annTarget->ann, bm->nextAew[newAnnI].ann);
         Buf_OBJCPY(aewTarget, &bm->nextAew[newAnnI]);
-
-        #ifndef PCP2
-            free(annTarget->content);
-            annTarget->content = bm->nextAew[newAnnI].content;
-        #endif
 
         // assign pointers
         aewTarget->ann = annTarget;

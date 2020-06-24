@@ -39,6 +39,10 @@ type Context_t = {
 };
 */
 
+const debug = (...args) => {
+    console.error('blkmine:', ...args);
+}
+
 const getAnnFileParentNum = (filePath, _cb) => {
     const cb = Util.once(_cb);
     const again = (i) => {
@@ -50,7 +54,7 @@ const getAnnFileParentNum = (filePath, _cb) => {
             } else {
                 setTimeout(()=> {
                     if (i > 3) {
-                        console.error('getAnnFileParentNum [' + String(err) +
+                        debug('getAnnFileParentNum [' + String(err) +
                             '] (attempt [' + i + '])');
                     }
                     again(i+1);
@@ -75,7 +79,7 @@ const getAnnFileParentNum = (filePath, _cb) => {
                     return void error(w, "short read " + buf.length);
                 }
                 const blockNo = buf.readUInt32LE(12);
-                //console.error("Got announcements with parent block number [" + blockNo + "]");
+                //debug("Got announcements with parent block number [" + blockNo + "]");
                 error = (_w, _e) => {};
                 cb(undefined, blockNo);
             });
@@ -112,6 +116,9 @@ const rankAnnFiles = (fileNames) => {
 };
 
 /*::
+type DownloadAnnCtx_t = {
+    inflight: {[string]:number};
+};
 type DownloadAnnResult_t = {
     annPath: string,
     wrkPath: string,
@@ -120,30 +127,52 @@ type DownloadAnnError_t = Error | {statusCode:number} | {code:string,annPath:str
 */
 
 const downloadAnnFile = (
+    dac /*:DownloadAnnCtx_t*/,
     currentHeight /*:number*/,
     config /*:Config_BlkMiner_t*/,
     serverUrl /*:string*/,
     serverId /*:string*/,
     fileNo /*:number*/,
-    cb /*:(?DownloadAnnError_t, ?DownloadAnnResult_t)=>true|void*/
+    _cb /*:(?DownloadAnnError_t, ?DownloadAnnResult_t)=>true|void*/
 ) => {
     const wrkdir = config.dir;
+    const fileSuffix = '_' + serverId + '_' + fileNo + '.bin';
+    const annPath = wrkdir + '/anndir/anns' + fileSuffix;
+    const url = serverUrl + '/anns/anns_' + fileNo + '.bin';
+    if (dac.inflight[url]) {
+        return void _cb({ code: 'INFLIGHT_REQ', annPath });
+    }
+    dac.inflight[url] = 1;
+    let timedout = false;
+    const to = setTimeout(() => {
+        debug("Request for " + url + " in flight for 5 minutes, cancelling.");
+        delete dac.inflight[url];
+        timedout = true;
+        _cb({ code: 'TIMEOUT', annPath: annPath });
+    }, 300000);
+    const cb = (x, y) => {
+        if (timedout) {
+            debug("Request for " + url + " finally returned, too late");
+            return;
+        }
+        if (!dac.inflight[url]) { throw new Error(url + " returned twice"); }
+        delete dac.inflight[url];
+        clearTimeout(to);
+        _cb(x, y);
+    };
     const again = () => {
-        const url = serverUrl + '/anns/anns_' + fileNo + '.bin';
-        const fileSuffix = '_' + serverId + '_' + fileNo + '.bin';
-        const annPath = wrkdir + '/anndir/anns' + fileSuffix;
         let parentBlockNum;
         let annBin;
         let wrkPath;
         nThen((w) => {
-            Fs.stat(annPath, w((err, st) => {
+            Fs.stat(annPath, w((err, _) => {
                 if (err && err.code === 'ENOENT') { return; }
                 if (err) { throw err; }
                 w.abort();
                 return void cb({ code: 'EEXIST', annPath: annPath });
             }));
         }).nThen((w) => {
-            // console.error("Get announcements [" + url + "] -> [" + annPath + "]");
+            // debug("Get announcements [" + url + "] -> [" + annPath + "]");
             Util.httpGetBin(url, w((err, res) => {
                 if (!res || res.length < 1024 || res.length % 1024) {
                     if (!err) { err = new Error("unknown error"); }
@@ -173,7 +202,7 @@ const downloadAnnFile = (
                     const cfname = 'ann_' + annContentHash.toString('hex') + '.bin';
                     const curl = serverUrl + '/content/' + cfname;
                     const cpath = wrkdir + '/contentdir/' + cfname;
-                    //console.error("Get announcement content [" + curl + "] -> [" + cpath + "]");
+                    //debug("Get announcement content [" + curl + "] -> [" + cpath + "]");
                     Util.httpGetBin(curl, ww((err, res) => {
                         if (!res) {
                             if (!err) { err = new Error("unknown error"); }
@@ -206,7 +235,7 @@ const downloadAnnFile = (
             if (!annBin) { return; }
             getAnnFileParentNum(annPath, w((err, pbn) => {
                 if (typeof(pbn) === 'undefined') {
-                    console.error('getAnnFileParentNum() error ' + String(err));
+                    debug('getAnnFileParentNum() error ' + String(err));
                     // filesystem error, we probably want to bail out...
                     throw err;
                 }
@@ -252,10 +281,10 @@ const downloadAnnFile = (
 
 /*
 if (searchBackward && err.statusCode === 404) {
-    console.error("Backward search on server [" + server + "] complete");
+    debug("Backward search on server [" + server + "] complete");
     return;
 }
-console.error("Unable to get ann file at [" + url + "] [" + String(err) + "]");
+debug("Unable to get ann file at [" + url + "] [" + String(err) + "]");
 return true;
 */
 
@@ -266,7 +295,7 @@ const getAnnFileNum = (
     const url = server + '/anns/index.json';
     Util.httpGetStr(url, (err, res) => {
         if (!res) {
-            console.error("Unable to contact AnnHandler at [" + url + "] [" + String(err) + "]");
+            debug("Unable to contact AnnHandler at [" + url + "] [" + String(err) + "]");
             return true;
         }
         let num = NaN;
@@ -275,11 +304,11 @@ const getAnnFileNum = (
             num = Number(obj.highestAnnFile);
         } catch (e) { }
         if (isNaN(num)) {
-            console.error("in response from [" + url + "] could not parse [" + res + "]");
+            debug("in response from [" + url + "] could not parse [" + res + "]");
             return true;
         }
         if (num < 0) {
-            console.error("Ann server doesn't have any anns yet, trying again in 10 seconds");
+            debug("Ann server doesn't have any anns yet, trying again in 10 seconds");
             return void setTimeout(() => { getAnnFileNum(server, then); }, 10000);
         }
         then(num);
@@ -334,7 +363,7 @@ const onNewWork = (ctx /*:Context_t*/, work, done) => {
             }
         }));
     }).nThen((w) => {
-        //console.error("Writing work.bin");
+        debug("Writing work.bin");
         Fs.writeFile(ctx.config.dir + '/wrkdir/_work.bin', work.binary, w((err) => {
             if (err) { throw err; }
             Fs.rename(
@@ -496,10 +525,10 @@ const httpRes = (ctx /*:Context_t*/, res /*:IncomingMessage*/) => {
     res.on('end', () => {
         if (res.statusCode !== 200) {
             // if (res.statusCode === 400) {
-            //     console.error("Pool replied with error 400 " + data.join('') + ", stopping");
+            //     debug("Pool replied with error 400 " + data.join('') + ", stopping");
             //     process.exit(100);
             // }
-            console.error("WARNING: Pool replied with [" + res.statusMessage +
+            debug("WARNING: Pool replied with [" + res.statusMessage +
                 "] [" + data.join('') + "]");
             return;
         }
@@ -509,19 +538,19 @@ const httpRes = (ctx /*:Context_t*/, res /*:IncomingMessage*/) => {
             const o = JSON.parse(d);
             result = o.result;
             if (o.error.length > 0) {
-                console.error("WARNING: Pool error [" + JSON.stringify(o.error) + "]");
+                debug("WARNING: Pool error [" + JSON.stringify(o.error) + "]");
                 // we do not proceed
                 return;
             }
             if (o.warn.length > 0) {
-                console.error("WARNING: Pool is warning us [" + JSON.stringify(o.warn) + "]");
+                debug("WARNING: Pool is warning us [" + JSON.stringify(o.warn) + "]");
             }
             result = o.result;
         } catch (e) {
-            console.error("WARNING: Pool reply is invalid [" + d + "]");
+            debug("WARNING: Pool reply is invalid [" + d + "]");
             return;
         }
-        console.error("Pool responded [" + JSON.stringify(result) + "]");
+        debug("Pool responded [" + JSON.stringify(result) + "]");
     });
 };
 
@@ -555,19 +584,19 @@ const getAnn = (share /*:Buffer*/, num /*:number*/) => {
 const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) => {
     let fileBuf;
     nThen((w) => {
-        //console.error("uploadShares2 " + filePath);
+        //debug("uploadShares2 " + filePath);
         Fs.readFile(filePath, w((err, ret) => {
             if (err) {
                 // could be ENOENT if the file was deleted in the mean time because
                 // new work arrived.
                 if (err.code === 'ENOENT') {
-                    console.error("Shares [" + filePath + "] disappeared");
+                    debug("Shares [" + filePath + "] disappeared");
                     return;
                 }
                 throw err;
             }
             if (ret.length > 0) {
-                //console.error("Uploading shares [" + filePath + "]");
+                //debug("Uploading shares [" + filePath + "]");
                 fileBuf = ret;
             }
         }));
@@ -575,7 +604,7 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
         if (!fileBuf) { return; }
         Fs.unlink(filePath, w((err) => {
             if (err) {
-                console.error("WARNING: failed to delete file [" + filePath + "] [" +
+                debug("WARNING: failed to delete file [" + filePath + "] [" +
                     String(err.code) + "]");
                 return;
             }
@@ -594,8 +623,8 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
                     getAnnContent(ctx, ann, w((err, buf) => {
                         if (failed) { return; }
                         if (!buf) {
-                            console.error("Unable to submit share");
-                            console.error(err);
+                            debug("Unable to submit share");
+                            debug(err);
                             failed = true;
                             return;
                         }
@@ -607,7 +636,7 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
                 const shr = convertShare(share, annContents, ctx.config.version);
                 const handlerNum = shr.contentProofIdx % ctx.pool.config.submitBlockUrls.length;
                 const url = ctx.pool.config.submitBlockUrls[handlerNum];
-                console.error("Uploading share [" + filePath + "] [" + i + "] to [" + url + "]");
+                debug("Uploading share [" + filePath + "] [" + i + "] to [" + url + "]");
                 const req = Util.httpPost(url, {
                     'Content-Type': 'application/json',
                     'x-pc-payto': ctx.config.paymentAddr,
@@ -617,7 +646,7 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
                 });
                 req.end(JSON.stringify(shr.toSubmit));
                 req.on('error', (err) => {
-                    console.error("Failed to upload share [" + err + "]");
+                    debug("Failed to upload share [" + err + "]");
                 });
                 //console.log(JSON.stringify(shr.toSubmit));
             });
@@ -672,7 +701,7 @@ const checkShares = (ctx /*:Context_t*/, done) => {
                         // work, delete it.
                         Fs.unlink(filePath, w((err) => {
                             if (err && err.code !== 'ENOENT') {
-                                console.error("WARNING: failed to delete file [" + filePath + "]");
+                                debug("WARNING: failed to delete file [" + filePath + "]");
                                 return;
                             }
                         }));
@@ -688,12 +717,12 @@ const checkShares = (ctx /*:Context_t*/, done) => {
 
 const deleteUselessAnns = (config, height, done) => {
     Util.deleteUselessAnns(config.dir + '/anndir', height, (f, done2) => {
-        //console.error("Deleted expired announcements [" + f + "]");
+        //debug("Deleted expired announcements [" + f + "]");
         const path = config.dir + '/anndir/' + f;
         Fs.unlink(path, (err) => {
             done2();
             if (!err) { return; }
-            console.error("Failed to delete [" + path + "] [" + err.message + "]");
+            debug("Failed to delete [" + path + "] [" + err.message + "]");
         });
     }, done);
 };
@@ -721,7 +750,7 @@ const mkLinks = (config, done) => {
                         }
                         if (err.code === 'ENOENT') {
                             // this is a race against deleteUselessAnns
-                            console.error("Failed to link [" + f + "] because file is missing");
+                            debug("Failed to link [" + f + "] because file is missing");
                             return;
                         }
                         throw err;
@@ -750,16 +779,16 @@ const mkMiner = (ctx) => {
     if (ctx.config.version === 1) {
         args.push(ctx.config.dir + '/contentdir');
     }
-    console.error(ctx.config.corePath + ' ' + args.join(' '));
+    debug(ctx.config.corePath + ' ' + args.join(' '));
     const miner = Spawn(ctx.config.corePath, args, {
         stdio: [ 'pipe', 1, 2 ]
     });
     miner.on('close', (num, sig) => {
-        console.error("pcblk died [" + num + "] [" + sig + "], restarting in 1 second");
+        debug("pcblk died [" + num + "] [" + sig + "], restarting in 1 second");
         ctx.miner = undefined;
         setTimeout(() => {
             ctx.lock.take((returnAfter) => {
-                //console.error("Enter pkblk died");
+                //debug("Enter pkblk died");
                 nThen((w) => {
                     deleteWorkAndShares(ctx.config, w());
                 }).nThen((w) => {
@@ -767,7 +796,7 @@ const mkMiner = (ctx) => {
                     if (ctx.work && ctx.pool.connected) { onNewWork(ctx, ctx.work, w()); }
                 }).nThen((w) => {
                     mkMiner(ctx);
-                    //console.error("Exit pkblk died");
+                    //debug("Exit pkblk died");
                     returnAfter()();
                 });
             });
@@ -776,9 +805,9 @@ const mkMiner = (ctx) => {
     ctx.miner = miner;
 };
 
-const downloadOldAnns = (config, currentHeight, masterConf, done) => {
+const downloadOldAnns = (dac, config, currentHeight, masterConf, done) => {
     let nt = nThen;
-    console.error("Downloading announcements to fill memory");
+    debug("Downloading announcements to fill memory");
 
     const serverCurrentNum = [];
     masterConf.downloadAnnUrls.forEach((server, i) => {
@@ -801,17 +830,17 @@ const downloadOldAnns = (config, currentHeight, masterConf, done) => {
     let activeServers;
     const again = (i) => {
         if (!activeServers) {
-            console.error("No more announcements available on any server, done");
+            debug("No more announcements available on any server, done");
             return void done();
         }
         if (totalLen >= maxLen) {
-            console.error("Downloaded enough announcements to fill available memory, done");
+            debug("Downloaded enough announcements to fill available memory, done");
             return void done();
         }
         if (i > serverCurrentNum.length) { i = 0; }
         if (!serverCurrentNum[i]) { return void again(i + 1); }
         const as = serverCurrentNum[i];
-        downloadAnnFile(currentHeight, config, as.server, String(i), as.currentAnnNum, (err, res) => {
+        downloadAnnFile(dac, currentHeight, config, as.server, String(i), as.currentAnnNum, (err, res) => {
             if (res) {
                 return void Fs.stat(res.annPath, (err, st) => {
                     if (err) { throw err; }
@@ -826,18 +855,18 @@ const downloadOldAnns = (config, currentHeight, masterConf, done) => {
                 return void again(i + 1);
             }
             if (err && err.code === 'USELESS') {
-                console.error("No more useful announcements on server [" + as.server + "]");
+                debug("No more useful announcements on server [" + as.server + "]");
                 serverCurrentNum[i] = undefined;
                 activeServers--;
                 return void again(i + 1);
             }
             if (err && err.statusCode === 404) {
-                console.error("Reached the end of useful announcements on [" + as.server + "]");
+                debug("Reached the end of useful announcements on [" + as.server + "]");
                 serverCurrentNum[i] = undefined;
                 activeServers--;
                 return void again(i + 1);
             }
-            console.error("Requesting ann file [" + as.currentAnnNum + "] from [" + as.server + "]" +
+            debug("Requesting ann file [" + as.currentAnnNum + "] from [" + as.server + "]" +
                 "got [" + JSON.stringify(err || null) + "] retrying...");
             return true;
         });
@@ -860,7 +889,7 @@ const pollAnnHandlers = (ctx) => {
         }, 60000);
         if (!ctx.work) { return; }
         const currentHeight = ctx.work.height;
-        downloadAnnFile(currentHeight, ctx.config, server, String(i), num, (err, res) => {
+        downloadAnnFile(ctx.dac, currentHeight, ctx.config, server, String(i), num, (err, res) => {
             if (completed) { return; }
             if (res) {
                 completed = true;
@@ -873,17 +902,20 @@ const pollAnnHandlers = (ctx) => {
                 // const path = String(err.annPath);
                 // throw new Error("Failed to download ann file to [" + path +
                 //     "] file already exists, please delete it and restart");
+            } else if (err && err.code === 'INFLIGHT_REQ') {
+                // We'll silently continue trying until the other requestor finishes
+                return true;
             }
-            if ((err /*:any*/).statusCode === 404) {
+            if ((err /*:any*/).statusCode === 404 || (err /*:any*/).code === 'USELESS') {
                 // This might mean we are not able to download ann files fast enough
                 // to keep up with the server, in this case lets just figure out where
                 // the server is and update num to that number and start downloading
                 // the most recent anns.
-                // console.error("Requesting ann file [" + num + "] from [" + server + "] " +
+                // debug("Requesting ann file [" + num + "] from [" + server + "] " +
                 //     "got a 404, re-requesting the index");
                 return void getAnnFileNum(server, (num) => { again(server, i, num); });
             }
-            console.error("Requesting ann file [" + num + "] from [" + server + "]" +
+            debug("Requesting ann file [" + num + "] from [" + server + "]" +
                 "got [" + JSON.stringify(err || null) + "] retrying...");
             return true;
         });
@@ -895,10 +927,11 @@ const pollAnnHandlers = (ctx) => {
 
 const launch = (config /*:Config_BlkMiner_t*/) => {
     if (!Util.isValidPayTo(config.paymentAddr)) {
-        console.error('Payment address [' + config.paymentAddr +
+        debug('Payment address [' + config.paymentAddr +
             '] is not a valid pkt address');
         process.exit(100);
     }
+    const dac = { inflight: {} };
     const pool = Pool.create(config.poolUrl);
     let masterConf;
     nThen((w) => {
@@ -919,9 +952,10 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
     }).nThen((w) => {
         if (!pool.work) { throw new Error(); }
         if (!config.initialDl) { return; }
-        downloadOldAnns(config, pool.work.height, pool.config, w());
+        downloadOldAnns(dac, config, pool.work.height, pool.config, w());
     }).nThen((w) => {
         const ctx = {
+            dac,
             config: config,
             miner: undefined,
             pool: pool,
@@ -930,27 +964,28 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
             minerLastSignaled: +new Date()
         };
         mkMiner(ctx);
-        console.error("Got [" + pool.config.downloadAnnUrls.length + "] AnnHandlers");
+        debug("Got [" + pool.config.downloadAnnUrls.length + "] AnnHandlers");
         pollAnnHandlers(ctx);
         pool.onWork((work) => {
             ctx.work = work;
+            debug("onWork");
             ctx.lock.take((returnAfter) => {
-                //console.error("Enter pool.onWork");
+                debug("Enter pool.onWork");
                 nThen((w) => {
                     onNewWork(ctx, work, w());
                 }).nThen((w) => {
                     deleteUselessAnns(config, work.height, w());
                 }).nThen((w) => {
-                    //console.error("Exit pool.onWork")
+                    debug("Exit pool.onWork")
                     returnAfter()();
                 });
             });
         });
         setInterval(() => {
             ctx.lock.take((returnAfter) => {
-                //console.error("Enter checkShares");
+                //debug("Enter checkShares");
                 checkShares(ctx, returnAfter(() => {
-                    //console.error("Exit checkShares");
+                    //debug("Exit checkShares");
                 }));
             });
         }, 500);
@@ -966,21 +1001,21 @@ const getMinerVersion = (cfg, cb) => {
     miner.on('close', () => {
         if (data.indexOf(MAGIC2) === -1) {
             if (data.indexOf(MAGIC1) === -1) {
-                console.error("pcblk not present or not working, if you are running the miner");
-                console.error("from outside of the PacketCryp directory, make sure you pass --corePath");
+                debug("pcblk not present or not working, if you are running the miner");
+                debug("from outside of the PacketCryp directory, make sure you pass --corePath");
                 process.exit(100);
             } else {
-                console.error("pcblk is out of date, you may need to recompile");
+                debug("pcblk is out of date, you may need to recompile");
                 process.exit(100);
             }
         } else if (data.indexOf(MAGIC2 + '2\n') > -1) {
-            console.error("PacketCrypt Block Miner: Protocol Version 2");
+            debug("PacketCrypt Block Miner: Protocol Version 2");
             cb(2);
         } else if (data.indexOf(MAGIC2 + '1\n') > -1) {
-            console.error("PacketCrypt Block Miner: Protocol Version 1");
+            debug("PacketCrypt Block Miner: Protocol Version 1");
             cb(1);
         } else {
-            console.error("pcblk unknown protocol version");
+            debug("pcblk unknown protocol version");
             process.exit(100);
         }
     });
@@ -1041,7 +1076,7 @@ const main = (argv) => {
         initialDl: a.initialDl || false,
     };
     if (!a.paymentAddr) {
-        console.error("WARNING: You have not passed the --paymentAddr flag\n" +
+        debug("WARNING: You have not passed the --paymentAddr flag\n" +
             "    as a default, " + DEFAULT_PAYMENT_ADDR + " will be used,\n" +
             "    cjd appreciates your generosity");
     }
