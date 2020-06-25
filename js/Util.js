@@ -10,6 +10,7 @@ const Http = require('http');
 const EventEmitter = require('events').EventEmitter;
 const Crypto = require('crypto');
 
+const Saferphore = require('saferphore');
 const Tweetnacl = require('tweetnacl');
 const Blake2b = require('blake2b');
 const nThen = require('nthen');
@@ -436,12 +437,11 @@ module.exports.deleteUselessAnns = (
         }));
     }).nThen((w) => {
         if (!files) { return; }
-        let nt = nThen;
+        const sema = Saferphore.create(8);
         files.forEach((f) => {
             const file = dir + '/' + f;
-            let buf;
-            nt = nt((w) => {
-                const rs = Fs.createReadStream(file);
+            sema.take((ra) => {
+                const rs = Fs.createReadStream(file, { end: 16 });
                 const data = [];
                 let len = 0;
                 rs.on('error', (e) => {
@@ -453,38 +453,33 @@ module.exports.deleteUselessAnns = (
                     throw e;
                 });
                 rs.on('data', (d) => {
-                    if (len > 16) {
-                        rs.destroy();
-                    } else {
-                        data.push(d);
-                        len += d.length;
-                    }
+                    data.push(d);
+                    len += d.length;
                 });
-                rs.on('close', w((err) => {
+                rs.on('close', w(ra((err) => {
                     if (len >= 16) {
-                        buf = Buffer.concat(data);
-                        return;
-                    }
-                    console.error("Error reading file [" + file + "] [" +
-                        ((err) ? err.message : 'runt file') + "]");
-                    Fs.stat(file, w((err, st) => {
-                        if (err) { return; }
-                        if (st.size < 16) {
-                            console.error("Deleting [" + file + "] because it's a runt");
+                        const buf = Buffer.concat(data);
+                        const height = buf.readInt32LE(12);
+                        const bits = buf.readUInt32LE(8);
+                        if (isWorkUselessExponential(bits, currentHeight - height)) {
                             rmcb(f, w());
                         }
+                        return;
+                    }
+                    Fs.stat(file, w((stErr, st) => {
+                        if (err) {
+                            if (err.code === 'ENOENT') { return; }
+                            console.error("Error stating file [" + file + "] [" + String(stErr) + "]");
+                        } else if (st.size < 16) {
+                            console.error("Deleting [" + file + "] because it's a runt");
+                            rmcb(f, w());
+                        } else {
+                            console.error("Error reading file [" + file + "] [" + err + "]");
+                        }
                     }));
-                }));
-            }).nThen((w) => {
-                if (!buf) { return; }
-                const height = buf.readInt32LE(12);
-                const bits = buf.readUInt32LE(8);
-                if (isWorkUselessExponential(bits, currentHeight - height)) {
-                    rmcb(f, w());
-                }
-            }).nThen;
+                })));
+            });
         });
-        nt(w());
     }).nThen((_) => {
         cb();
     });

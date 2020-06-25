@@ -36,6 +36,7 @@ type Context_t = {
     pool: PoolClient_t,
     lock: Saferphore_t,
     lock2: Saferphore_t,
+    newWorkLock: Saferphore_t,
     minerLastSignaled: number
 };
 */
@@ -356,27 +357,30 @@ const sigMiner = (ctx /*:Context_t*/) => {
 };
 
 const onNewWork = (ctx /*:Context_t*/, work, done) => {
-    nThen((w) => {
-        debug("Writing work.bin");
-        Fs.writeFile(ctx.config.dir + '/wrkdir/_work.bin', work.binary, w((err) => {
-            if (err) { throw err; }
-            Fs.rename(
-                ctx.config.dir + '/wrkdir/_work.bin',
-                ctx.config.dir + '/wrkdir/work.bin',
-                w((err) =>
-            {
+    ctx.newWorkLock.take((ra) => {
+        done = ra(done);
+        nThen((w) => {
+            debug("Writing work.bin");
+            Fs.writeFile(ctx.config.dir + '/wrkdir/_work.bin', work.binary, w((err) => {
                 if (err) { throw err; }
+                Fs.rename(
+                    ctx.config.dir + '/wrkdir/_work.bin',
+                    ctx.config.dir + '/wrkdir/work.bin',
+                    w((err) =>
+                {
+                    if (err) { throw err; }
+                }));
             }));
-        }));
-    }).nThen((w) => {
-        if (!ctx.miner) { return; }
-        // It's important that if there's new work, the miner does woken up...
-        const s = () => {
-            if (!sigMiner(ctx)) { setTimeout(w(s), 50); }
-        };
-        s();
-    }).nThen((_) => {
-        done();
+        }).nThen((w) => {
+            if (!ctx.miner) { return; }
+            // It's important that if there's new work, the miner does woken up...
+            const s = () => {
+                if (!sigMiner(ctx)) { setTimeout(w(s), 50); }
+            };
+            s();
+        }).nThen((_) => {
+            done();
+        });
     });
 };
 
@@ -710,15 +714,31 @@ const checkShares = (ctx /*:Context_t*/, done) => {
 };
 
 const deleteUselessAnns = (config, height, done) => {
-    Util.deleteUselessAnns(config.dir + '/anndir', height, (f, done2) => {
-        //debug("Deleted expired announcements [" + f + "]");
-        const path = config.dir + '/anndir/' + f;
-        Fs.unlink(path, (err) => {
-            done2();
-            if (!err) { return; }
-            debug("Failed to delete [" + path + "] [" + err.message + "]");
-        });
-    }, done);
+    const sema = Saferphore.create(32);
+    debug("Deleting expired announcements");
+    nThen((w) => {
+        Util.deleteUselessAnns(config.dir + '/anndir', height, (f, done2) => {
+            //debug("Deleted expired announcements [" + f + "]");
+            sema.take(w((ra) => {
+                done2();
+                const path = config.dir + '/anndir/' + f;
+                const st = +new Date();
+                Fs.unlink(path, w(ra((err) => {
+                    if (!err) {
+                        const t = +new Date() - st;
+                        if (t > 50) {
+                            debug("WARN: deletion of [" + path + "] took [" + t + "ms]");
+                        }
+                        return;
+                    }
+                    debug("Failed to delete [" + path + "] [" + err.message + "]");
+                })));
+            }));
+        }, w());
+    }).nThen((_) => {
+        debug("Deleting expired announcements complete");
+        done();
+    });
 };
 
 const FILES_PER_BATCH = 500;
@@ -732,34 +752,32 @@ const mkLinks = (config, done) => {
         if (!chunk.length) {
             debug("mkLinks() done");
             return void done();
+        } else if (i > config.maxAnns * 1024) {
+            debug("mkLinks() done, the remaining files will be discarded");
+            return void done();
         }
         nThen((w) => {
             chunk.forEach((f, _i) => {
-                const index = i + _i;
+                if (i + _i > config.maxAnns * 1024) { return; }
                 sema.take((ra) => {
-                    // consider each file contains about 1000 anns
-                    if (index < config.maxAnns * 1024) {
-                        Fs.link(
-                            config.dir + '/anndir/' + f,
-                            config.dir + '/wrkdir/' + f,
-                            w(ra((err) =>
-                        {
-                            if (!err) {
-                                return;
-                            }
-                            if (err.code === 'EEXIST') {
-                                return;
-                            }
-                            if (err.code === 'ENOENT') {
-                                // this is a race against deleteUselessAnns
-                                debug("Failed to link [" + f + "] because file is missing");
-                                return;
-                            }
-                            throw err;
-                        })));
-                    } else {
-                        Fs.unlink(config.dir + '/anndir/' + f, w(ra(() => {})));
-                    }
+                    Fs.link(
+                        config.dir + '/anndir/' + f,
+                        config.dir + '/wrkdir/' + f,
+                        w(ra((err) =>
+                    {
+                        if (!err) {
+                            return;
+                        }
+                        if (err.code === 'EEXIST') {
+                            return;
+                        }
+                        if (err.code === 'ENOENT') {
+                            // this is a race against deleteUselessAnns
+                            //debug("Failed to link [" + f + "] because file is missing");
+                            return;
+                        }
+                        throw err;
+                    })));
                 });
             });
         }).nThen((_) => {
@@ -982,6 +1000,7 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
             pool: pool,
             lock: Saferphore.create(1),
             lock2: Saferphore.create(1),
+            newWorkLock: Saferphore.create(1),
             work: undefined,
             minerLastSignaled: +new Date()
         };
@@ -990,16 +1009,7 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
         pollAnnHandlers(ctx);
         pool.onWork((work) => {
             ctx.work = work;
-            //debug("onWork");
-            ctx.lock.take((returnAfter) => {
-                //debug("Enter pool.onWork");
-                nThen((w) => {
-                    onNewWork(ctx, work, w());
-                }).nThen((w) => {
-                    //debug("Exit pool.onWork");
-                    returnAfter()();
-                });
-            });
+            onNewWork(ctx, work, ()=>{});
             ctx.lock2.take((r) => {
                 deleteUselessAnns(config, work.height, r());
             });
