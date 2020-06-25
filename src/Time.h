@@ -9,6 +9,7 @@
 
 #include <sys/time.h>
 #include <time.h>
+#include <stdint.h>
 
 typedef struct {
     struct timeval tv0;
@@ -23,5 +24,7 @@ typedef struct {
 )
 
 void Time_nsleep(long nanos);
+
+uint64_t Time_nowMilliseconds();
 
 #endif

@@ -13,6 +13,7 @@
 #include "FileUtil.h"
 #include "Conf.h"
 #include "Difficulty.h"
+#include "Time.h"
 #include "config.h"
 
 #include "sodium/crypto_hash_sha256.h"
@@ -355,6 +356,9 @@ int main(int argc, char** argv) {
     int top = 100;
     int32_t outFileNo = 1;
     int files = 0;
+    int reportAnns = 0;
+    int reportFiles = 0;
+    uint64_t lastReport = Time_nowMilliseconds();
     for (uint32_t i = 0;; i++) {
         uint32_t command = 0;
         for (int j = 0; j < top; j++) {
@@ -429,7 +433,6 @@ int main(int argc, char** argv) {
             files++;
         }
         if (files) {
-            DEBUGF("Loaded [%d] announcements from [%d] files\n", announcements, files);
             int ret = BlockMiner_addAnns(ctx->bm, annsBuf, announcements, true);
             if (ret) {
                 if (ret == BlockMiner_addAnns_LOCKED) {
@@ -438,16 +441,37 @@ int main(int argc, char** argv) {
                     DEBUGF("Could not add announcements, unknown error [%d]\n", ret);
                 }
             }
+            reportAnns += announcements;
+            reportFiles += files;
         }
-        uint64_t hps = BlockMiner_getHashesPerSecond(ctx->bm);
-        if (hps) {
-            double ehps = BlockMiner_getEffectiveHashRate(ctx->bm);
-            int i = 0;
-            for (; ehps > 10000; i++) { ehps = floor(ehps / 1000); }
-            const char* xx[] = { "h", "Kh", "Mh", "Gh", "Th", "Ph", "Zh", "??" };
-            if (i > 7) { i = 7; }
-            DEBUGF("%luh real hashrate - %.f%s effective hashrate\n",
-                (unsigned long)hps, ehps, xx[i]);
+        uint64_t now = Time_nowMilliseconds();
+        if (now - lastReport > 5000) {
+            uint64_t hps = BlockMiner_getHashesPerSecond(ctx->bm);
+            double ehps = 0;
+            const char* unit = "";
+            if (hps) {
+                ehps = BlockMiner_getEffectiveHashRate(ctx->bm);
+                int i = 0;
+                for (; ehps > 10000; i++) { ehps = floor(ehps / 1000); }
+                const char* xx[] = { "h", "Kh", "Mh", "Gh", "Th", "Ph", "Zh", "??" };
+                if (i > 7) { i = 7; }
+                unit = xx[i];
+            }
+            // mB = reportAnns / 1024
+            // mb = mB * 8
+            // seconds = (now - lastReport) / 1000
+            // mb/s = mb / seconds
+            //
+            // ( reportAnns / 1024 * 8 ) / ( (now - lastReport) / 1000 )
+            // ( reportAnns * 1000 / 1024 * 8 ) / ( (now - lastReport) )
+            uint64_t bandwidth = reportAnns * 1000 / 1024 * 8 / (now - lastReport);
+            DEBUGF("%luh real hashrate - %.f%s effective hashrate - "
+                "loaded [%d] announcements from [%d] files (%lu mb/s)\n",
+                (unsigned long)hps, ehps, unit, reportAnns, reportFiles,
+                (unsigned long) bandwidth);
+            reportAnns = 0;
+            reportFiles = 0;
+            lastReport = now;
         }
 
         // Check if there's a work.bin file for us

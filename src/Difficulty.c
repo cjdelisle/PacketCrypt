@@ -230,7 +230,7 @@ uint64_t Difficulty_getHashRateMultiplier(uint32_t annTar, uint64_t annCount)
     return out;
 }
 
-static inline uint32_t degradeAnnouncementTarget2(uint32_t annTar, uint32_t annAgeBlocks)
+uint32_t Difficulty_degradeAnnouncementTarget(uint32_t annTar, uint32_t annAgeBlocks)
 {
     if (annAgeBlocks < Conf_PacketCrypt_ANN_WAIT_PERIOD) { return 0xffffffff; }
     if (annAgeBlocks == Conf_PacketCrypt_ANN_WAIT_PERIOD) { return annTar; }
@@ -246,52 +246,19 @@ static inline uint32_t degradeAnnouncementTarget2(uint32_t annTar, uint32_t annA
     return out > 0x207fffff ? 0xffffffff : out;
 }
 
-uint32_t Difficulty_degradeAnnouncementTarget(uint32_t annTar, uint32_t annAgeBlocks)
-{
-#ifdef PCP2
-    return degradeAnnouncementTarget2(annTar, annAgeBlocks);
-#endif
-    if (annAgeBlocks < Conf_PacketCrypt_ANN_WAIT_PERIOD) { return 0xffffffff; }
-    annAgeBlocks -= (Conf_PacketCrypt_ANN_WAIT_PERIOD - 1);
-    BN_CTX* ctx = BN_CTX_new(); assert(ctx);
-    BIGNUM* bnAnnTar = BN_new(); assert(bnAnnTar);
-    BIGNUM* bnAnnWork = BN_new(); assert(bnAnnWork);
-    BIGNUM* bnAnnAgeBlocks = BN_new(); assert(bnAnnAgeBlocks);
-    setuint64(bnAnnAgeBlocks, annAgeBlocks);
-
-    bnSetCompact(bnAnnTar, annTar);
-    bnWorkForDiff(ctx, bnAnnWork, bnAnnTar);
-    assert(BN_div(bnAnnWork, NULL, bnAnnWork, bnAnnAgeBlocks, ctx));
-    bnDiffForWork(ctx, bnAnnTar, bnAnnWork);
-    uint32_t out = bnGetCompact(bnAnnTar);
-
-    BN_free(bnAnnTar);
-    BN_free(bnAnnWork);
-    BN_free(bnAnnAgeBlocks);
-    BN_CTX_free(ctx);
-
-    // if out > 0x207fffff then it rounds to zero, meaning the announcement cannot be mined
-    return out > 0x207fffff ? 0xffffffff : out;
-}
-
 // IsAnnMinDiffOk is kind of a sanity check to make sure that the miner doesn't provide
 // "silly" results which might trigger wrong behavior from the diff computation
 bool Difficulty_isMinAnnDiffOk(uint32_t target)
 {
-    if (target == 0 || target > 0x20ffffff) {
+    if (target == 0 || target > 0x207fffff) {
         return false;
     }
-#ifdef PCP2
-    if (target > 0x207fffff) { return false; }
-#endif
     BN_CTX* ctx = BN_CTX_new(); assert(ctx);
     BIGNUM* bnTar = BN_new(); assert(bnTar);
     BIGNUM* bnWork = BN_new(); assert(bnWork);
     BIGNUM* bnMax = BN_new(); assert(bnMax);
     bnSetCompact(bnTar, target);
-#ifdef PCP2
     if (BN_is_zero(bnTar) || BN_is_negative(bnTar)) { return false; }
-#endif
     bnWorkForDiff(ctx, bnWork, bnTar);
     if (BN_is_zero(bnWork)) { return false; }
     bn256(bnMax);

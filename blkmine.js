@@ -35,6 +35,7 @@ type Context_t = {
     miner: void|ChildProcess,
     pool: PoolClient_t,
     lock: Saferphore_t,
+    lock2: Saferphore_t,
     minerLastSignaled: number
 };
 */
@@ -356,13 +357,6 @@ const sigMiner = (ctx /*:Context_t*/) => {
 
 const onNewWork = (ctx /*:Context_t*/, work, done) => {
     nThen((w) => {
-        // Delete share/work files because there is no chance of them being useful
-        deleteWorkAndShares(ctx.config, w((err) => {
-            if (err && err.code !== 'ENOENT') {
-                throw err;
-            }
-        }));
-    }).nThen((w) => {
         debug("Writing work.bin");
         Fs.writeFile(ctx.config.dir + '/wrkdir/_work.bin', work.binary, w((err) => {
             if (err) { throw err; }
@@ -960,6 +954,7 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
             miner: undefined,
             pool: pool,
             lock: Saferphore.create(1),
+            lock2: Saferphore.create(1),
             work: undefined,
             minerLastSignaled: +new Date()
         };
@@ -968,24 +963,25 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
         pollAnnHandlers(ctx);
         pool.onWork((work) => {
             ctx.work = work;
-            debug("onWork");
+            //debug("onWork");
             ctx.lock.take((returnAfter) => {
-                debug("Enter pool.onWork");
+                //debug("Enter pool.onWork");
                 nThen((w) => {
                     onNewWork(ctx, work, w());
                 }).nThen((w) => {
-                    deleteUselessAnns(config, work.height, w());
-                }).nThen((w) => {
-                    debug("Exit pool.onWork")
+                    //debug("Exit pool.onWork");
                     returnAfter()();
                 });
             });
+            ctx.lock2.take((r) => {
+                deleteUselessAnns(config, work.height, r());
+            })
         });
         setInterval(() => {
             ctx.lock.take((returnAfter) => {
-                //debug("Enter checkShares");
+                debug("Enter checkShares");
                 checkShares(ctx, returnAfter(() => {
-                    //debug("Exit checkShares");
+                    debug("Exit checkShares");
                 }));
             });
         }, 500);

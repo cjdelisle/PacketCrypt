@@ -188,8 +188,12 @@ static void found(MineResult_t* res, PacketCrypt_BlockHeader_t* hdr, Worker_t* w
 
     Buf32_t root2;
     Buf32_t hashes[PacketCrypt_NUM_ANNS];
+    fprintf(stderr, "pcblk: share\n");
     for (int i = 0; i < PacketCrypt_NUM_ANNS; i++) {
         Buf_OBJCPY(&output->hap.announcements[i], &w->bm->anns[res->items[i]].ann);
+        // fprintf(stderr, "ann[%d] pbh %08x wb %08x ",
+        //     i, output->hap.announcements[i].hdr.parentBlockHeight,
+        //     output->hap.announcements[i].hdr.workBits);
         Hash_COMPRESS32_OBJ(&hashes[i], &w->bm->anns[res->items[i]].ann);
     }
     assert(!PacketCryptProof_hashProof(
@@ -451,9 +455,6 @@ static void updateAew(
 static void prepareAnns(BlockMiner_t* bm, AnnounceList_t* list, uint32_t nextBlockHeight) {
     bm->nextAew = realloc(bm->nextAew, (bm->nextAewLen + list->count) * sizeof(bm->nextAew[0]));
     assert(bm->nextAew);
-    #ifndef PCP2
-        size_t k = 0;
-    #endif
     for (size_t i = 0, j = bm->nextAewLen; i < list->count; i++, j++) {
         PacketCrypt_Announce_t* ann = &list->someAnns[i];
         NextAnnounceEffectiveWork_t* aew = &bm->nextAew[j];
@@ -461,12 +462,6 @@ static void prepareAnns(BlockMiner_t* bm, AnnounceList_t* list, uint32_t nextBlo
         aew->parentBlock = ann->hdr.parentBlockHeight;
         aew->ann = ann;
         aew->effectiveWork = 0xffffffff;
-        #ifndef PCP2
-            aew->content = NULL;
-            if (ann->hdr.contentLength > 32) {
-                aew->content = list->contents[k++];
-            }
-        #endif
     }
     updateAew(&bm->nextAew[bm->nextAewLen], list->count, nextBlockHeight);
     bm->nextAewLen += list->count;
@@ -645,15 +640,22 @@ int BlockMiner_lockForMining(
     uint64_t bestHrm = 0;
     uint32_t bestI = 0;
     if (mainAnnI > 0) { bm->aew[0].ann->aewPtr = &bm->aew[0]; }
+    // uint32_t lwork = 0; // paranoia
     for (size_t i = 1; i < mainAnnI; i++) {
         // While we're here, we need to fix up the pointers because we just sorted...
         bm->aew[i].ann->aewPtr = &bm->aew[i];
         uint32_t work = bm->aew[i].effectiveWork;
+        // assert(work >= lwork);
+        // lwork = work;
         if (work == 0xffffffff) { break; }
         uint64_t hrm = Difficulty_getHashRateMultiplier(work, i);
         if (hrm <= bestHrm) { continue; }
         bestHrm = hrm;
         bestI = i;
+    }
+    for (size_t i = bestI; i < mainAnnI; i++) {
+        // Zero the tree hashes which need to be removed
+        Buf_OBJSET(&bm->tree->entries[bm->aew[i].ann->_treePosition], 0);
     }
 
     // Truncate the list to only the best subset
@@ -704,6 +706,31 @@ int BlockMiner_lockForMining(
         postLockCleanup(bm);
         prepareNextBlock(bm, nextBlockHeight);
         return BlockMiner_lockForMining_NO_ANNS;
+    }
+
+    // debugging
+    if (1) {
+        int ok = 1;
+        for (size_t i = 0; i < nextCount; i++) {
+            AnnounceEffectiveWork_t* aew = bm->anns[i].aewPtr;
+            assert(aew->initialWork == bm->anns[i].ann.hdr.workBits);
+            assert(aew->parentBlock == bm->anns[i].ann.hdr.parentBlockHeight);
+            uint32_t realEffectiveWork = Difficulty_degradeAnnouncementTarget(
+                aew->initialWork,
+                (nextBlockHeight - aew->parentBlock)
+            );
+            if (aew->effectiveWork != realEffectiveWork) {
+                fprintf(stderr, "pcblk: ERROR ann %d of %d has ew %08x real ew %08x\n",
+                    (int)i, (int)nextCount, aew->effectiveWork, realEffectiveWork);
+                ok = 0;
+            }
+            if (aew->effectiveWork > worstEffectiveWork) {
+                fprintf(stderr, "pcblk: ERROR ann %d of %d has ew %08x wew %08x\n",
+                    (int)i, (int)nextCount, aew->effectiveWork, worstEffectiveWork);
+                ok = 0;
+            }
+        }
+        assert(ok);
     }
 
     PacketCryptProof_computeTree(bm->tree);

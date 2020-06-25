@@ -118,15 +118,6 @@ static void checkedWrite(const char* filename, int fileno, void* ptr, int len) {
     assert(0);
 }
 
-static uint64_t nowSeconds() {
-    struct timeval tv;
-    if (gettimeofday(&tv, NULL)) {
-        DEBUGF("gettimeofday failed [%s]\n", strerror(errno));
-        assert(0);
-    }
-    return tv.tv_sec;
-}
-
 typedef struct Result_s {
     uint32_t accepted;
     uint32_t duplicates;
@@ -307,7 +298,7 @@ static void tryWriteAnnsCritical(
     // attempts to write nothing.
     StateAndOutput_t* current = output->stateAndOutput;
     if (!current->outCount && !newBlock) {
-        current->timeOfLastWrite = nowSeconds();
+        current->timeOfLastWrite = Time_nowMilliseconds() / 1000;
         return;
     }
 
@@ -325,7 +316,7 @@ static void tryWriteAnnsCritical(
         // ever needed to be.
     }
     next->outCount = 0;
-    next->timeOfLastWrite = nowSeconds();
+    next->timeOfLastWrite = Time_nowMilliseconds() / 1000;
 
     assert(!pthread_mutex_unlock(&output->lock));
     writeAnns(&w->lw, afn, current);
@@ -378,7 +369,7 @@ static bool processAnns1(Worker_t* w, Result_t* res, int fileNo, int annCount) {
       return false;
     }
 
-    uint64_t now = nowSeconds();
+    uint64_t now = Time_nowMilliseconds() / 1000;
     int goodCount = 0;
 
     Output_t* output = OUTPUT(w->g, w->lw.inBuf.parentBlockHeight);
@@ -571,7 +562,7 @@ static void initOutput(Output_t* out) {
     out->dedup->dedupTableLen = 0;
 
     out->stateAndOutput = checkmem(calloc(sizeof(StateAndOutput_t), 1));
-    out->stateAndOutput->timeOfLastWrite = nowSeconds();
+    out->stateAndOutput->timeOfLastWrite = Time_nowMilliseconds() / 1000;
 
     assert(!pthread_mutex_init(&out->lock, NULL));
 }
