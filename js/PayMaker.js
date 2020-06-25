@@ -627,7 +627,7 @@ const loadData = (ctx /*:Context_t*/, done) => {
         let nt = nThen;
         files.forEach((f, i) => {
             nt = nt((w) => {
-                if (!(i % 100)) { garbageCollect(ctx); }
+                if (0 === (i % 100)) { garbageCollect(ctx); }
                 const fileName = ctx.workdir + '/' + f;
                 let dateFile = '<unknown date>';
                 fileName.replace(/paylog_([0-9]+)_/, (all, x) => {

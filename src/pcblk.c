@@ -86,8 +86,8 @@ typedef struct Context_s {
 
     PoolProto_Work_t* currentWork;
     PacketCrypt_Coinbase_t* coinbaseCommit;
-    bool mining;
     int currentWorkProofSz;
+    int isMining;
 } Context_t;
 
 static PacketCrypt_Announce_t* nextBuf(Context_t* ctx, int count) {
@@ -231,13 +231,16 @@ static bool loadWork(Context_t* ctx) {
     ctx->currentWork = work;
     ctx->currentWorkProofSz = proofSz;
     ctx->coinbaseCommit = (PacketCrypt_Coinbase_t*) (&ptr[COMMIT_PATTERN_OS]);
-    ctx->mining = false;
     DEBUGF("Loaded new work (height: [%d])\n", work->height);
     return true;
 }
 
-static void beginMining(Context_t* ctx)
+// start or re-start miner, return whether we are currently mining
+static bool restartMiner(Context_t* ctx)
 {
+    // First we stop the miner in case it's running
+    BlockMiner_stop(ctx->bm);
+
     assert(ctx->currentWork);
     ctx->coinbaseCommit->annLeastWorkTarget = 0xffffffff;
     DEBUGF("Begin BlockMiner_lockForMining()\n");
@@ -257,7 +260,7 @@ static void beginMining(Context_t* ctx)
             DEBUGF("Failed BlockMiner_lockForMining() error [%d]", res);
         }
         ctx->nextAnn = 0;
-        return;
+        return false;
     }
 
     uint8_t* merkles = &ctx->currentWork->coinbaseAndMerkles[ctx->currentWork->coinbaseLen];
@@ -285,9 +288,11 @@ static void beginMining(Context_t* ctx)
             DEBUGF("BlockMiner_start() -> unknown error [%d]\n", res);
         }
         assert(0 && "error from blockminer");
+        return false;
+    } else {
+        ctx->nextAnn = 0;
+        return true;
     }
-    ctx->mining = true;
-    ctx->nextAnn = 0;
 }
 
 int main(int argc, char** argv) {
@@ -418,12 +423,16 @@ int main(int argc, char** argv) {
         files = 0;
         int announcements = 0;
         PacketCrypt_Announce_t* annsBuf = nextBuf(ctx, 0);
-        // DEBUGF("Loading announcements\n");
+        if (i == 0) {
+            DEBUGF("Loading announcements\n");
+        }
         uint64_t startProcessing = 0;
         while (ctx->nextAnn >= 0) {
             uint64_t now = Time_nowMilliseconds();
             if (!startProcessing) {
                 startProcessing = now;
+            } else if (i == 0) {
+                // fall through, load as many anns as possible in the first cycle
             } else if (now - startProcessing > 5000 || shouldWakeup()) {
                 // don't load files for more than 5 seconds at a time
                 break;
@@ -437,7 +446,7 @@ int main(int argc, char** argv) {
             }
             if (strncmp(file->d_name, "anns_", 5)) { continue; }
             long fileNum = strtol(&file->d_name[5], NULL, 10);
-            // if ctx->mining is true then we are currently mining ctx->currentWork->height
+            // if ctx->isMining is true then we are currently mining ctx->currentWork->height
             // otherwise we are waiting to mine it.
             // height (next block) 5
             // any announcement with parent < 3 is valid for 5
@@ -446,7 +455,7 @@ int main(int argc, char** argv) {
                 // no current work
             } else if (ctx->currentWork->height <= Conf_PacketCrypt_ANN_WAIT_PERIOD) {
                 // first 3 blocks are special
-            } else if (fileNum >= (ctx->currentWork->height - 2 - (!ctx->mining))) {
+            } else if (fileNum >= (ctx->currentWork->height - 2 - (!ctx->isMining))) {
                 continue;
             }
             int anns = loadFile(ctx, file->d_name);
@@ -488,27 +497,14 @@ int main(int argc, char** argv) {
         }
 
         // Check if there's a work.bin file for us
-        if (!loadWork(ctx)) {
-            // no new work, we potentially swapped files because of a signal but we
-            // need not restart the miner.
-            //DEBUGF("No new work\n");
-            continue;
-        }
+        // We cannot safely unlock and relock the miner with additional anns because
+        // it is setup to process anns for block n+1 when mining block n, so don't do it.
+        if (!loadWork(ctx)) { continue; }
 
         // Only applicable before we receive our first work, we can't really load
         // any anns because we don't know which ones might be useful.
-        if (!ctx->currentWork) {
-            continue;
-        }
+        if (!ctx->currentWork) { continue; }
 
-        // Stop mining ASAP, it will take some time before the miner threads realize they
-        // need to stop so while they're doing that, we can be loading anns in.
-        if (!ctx->mining) { BlockMiner_stop(ctx->bm); }
-
-        if (!ctx->mining) { beginMining(ctx); }
-
-        // wait for announcements and don't spam the logs too hard...
-        // wait 6 seconds
-        if (!ctx->mining) { top = 600; }
+        ctx->isMining = restartMiner(ctx);
     }
 }

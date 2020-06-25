@@ -42,7 +42,7 @@ type Context_t = {
 
 const debug = (...args) => {
     console.error('blkmine:', ...args);
-}
+};
 
 const getAnnFileParentNum = (filePath, _cb) => {
     const cb = Util.once(_cb);
@@ -69,7 +69,7 @@ const getAnnFileParentNum = (filePath, _cb) => {
                 } else if (st.size < 16) {
                     error(w, "short stat " + st.size);
                 }
-            }))
+            }));
         }).nThen((w) => {
             const stream = Fs.createReadStream(filePath, { end: 16 });
             const data = [];
@@ -106,7 +106,7 @@ const rankAnnFiles = (fileNames) => {
     do {
         cont = false;
         for (const hn in handlers) {
-            const f = handlers[hn].shift()
+            const f = handlers[hn].shift();
             if (typeof(f) === 'undefined') { continue; }
             const file = hn + '_' + f + '.bin';
             out.push(file);
@@ -721,42 +721,62 @@ const deleteUselessAnns = (config, height, done) => {
     }, done);
 };
 
+const FILES_PER_BATCH = 500;
 const mkLinks = (config, done) => {
-    Fs.readdir(config.dir + '/anndir', (err, files) => {
-        if (err) { throw err; }
-        let nt = nThen;
-        const ranked = rankAnnFiles(files);
-        ranked.reverse();
-        files.forEach((f, i) => {
-            nt = nt((w) => {
-                // consider each file contains about 1000 anns
-                if (i < config.maxAnns * 1024) {
-                    Fs.link(
-                        config.dir + '/anndir/' + f,
-                        config.dir + '/wrkdir/' + f,
-                        w((err) =>
-                    {
-                        if (!err) {
-                            return;
-                        }
-                        if (err.code === 'EEXIST') {
-                            return;
-                        }
-                        if (err.code === 'ENOENT') {
-                            // this is a race against deleteUselessAnns
-                            debug("Failed to link [" + f + "] because file is missing");
-                            return;
-                        }
-                        throw err;
-                    }));
-                } else {
-                    Fs.unlink(config.dir + '/anndir/' + f, w());
-                }
-            }).nThen;
+    const sema = Saferphore.create(8);
+    debug("mkLinks() getting list of files");
+    let files;
+    const more = (i) => {
+        debug("mkLinks() processing files [" + i + "] to [" + (i + FILES_PER_BATCH) + "]");
+        const chunk = files.slice(i, i + FILES_PER_BATCH);
+        if (!chunk.length) {
+            debug("mkLinks() done");
+            return void done();
+        }
+        nThen((w) => {
+            chunk.forEach((f, _i) => {
+                const index = i + _i;
+                sema.take((ra) => {
+                    // consider each file contains about 1000 anns
+                    if (index < config.maxAnns * 1024) {
+                        Fs.link(
+                            config.dir + '/anndir/' + f,
+                            config.dir + '/wrkdir/' + f,
+                            w(ra((err) =>
+                        {
+                            if (!err) {
+                                return;
+                            }
+                            if (err.code === 'EEXIST') {
+                                return;
+                            }
+                            if (err.code === 'ENOENT') {
+                                // this is a race against deleteUselessAnns
+                                debug("Failed to link [" + f + "] because file is missing");
+                                return;
+                            }
+                            throw err;
+                        })));
+                    } else {
+                        Fs.unlink(config.dir + '/anndir/' + f, w(ra(() => {})));
+                    }
+                });
+            });
+        }).nThen((_) => {
+            more(i + FILES_PER_BATCH);
         });
-        nt(() => {
-            done();
-        });
+    };
+    nThen((w) => {
+        Fs.readdir(config.dir + '/anndir', w((err, fls) => {
+            if (err) { throw err; }
+            debug("mkLinks() processing [" + fls.length + "] files");
+            const ranked = rankAnnFiles(fls);
+            ranked.reverse();
+            debug("mkLinks() ranked");
+            files = ranked;
+        }));
+    }).nThen((_) => {
+        more(0);
     });
 };
 
@@ -802,7 +822,7 @@ const mkMiner = (ctx) => {
     });
     miner.stdin.on('error', (e) => {
         debug("error from pcblk [" + e + "]");
-    })
+    });
     ctx.miner = miner;
 };
 
@@ -982,7 +1002,7 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
             });
             ctx.lock2.take((r) => {
                 deleteUselessAnns(config, work.height, r());
-            })
+            });
         });
         setInterval(() => {
             ctx.lock.take((returnAfter) => {
