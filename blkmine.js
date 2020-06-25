@@ -979,9 +979,9 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
         });
         setInterval(() => {
             ctx.lock.take((returnAfter) => {
-                debug("Enter checkShares");
+                //debug("Enter checkShares");
                 checkShares(ctx, returnAfter(() => {
-                    debug("Exit checkShares");
+                    //debug("Exit checkShares");
                 }));
             });
         }, 500);
