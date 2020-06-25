@@ -151,6 +151,22 @@ static int loadFile(Context_t* ctx, const char* fileName) {
     return numAnns;
 }
 
+static int shouldWakeup() {
+    int gotMessage = 0;
+    uint32_t x = 0;
+    for (;;) {
+        if (4 == read(STDIN_FILENO, &x, 4)) {
+            // drop out
+            gotMessage = 1;
+        } else if (EAGAIN != errno) {
+            DEBUGF("Stdin is nolonger connected, exiting\n");
+            exit(0);
+        } else {
+            return gotMessage;
+        }
+    }
+}
+
 static const char* COMMIT_PATTERN =
     "\x6a\x30\x09\xf9\x11\x02\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfc"
     "\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfc"
@@ -360,15 +376,10 @@ int main(int argc, char** argv) {
     int reportFiles = 0;
     uint64_t lastReport = Time_nowMilliseconds();
     for (uint32_t i = 0;; i++) {
-        uint32_t command = 0;
         for (int j = 0; j < top; j++) {
-            if (4 == read(STDIN_FILENO, &command, 4)) {
+            if (files > 100 || shouldWakeup()) {
                 // drop out
-            } else if (EAGAIN != errno) {
-                DEBUGF("Stdin is nolonger connected, exiting\n");
-                return 0;
-            } else if (files > 100) {
-                // drop out, get more files...
+                break;
             } else {
                 struct timespec ts = { .tv_sec = 0, .tv_nsec = 10000 };
                 nanosleep(&ts, NULL);
@@ -376,8 +387,11 @@ int main(int argc, char** argv) {
         }
         top = 100;
 
-        // if we get sighup'd, open a new file and dup2 it so we will begin writing there.
-        if (command & CMD_OPEN_NEW_FILE) {
+        // if a thread has written to the file, go on and create a new one
+        struct stat st;
+        if (fstat(outfile, &st)) {
+            DEBUGF("Failed to stat share file errno=[%s]\n", strerror(errno));
+        } else if (st.st_size) {
             snprintf(ctx->filepath.name, FilePath_NAME_SZ, "shares_%d.bin", outFileNo++);
             int nextOutfile = open(ctx->filepath.path, O_WRONLY | O_CREAT | O_EXCL, 0222);
             if (nextOutfile < 0) {
@@ -393,7 +407,7 @@ int main(int argc, char** argv) {
                 DEBUGF("Failed to chmod [%s] errno=[%s]\n", ctx->filepath.path, strerror(errno));
                 return 100;
             }
-            DEBUGF("Created new file [%s]\n", ctx->filepath.path);
+            //DEBUGF("Created new file [%s]\n", ctx->filepath.path);
         }
 
         // Load whatever anns we can use in the next mining cycle
@@ -405,7 +419,15 @@ int main(int argc, char** argv) {
         int announcements = 0;
         PacketCrypt_Announce_t* annsBuf = nextBuf(ctx, 0);
         // DEBUGF("Loading announcements\n");
+        uint64_t startProcessing = 0;
         while (ctx->nextAnn >= 0) {
+            uint64_t now = Time_nowMilliseconds();
+            if (!startProcessing) {
+                startProcessing = now;
+            } else if (now - startProcessing > 5000 || shouldWakeup()) {
+                // don't load files for more than 5 seconds at a time
+                break;
+            }
             errno = 0;
             struct dirent* file = readdir(wrkdir);
             if (file == NULL) {
@@ -457,18 +479,9 @@ int main(int argc, char** argv) {
                 if (i > 7) { i = 7; }
                 unit = xx[i];
             }
-            // mB = reportAnns / 1024
-            // mb = mB * 8
-            // seconds = (now - lastReport) / 1000
-            // mb/s = mb / seconds
-            //
-            // ( reportAnns / 1024 * 8 ) / ( (now - lastReport) / 1000 )
-            // ( reportAnns * 1000 / 1024 * 8 ) / ( (now - lastReport) )
-            uint64_t bandwidth = reportAnns * 1000 / 1024 * 8 / (now - lastReport);
             DEBUGF("%luh real hashrate - %.f%s effective hashrate - "
-                "loaded [%d] announcements from [%d] files (%lu mb/s)\n",
-                (unsigned long)hps, ehps, unit, reportAnns, reportFiles,
-                (unsigned long) bandwidth);
+                "loaded [%d] announcements from [%d] files\n",
+                (unsigned long)hps, ehps, unit, reportAnns, reportFiles);
             reportAnns = 0;
             reportFiles = 0;
             lastReport = now;

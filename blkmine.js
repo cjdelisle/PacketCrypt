@@ -370,7 +370,7 @@ const onNewWork = (ctx /*:Context_t*/, work, done) => {
         }));
     }).nThen((w) => {
         if (!ctx.miner) { return; }
-        // It's important that if there's new work, the miner does get signaled...
+        // It's important that if there's new work, the miner does woken up...
         const s = () => {
             if (!sigMiner(ctx)) { setTimeout(w(s), 50); }
         };
@@ -782,20 +782,27 @@ const mkMiner = (ctx) => {
         ctx.miner = undefined;
         setTimeout(() => {
             ctx.lock.take((returnAfter) => {
-                //debug("Enter pkblk died");
+                debug("Enter pkblk died");
                 nThen((w) => {
+                    debug("Delete work and shares");
                     deleteWorkAndShares(ctx.config, w());
                 }).nThen((w) => {
+                    debug("Hard linking ann files");
                     mkLinks(ctx.config, w());
+                }).nThen((w) => {
+                    debug("onNewWork");
                     if (ctx.work && ctx.pool.connected) { onNewWork(ctx, ctx.work, w()); }
                 }).nThen((w) => {
                     mkMiner(ctx);
-                    //debug("Exit pkblk died");
+                    debug("Exit pkblk died");
                     returnAfter()();
                 });
             });
         }, 1000);
     });
+    miner.stdin.on('error', (e) => {
+        debug("error from pcblk [" + e + "]");
+    })
     ctx.miner = miner;
 };
 
