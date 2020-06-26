@@ -6,6 +6,7 @@
  */
 /*@flow*/
 const Spawn = require('child_process').spawn;
+const Fork = require('child_process').fork;
 const Fs = require('fs');
 const nThen = require('nthen');
 const Minimist = require('minimist');
@@ -45,78 +46,6 @@ const debug = (...args) => {
     console.error('blkmine:', ...args);
 };
 
-const getAnnFileParentNum = (filePath, _cb) => {
-    const cb = Util.once(_cb);
-    const again = (i) => {
-        let error = (w, err) => {
-            error = (_w, _e) => {};
-            w.abort();
-            if (i > 5) {
-                cb(err);
-            } else {
-                setTimeout(()=> {
-                    if (i > 3) {
-                        debug('getAnnFileParentNum [' + String(err) +
-                            '] (attempt [' + i + '])');
-                    }
-                    again(i+1);
-                }, (i > 0) ? 5000 : 500);
-            }
-        };
-        nThen((w) => {
-            Fs.stat(filePath, w((err, st) => {
-                if (err) {
-                    error(w, "stat error " + String(err));
-                } else if (st.size < 16) {
-                    error(w, "short stat " + st.size);
-                }
-            }));
-        }).nThen((w) => {
-            const stream = Fs.createReadStream(filePath, { end: 16 });
-            const data = [];
-            stream.on('data', (d) => { data.push(d); });
-            stream.on('end', () => {
-                const buf = Buffer.concat(data);
-                if (buf.length < 16) {
-                    return void error(w, "short read " + buf.length);
-                }
-                const blockNo = buf.readUInt32LE(12);
-                //debug("Got announcements with parent block number [" + blockNo + "]");
-                error = (_w, _e) => {};
-                cb(undefined, blockNo);
-            });
-            stream.on('error', (err) => { error(w, err); });
-        });
-    };
-    again(0);
-};
-
-// returns filenames ranked worst to best
-const rankAnnFiles = (fileNames) => {
-    const handlers = {};
-    for (const fn of fileNames) {
-        if (!/^anns_/.test(fn)) { continue; }
-        const h = fn.slice(0, fn.lastIndexOf('_'));
-        const num = fn.replace(/^.*_([0-9]+)\.bin$/, (_, x) => x);
-        const handler = handlers[h] = (handlers[h] || []);
-        handler.push(num);
-    }
-    for (const hn in handlers) { handlers[hn].sort(); }
-    const out = [];
-    let cont;
-    do {
-        cont = false;
-        for (const hn in handlers) {
-            const f = handlers[hn].shift();
-            if (typeof(f) === 'undefined') { continue; }
-            const file = hn + '_' + f + '.bin';
-            out.push(file);
-            cont = true;
-        }
-    } while (cont);
-    return out;
-};
-
 /*::
 type DownloadAnnCtx_t = {
     inflight: {[string]:number};
@@ -139,10 +68,9 @@ const downloadAnnFile = (
 ) => {
     const wrkdir = config.dir;
     const fileSuffix = '_' + serverId + '_' + fileNo + '.bin';
-    const annPath = wrkdir + '/anndir/anns' + fileSuffix;
     const url = serverUrl + '/anns/anns_' + fileNo + '.bin';
     if (dac.inflight[url]) {
-        return void _cb({ code: 'INFLIGHT_REQ', annPath });
+        return void _cb({ code: 'INFLIGHT_REQ', annPath: url });
     }
     dac.inflight[url] = 1;
     let timedout = false;
@@ -150,7 +78,7 @@ const downloadAnnFile = (
         debug("Request for " + url + " in flight for 5 minutes, cancelling.");
         delete dac.inflight[url];
         timedout = true;
-        _cb({ code: 'TIMEOUT', annPath: annPath });
+        _cb({ code: 'TIMEOUT', annPath: url });
     }, 300000);
     const cb = (x, y) => {
         if (timedout) {
@@ -166,14 +94,8 @@ const downloadAnnFile = (
         let parentBlockNum;
         let annBin;
         let wrkPath;
+        let annPath;
         nThen((w) => {
-            Fs.stat(annPath, w((err, _) => {
-                if (err && err.code === 'ENOENT') { return; }
-                if (err) { throw err; }
-                w.abort();
-                return void cb({ code: 'EEXIST', annPath: annPath });
-            }));
-        }).nThen((w) => {
             // debug("Get announcements [" + url + "] -> [" + annPath + "]");
             Util.httpGetBin(url, w((err, res) => {
                 if (!res || res.length < 1024 || res.length % 1024) {
@@ -185,48 +107,16 @@ const downloadAnnFile = (
             }));
         }).nThen((w) => {
             if (!annBin) { return; }
-            const annParentBlockHeight = annBin.readUInt32LE(12);
+            parentBlockNum = annBin.readUInt32LE(12);
             const annWorkBits = annBin.readUInt32LE(8);
-            if (Util.isWorkUselessExponential(annWorkBits, currentHeight - annParentBlockHeight)) {
+            if (Util.isWorkUselessExponential(annWorkBits, currentHeight - parentBlockNum)) {
                 w.abort();
-                return void cb({ code: 'USELESS', annPath: annPath });
+                return void cb({ code: 'USELESS', annPath: url });
             }
         }).nThen((w) => {
             if (!annBin) { return; }
-            if (config.version >= 2) { return; }
-            let nt = nThen;
-            const eachAnn = (i) => {
-                if (!annBin) { throw new Error(); } // shouldn't happen
-                const annContentLen = annBin.readUInt32LE(i + 20);
-                if (annContentLen <= 32) { return; }
-                const annContentHash = annBin.slice(i + 24, i + 56);
-                nt = nt((ww) => {
-                    const cfname = 'ann_' + annContentHash.toString('hex') + '.bin';
-                    const curl = serverUrl + '/content/' + cfname;
-                    const cpath = wrkdir + '/contentdir/' + cfname;
-                    //debug("Get announcement content [" + curl + "] -> [" + cpath + "]");
-                    Util.httpGetBin(curl, ww((err, res) => {
-                        if (!res) {
-                            if (!err) { err = new Error("unknown error"); }
-                            ww.abort();
-                            w.abort();
-                            if (cb(err)) { setTimeout(again, 5000); }
-                            return;
-                        }
-                        Fs.writeFile(cpath, res, (err) => {
-                            if (err) {
-                                ww.abort();
-                                w.abort();
-                                if (cb(err)) { setTimeout(again, 5000); }
-                            }
-                        });
-                    }));
-                }).nThen;
-            };
-            for (let i = 0; i < annBin.length; i += 1024) { eachAnn(i); }
-            nt(w());
-        }).nThen((w) => {
-            if (!annBin) { return; }
+            annPath = wrkdir + '/anndir/anns_' + parentBlockNum + fileSuffix;
+            wrkPath = wrkdir + '/wrkdir/anns_' + parentBlockNum + fileSuffix;
             Fs.writeFile(annPath, annBin, w((err) => {
                 if (err) {
                     w.abort();
@@ -235,32 +125,6 @@ const downloadAnnFile = (
             }));
         }).nThen((w) => {
             if (!annBin) { return; }
-            getAnnFileParentNum(annPath, w((err, pbn) => {
-                if (typeof(pbn) === 'undefined') {
-                    debug('getAnnFileParentNum() error ' + String(err));
-                    // filesystem error, we probably want to bail out...
-                    throw err;
-                }
-                parentBlockNum = pbn;
-            }));
-        }).nThen((w) => {
-            if (!annBin) { return; }
-            wrkPath = wrkdir + '/wrkdir/anns_' + parentBlockNum + fileSuffix;
-            Fs.readdir(wrkdir + '/wrkdir/', (err, files) => {
-                if (err) { throw err; }
-                if (files.length > config.maxAnns * 1024) {
-                    console.log('Deleting old announcements');
-                    const ranked = rankAnnFiles(files);
-                    for (let i = 0; i < 1000; i++) {
-                        //console.log('Deleting ' + ranked[i]);
-                        Fs.unlink(wrkdir + '/wrkdir/' + ranked[i], (err) => {
-                            if (err) {
-                                //console.log('Failed to delete ' + ranked[i]);
-                            }
-                        });
-                    }
-                }
-            });
             Fs.link(annPath, wrkPath, w((err) => {
                 if (err && err.code === 'EEXIST') {
                     // Just ignore if the file already exists
@@ -713,88 +577,102 @@ const checkShares = (ctx /*:Context_t*/, done) => {
     });
 };
 
+const rankForDeletion = (fileNames, height) => {
+    // anns_454982_4_10949021.bin
+    // anns_4_10947406.bin
+    const byBlk = {};
+    const last = [];
+    for (const fn of fileNames) {
+        if (!/^anns_/.test(fn)) { continue; }
+        const blkNum = fn.replace(/^anns_([0-9]+)_[0-9]+_[0-9]+\.bin$/, (_, blkNum) => blkNum);
+        if (Number(blkNum) > (height - 3)) {
+            // never consider for deletion any file which is not yet usable
+            continue;
+        }
+        if (blkNum === fn) {
+            last.push(fn);
+            continue;
+        }
+        const blkList = byBlk[blkNum];
+        if (!blkList) {
+            byBlk[blkNum] = [ fn ];
+        } else {
+            blkList.push(fn);
+        }
+    }
+    const out = [];
+    Object.keys(byBlk).sort().reverse().forEach((k) => out.push(...byBlk[k]));
+    out.push(...last);
+    return out;
+};
+
 const deleteUselessAnns = (config, height, done) => {
-    const sema = Saferphore.create(32);
     debug("Deleting expired announcements");
-    nThen((w) => {
-        Util.deleteUselessAnns(config.dir + '/anndir', height, (f, done2) => {
-            //debug("Deleted expired announcements [" + f + "]");
-            sema.take(w((ra) => {
-                done2();
-                const path = config.dir + '/anndir/' + f;
-                const st = +new Date();
-                Fs.unlink(path, w(ra((err) => {
-                    if (!err) {
-                        const t = +new Date() - st;
-                        if (t > 50) {
-                            debug("WARN: deletion of [" + path + "] took [" + t + "ms]");
-                        }
-                        return;
+    Fs.readdir(config.dir + '/anndir', (err, files) => {
+        if (err) { throw err; }
+        const ranked = rankForDeletion(files, height);
+        let nt = nThen;
+        ranked.slice(Math.floor(config.maxAnns * 1.25 / 1024)).forEach((f) => {
+            const path = config.dir + '/anndir/' + f;
+            const wrkpath = config.dir + '/anndir/' + f;
+            const trashpath = config.dir + '/trash/' + f;
+            nt = nt((w) => {
+                Fs.rename(path, trashpath, w((err) => {
+                    if (err && err.code !== 'ENOENT') {
+                        debug("Failed to move [" + path + "] to trash [" + err.message + "]");
                     }
-                    debug("Failed to delete [" + path + "] [" + err.message + "]");
-                })));
-            }));
-        }, w());
-    }).nThen((_) => {
-        debug("Deleting expired announcements complete");
-        done();
+                }));
+                Fs.rename(wrkpath, trashpath + '.wrkdir', w((err) => {
+                    if (err && err.code !== 'ENOENT') {
+                        debug("Failed to move [" + wrkpath + "] to trash [" + err.message + "]");
+                    }
+                    // ENOENT are very likely here if the file has been deleted
+                }));
+            }).nThen;
+        });
+        nt(() => {
+            debug("Deleting expired announcements complete");
+            done();
+        });
     });
 };
 
-const FILES_PER_BATCH = 500;
 const mkLinks = (config, done) => {
     const sema = Saferphore.create(8);
     debug("mkLinks() getting list of files");
     let files;
-    const more = (i) => {
-        debug("mkLinks() processing files [" + i + "] to [" + (i + FILES_PER_BATCH) + "]");
-        const chunk = files.slice(i, i + FILES_PER_BATCH);
-        if (!chunk.length) {
-            debug("mkLinks() done");
-            return void done();
-        } else if (i > config.maxAnns * 1024) {
-            debug("mkLinks() done, the remaining files will be discarded");
-            return void done();
-        }
-        nThen((w) => {
-            chunk.forEach((f, _i) => {
-                if (i + _i > config.maxAnns * 1024) { return; }
-                sema.take((ra) => {
-                    Fs.link(
-                        config.dir + '/anndir/' + f,
-                        config.dir + '/wrkdir/' + f,
-                        w(ra((err) =>
-                    {
-                        if (!err) {
-                            return;
-                        }
-                        if (err.code === 'EEXIST') {
-                            return;
-                        }
-                        if (err.code === 'ENOENT') {
-                            // this is a race against deleteUselessAnns
-                            //debug("Failed to link [" + f + "] because file is missing");
-                            return;
-                        }
-                        throw err;
-                    })));
-                });
-            });
-        }).nThen((_) => {
-            more(i + FILES_PER_BATCH);
-        });
-    };
     nThen((w) => {
         Fs.readdir(config.dir + '/anndir', w((err, fls) => {
             if (err) { throw err; }
             debug("mkLinks() processing [" + fls.length + "] files");
-            const ranked = rankAnnFiles(fls);
-            ranked.reverse();
-            debug("mkLinks() ranked");
-            files = ranked;
+            files = fls;
         }));
+    }).nThen((w) => {
+        files.forEach((f, i) => {
+            sema.take((ra) => {
+                Fs.link(
+                    config.dir + '/anndir/' + f,
+                    config.dir + '/wrkdir/' + f,
+                    w(ra((err) =>
+                {
+                    if (!err) {
+                        return;
+                    }
+                    if (err.code === 'EEXIST') {
+                        return;
+                    }
+                    if (err.code === 'ENOENT') {
+                        // this is a race against deleteUselessAnns
+                        //debug("Failed to link [" + f + "] because file is missing");
+                        return;
+                    }
+                    throw err;
+                })));
+            });
+        });
     }).nThen((_) => {
-        more(0);
+        debug("mkLinks() complete");
+        done();
     });
 };
 
@@ -964,6 +842,17 @@ const pollAnnHandlers = (ctx) => {
     });
 };
 
+const launchDeleter = (trashDir, retryCount) => {
+    const deleter = Fork('./js/FileDeleter.js');
+    deleter.send({ directory: trashDir, prefix: 'anns_' });
+    deleter.on('close', () => {
+        if (retryCount > 10) {
+            throw new Error("Tried restarting the deleter 10 times, aborting");
+        }
+        launchDeleter(trashDir, retryCount + 1);
+    });
+};
+
 const launch = (config /*:Config_BlkMiner_t*/) => {
     if (!Util.isValidPayTo(config.paymentAddr)) {
         debug('Payment address [' + config.paymentAddr +
@@ -972,16 +861,17 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
     }
     const dac = { inflight: {} };
     const pool = Pool.create(config.poolUrl);
-    let masterConf;
     nThen((w) => {
         pool.getMasterConf(w());
         Util.checkMkdir(config.dir + '/wrkdir', w());
         Util.checkMkdir(config.dir + '/anndir', w());
+        Util.checkMkdir(config.dir + '/trash', w());
         if (config.version === 1) {
             Util.checkMkdir(config.dir + '/contentdir', w());
         }
         Util.clearDir(config.dir + '/wrkdir', w());
     }).nThen((w) => {
+        launchDeleter(config.dir + '/trash', 0);
         console.log('Deleting expired announcements');
         if (!pool.work) { throw new Error(); }
         deleteUselessAnns(config, pool.work.height, w());
