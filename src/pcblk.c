@@ -499,7 +499,7 @@ int main(int argc, char** argv) {
         // Check if there's a work.bin file for us
         // We cannot safely unlock and relock the miner with additional anns because
         // it is setup to process anns for block n+1 when mining block n, so don't do it.
-        if (!loadWork(ctx)) { continue; }
+        if (!loadWork(ctx) && ctx->isMining) { continue; }
 
         // Only applicable before we receive our first work, we can't really load
         // any anns because we don't know which ones might be useful.
