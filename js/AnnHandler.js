@@ -274,15 +274,18 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
             Util.clearDir(ctx.workdir + '/tmpdir', w());
             Util.clearDir(ctx.workdir + '/uploaddir', w());
 
-            setInterval(() => {
-                Util.uploadPayLogs(
-                    ctx.workdir + '/paylogdir',
-                    ctx.poolClient.config.paymakerUrl + '/events',
-                    ctx.mut.cfg.root.paymakerHttpPasswd,
-                    false,
-                    ()=>{}
-                );
-            }, 30000);
+            const payCycle = () => {
+                setTimeout(() => {
+                    Util.uploadPayLogs(
+                        ctx.workdir + '/paylogdir',
+                        ctx.poolClient.config.paymakerUrl + '/events',
+                        ctx.mut.cfg.root.paymakerHttpPasswd,
+                        false,
+                        payCycle
+                    );
+                }, 30000);
+            };
+            payCycle();
 
             Util.longPollServer(ctx.workdir + '/outdir/').onFileUpdate((file) => {
                 const path = ctx.workdir + '/outdir/' + file;
