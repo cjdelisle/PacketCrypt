@@ -31,6 +31,7 @@ export type AnnHandler_Config_t = {
     url: string,
     port: number,
     threads: number,
+    maxConnections: ?number,
     root: Config_t
 };
 type PendingRequest_t = {
@@ -45,6 +46,8 @@ type Context_t = {
     mut: {
         hashNum: number,
         hashMod: number,
+
+        connections: number,
 
         payLog: ?WriteStream,
         cfg: AnnHandler_Config_t,
@@ -120,7 +123,7 @@ const onSubmit = (ctx, req, res) => {
     const fileName = 'annshare_' + worknum + '_' + Crypto.randomBytes(16).toString('hex') + '.bin';
     const fileUploadPath = ctx.workdir + '/uploaddir/' + fileName;
     const fileInPath = ctx.workdir + '/indir/' + fileName;
-    console.error("ann post [" + fileName + "] by [" + payTo + "]");
+    console.error("ann post [" + fileName + "] by [" + payTo + "] [" + ctx.mut.connections + "]");
     let work;
     nThen((w) => {
         ctx.poolClient.getWorkByNum(worknum, w((w) => { work = w; }));
@@ -219,11 +222,23 @@ const getAnn = (ctx, req, res) => {
     });
 };
 
+const maxConnections = (ctx) => {
+    return ctx.mut.cfg.maxConnections || 200;
+};
+
 const onReq = (ctx, req, res) => {
     if (!ctx.mut.ready) {
         res.statusCode = 500;
         return void res.end("server not ready");
     }
+    if (ctx.mut.connections > maxConnections(ctx)) {
+        res.statusCode = 501;
+        return void res.end("overloaded");
+    }
+    ctx.mut.connections++;
+    res.on('close', () => {
+        ctx.mut.connections--;
+    });
     if (req.url === '/submit') { return void onSubmit(ctx, req, res); }
     if (req.url.startsWith('/anns/')) { return void getAnns(ctx, req, res); }
     if (req.url.startsWith('/content/')) { return void getAnn(ctx, req, res); }
@@ -232,6 +247,12 @@ const onReq = (ctx, req, res) => {
 };
 
 module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
+    process.on('uncaughtException', (err) => {
+        // Too many of these whenever we write to http sockets which disappeared
+        if (err.code === 'ERR_STREAM_DESTROYED') { return; }
+        // We're not going to quit over errors
+        console.error("Unhandled error: " + JSON.stringify(err));
+    });
     const ctx /*:Context_t*/ = Object.freeze({
         workdir: cfg.root.rootWorkdir + '/ann_' + cfg.port,
         pendingRequests: {},
@@ -242,6 +263,8 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
             highestAnnFile: -1,
             ready: false,
             payLog: undefined,
+
+            connections: 0,
 
             hashNum: -1,
             hashMod: -1

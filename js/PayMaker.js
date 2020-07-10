@@ -121,6 +121,7 @@ type AnnCompressorConfig_t = {
 export type PayMaker_Config_t = {
     url: string,
     port: number,
+    maxConnections: ?number,
     updateCycle: number,
     historyDepth: number,
     annCompressor: AnnCompressorConfig_t,
@@ -142,6 +143,7 @@ type Context_t = {
     oes: typeof _flow_typeof_saferphore,
     startTime: number,
     mut: {
+        connections: number,
         mostRecentEventTime: number,
         cfg: PayMaker_Config_t,
         ready: bool
@@ -565,9 +567,23 @@ const onStats = (ctx /*:Context_t*/, req, res) => {
     }, null, '\t'));
 };
 
+const maxConnections = (ctx) => {
+    return ctx.mut.cfg.maxConnections || 50;
+};
+
 const onReq = (ctx /*:Context_t*/, req, res) => {
     const authLine = 'Basic ' +
         Buffer.from('x:' + ctx.mut.cfg.root.paymakerHttpPasswd, 'utf8').toString('base64');
+
+    if (ctx.mut.connections > maxConnections(ctx)) {
+        res.statusCode = 501;
+        return void res.end("overloaded");
+    }
+    ctx.mut.connections++;
+    res.on('close', () => {
+        ctx.mut.connections--;
+    });
+
     if (req.headers.authorization !== authLine) {
         res.setHeader("WWW-Authenticate", "Basic realm=paymaker");
         res.writeHead(401);
@@ -804,6 +820,7 @@ module.exports.create = (cfg /*:PayMaker_Config_t*/) => {
             oes: Saferphore.create(1),
             startTime: +new Date(),
             mut: {
+                connections: 0,
                 mostRecentEventTime: 0,
                 cfg: cfg,
                 ready: false

@@ -69,6 +69,9 @@ config.annHandlers = [
         // Number of threads to use in the checkanns process
         threads: 4,
 
+        // Maximum number of simultanious connections to accept before sending 500 errors
+        maxConnections: 200,
+
         root: config
     },
 ];
@@ -83,6 +86,9 @@ config.blkHandlers = [
 
         // Which port to run this block handler on
         port: 8082,
+
+        // Maximum number of simultanious connections to accept before sending 500 errors
+        maxConnections: 50,
 
         root: config
     },
@@ -145,6 +151,9 @@ config.payMaker = {
 
     // How many seconds backward to keep history in memory
     historyDepth: 60*60*24*30,
+
+    // Maximum number of simultanious connections to accept before sending 500 errors
+    maxConnections: 200,
 
     annCompressor: {
         // Store data in 1 minute aggregations

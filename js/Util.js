@@ -212,7 +212,7 @@ const emptyResponse = (resp) => {
 };
 
 module.exports.longPollServer = (dir /*:string*/) /*:Util_LongPollServer_t*/ => {
-    const requests /*:{ [string]:Array<{ resp: ServerResponse, to: TimeoutID }> }*/ = {};
+    const requests /*:{ [string]:Array<{ resp: ServerResponse, to: TimeoutID, closed: bool }> }*/ = {};
     const files = {};
     const ee = new EventEmitter();
     const checkFile = (file) => {
@@ -227,7 +227,9 @@ module.exports.longPollServer = (dir /*:string*/) /*:Util_LongPollServer_t*/ => 
             if (!r) { return; }
             delete requests[file];
             r.forEach((obj) => {
-                obj.resp.end(ret);
+                if (!obj.closed) {
+                    obj.resp.end(ret);
+                }
                 clearTimeout(obj.to);
             });
         });
@@ -241,13 +243,19 @@ module.exports.longPollServer = (dir /*:string*/) /*:Util_LongPollServer_t*/ => 
             const file = req.url.split('/').pop();
             const x = (requests[file] = requests[file] || []);
             const obj = {};
+            obj.closed = false;
             obj.resp = res;
             obj.to = setTimeout(() => {
-                emptyResponse(res);
+                if (!obj.closed) {
+                    emptyResponse(res);
+                }
                 listRemove(x, obj);
             }, 30000);
             x.push(obj);
             checkFile(file);
+            req.socket.on('close', () => {
+                obj.closed = true;
+            });
         },
         onFileUpdate: (f) => { ee.on('update', f); }
     };
