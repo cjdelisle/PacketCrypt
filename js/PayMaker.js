@@ -326,7 +326,8 @@ const getNewestTimestamp = (dataStr) => {
 const stats = (ctx) => {
   return 'annSlots:' + ctx.annCompressor.size() +
   ' shares:' + ctx.shares.size() +
-  ' blocks:' + ctx.blocks.size();
+  ' blocks:' + ctx.blocks.size() +
+  ' connections: ' + ctx.mut.connections;
 };
 
 const onEvents = (ctx, req, res, done) => {
