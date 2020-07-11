@@ -37,7 +37,14 @@ type Context_t = {
     lock: Saferphore_t,
     lock2: Saferphore_t,
     newWorkLock: Saferphore_t,
-    minerLastSignaled: number
+    minerLastSignaled: number,
+    stats: {
+        [string]: {
+            downloaded: number,
+            downloading: number,
+            todo: number,
+        },
+    }
 };
 */
 
@@ -45,104 +52,7 @@ const debug = (...args) => {
     console.error('blkmine:', ...args);
 };
 
-/*::
-type DownloadAnnCtx_t = {
-    inflight: {[string]:number};
-};
-type DownloadAnnResult_t = {
-    annPath: string,
-    wrkPath: string,
-};
-type DownloadAnnError_t = Error | {statusCode:number} | {code:string,annPath:string};
-*/
 
-const downloadAnnFile = (
-    dac /*:DownloadAnnCtx_t*/,
-    currentHeight /*:number*/,
-    config /*:Config_BlkMiner_t*/,
-    serverUrl /*:string*/,
-    serverId /*:string*/,
-    fileNo /*:number*/,
-    _cb /*:(?DownloadAnnError_t, ?DownloadAnnResult_t)=>true|void*/
-) => {
-    const wrkdir = config.dir;
-    const fileSuffix = '_' + serverId + '_' + fileNo + '.bin';
-    const url = serverUrl + '/anns/anns_' + fileNo + '.bin';
-    if (dac.inflight[url]) {
-        return void _cb({ code: 'INFLIGHT_REQ', annPath: url });
-    }
-    dac.inflight[url] = 1;
-    let timedout = false;
-    const to = setTimeout(() => {
-        debug("Request for " + url + " in flight for 5 minutes, cancelling.");
-        delete dac.inflight[url];
-        timedout = true;
-        _cb({ code: 'TIMEOUT', annPath: url });
-    }, 300000);
-    const cb = (x, y) => {
-        if (timedout) {
-            debug("Request for " + url + " finally returned, too late");
-            return;
-        }
-        if (!dac.inflight[url]) { throw new Error(url + " returned twice"); }
-        delete dac.inflight[url];
-        clearTimeout(to);
-        _cb(x, y);
-    };
-    const again = () => {
-        let parentBlockNum;
-        let annBin;
-        let wrkPath;
-        let annPath;
-        nThen((w) => {
-            // debug("Get announcements [" + url + "] -> [" + annPath + "]");
-            Util.httpGetBin(url, w((err, res) => {
-                if (!res || res.length < 1024 || res.length % 1024) {
-                    if (!err) { err = new Error("unknown error"); }
-                    w.abort();
-                    if (cb(err)) { setTimeout(again, 5000); }
-                }
-                annBin = res;
-            }));
-        }).nThen((w) => {
-            if (!annBin) { return; }
-            parentBlockNum = annBin.readUInt32LE(12);
-            const annWorkBits = annBin.readUInt32LE(8);
-            if (Util.isWorkUselessExponential(annWorkBits, currentHeight - parentBlockNum)) {
-                w.abort();
-                return void cb({ code: 'USELESS', annPath: url });
-            }
-        }).nThen((w) => {
-            if (!annBin) { return; }
-            annPath = wrkdir + '/anndir/anns_' + parentBlockNum + fileSuffix;
-            wrkPath = wrkdir + '/wrkdir/anns_' + parentBlockNum + fileSuffix;
-            Fs.writeFile(annPath, annBin, w((err) => {
-                if (err) {
-                    w.abort();
-                    if (cb(err)) { setTimeout(again, 5000); }
-                }
-            }));
-        }).nThen((w) => {
-            if (!annBin) { return; }
-            Fs.link(annPath, wrkPath, w((err) => {
-                if (err && err.code === 'EEXIST') {
-                    // Just ignore if the file already exists
-                    return;
-                }
-                if (err) { throw err; }
-            }));
-        }).nThen((_) => {
-            if (!annBin) { return; }
-            if (cb(undefined, {
-                annPath: annPath,
-                wrkPath: wrkPath
-            })) {
-                setTimeout(again, 5000);
-            }
-        });
-    };
-    again();
-};
 
 const getAnnFileNum = (
     server /*:string*/,
@@ -601,7 +511,7 @@ const mkMiner = (ctx) => {
                     mkLinks(ctx.config, w());
                 }).nThen((w) => {
                     debug("onNewWork");
-                    if (ctx.work && ctx.pool.connected) { onNewWork(ctx, ctx.work, w()); }
+                    if (ctx.pool.work && ctx.pool.connected) { onNewWork(ctx, ctx.pool.work, w()); }
                 }).nThen((w) => {
                     mkMiner(ctx);
                     debug("Exit pkblk died");
@@ -616,50 +526,166 @@ const mkMiner = (ctx) => {
     ctx.miner = miner;
 };
 
-const pollAnnHandlers = (ctx) => {
-    const again = (server, i, num) => {
-        let completed = false;
-        setTimeout(() => {
-            if (completed) { return; }
-            completed = true;
-            again(server, i, num);
-        }, 60000);
-        if (!ctx.work) { return; }
-        const currentHeight = ctx.work.height;
-        downloadAnnFile(ctx.dac, currentHeight, ctx.config, server, String(i), num, (err, res) => {
-            if (completed) { return; }
-            if (res) {
-                completed = true;
-                return void again(server, i, num + 1);
+/*::
+type DownloadAnnError_t = Error | {statusCode:number} | {code:string,annPath:string};
+*/
+const downloadAnnFile = (
+    currentHeight /*:number*/,
+    config /*:Config_BlkMiner_t*/,
+    url /*:string*/,
+    serverId /*:number*/,
+    fileNo /*:number*/,
+    _cb /*:(?DownloadAnnError_t)=>void*/
+) => {
+    const wrkdir = config.dir;
+    let timedout = false;
+    const to = setTimeout(() => {
+        debug("Request for " + url + " in flight for 5 minutes, cancelling.");
+        timedout = true;
+        _cb({ code: 'TIMEOUT', annPath: url });
+        _cb = (_x)=> { throw new Error(); };
+    }, 300000);
+    const cb = (x) => {
+        if (timedout) {
+            debug("Request for " + url + " finally returned, too late");
+            return;
+        }
+        clearTimeout(to);
+        _cb(x);
+        _cb = (_x)=> { throw new Error(); };
+    };
+
+    let annBin;
+    let wrkPath;
+    let annPath;
+    nThen((w) => {
+        // debug("Get announcements [" + url + "] -> [" + annPath + "]");
+        Util.httpGetBin(url, w((err, res) => {
+            if (!res || res.length < 1024 || res.length % 1024) {
+                if (!err) { err = new Error("unknown error"); }
+                w.abort();
+                return void cb(err);
             }
-            if (err && err.code === 'EEXIST' && err.annPath) {
-                // Lets just continue looking for newer files
-                completed = true;
-                return void again(server, i, num + 1);
-                // const path = String(err.annPath);
-                // throw new Error("Failed to download ann file to [" + path +
-                //     "] file already exists, please delete it and restart");
-            } else if (err && err.code === 'INFLIGHT_REQ') {
-                // We'll silently continue trying until the other requestor finishes
-                return true;
+            annBin = res;
+        }));
+    }).nThen((w) => {
+        if (!annBin) { return; }
+        let fileName = url.replace(/^.*\/([^\/]+)$/, (_, x) => x);
+        if (/^anns_[0-9]+_[0-9]+_[0-9]+.bin$/.test(fileName)) {
+            // The file coming from the server already contains everything it needs
+            // just use the url as it is.
+        } else {
+            // Old url format, anns_<number>.bin, need to extract the block number
+            // from the work and also add the server number.
+            const parentBlockNum = annBin.readUInt32LE(12);
+            const annWorkBits = annBin.readUInt32LE(8);
+            if (Util.isWorkUselessExponential(annWorkBits, currentHeight - parentBlockNum)) {
+                w.abort();
+                return void cb({ code: 'USELESS', annPath: url });
             }
-            if ((err /*:any*/).statusCode === 404 || (err /*:any*/).code === 'USELESS') {
-                // This might mean we are not able to download ann files fast enough
-                // to keep up with the server, in this case lets just figure out where
-                // the server is and update num to that number and start downloading
-                // the most recent anns.
-                // debug("Requesting ann file [" + num + "] from [" + server + "] " +
-                //     "got a 404, re-requesting the index");
-                return void getAnnFileNum(server, (num) => { again(server, i, num); });
+            fileName = 'anns_' + parentBlockNum + '_' + serverId + '_' + fileNo + '.bin';
+        }
+        annPath = wrkdir + '/anndir/' + fileName;
+        wrkPath = wrkdir + '/wrkdir/' + fileName;
+    }).nThen((w) => {
+        if (!annBin) { return; }
+        Fs.writeFile(annPath, annBin, w((err) => {
+            if (err) {
+                w.abort();
+                return void cb(err);
             }
-            debug("Requesting ann file [" + num + "] from [" + server + "]" +
-                "got [" + JSON.stringify(err || null) + "] retrying...");
-            return true;
+        }));
+    }).nThen((w) => {
+        if (!annBin) { return; }
+        Fs.link(annPath, wrkPath, w((err) => {
+            if (err && err.code === 'EEXIST') {
+                // Just ignore if the file already exists
+                return;
+            }
+            if (err) { throw err; }
+        }));
+    }).nThen((_) => {
+        if (!annBin) { return; }
+        cb();
+    });
+};
+
+const connsPerAh = 20;
+const pollAnnHandler = (ctx /*:Context_t*/, serverNum /*:number*/) => {
+
+    let topFile = '';
+    const filesTodo = [];
+    const filesInProgress = [];
+    let downloaded = 0;
+
+    const again = () => {
+        if (!topFile || filesInProgress.length > connsPerAh) { return setTimeout(again, 5000); }
+        if (!ctx.pool.work) { return setTimeout(again, 1000); }
+        const work = ctx.pool.work;
+        const cycle = () => {
+            const curHeight = work.height;
+            const url = filesTodo.pop();
+            filesInProgress.push(url);
+            const fileNo = url.replace(/^.*\/anns_([0-9]+).bin$/, (_, a) => a);
+            //debug("Getting file " + url);
+            downloadAnnFile(curHeight, ctx.config, url, Number(fileNo), serverNum, (err, res) => {
+                downloaded++;
+                // return the connection
+                const idx = filesInProgress.indexOf(url);
+                if (idx === -1) {
+                    console.error("Spooky file disappeared " + url);
+                } else {
+                    filesInProgress.splice(idx, 1);
+                }
+                if (!err) {
+                } else if ((err /*:any*/).statusCode === 404 || (err /*:any*/).code === 'USELESS') {
+                    // File is either missing or not usable, don't re-download
+                } else {
+                    // We'll come back around and try later if it's a slow day
+                    filesTodo.unshift(url);
+                }
+                again();
+            });
+        };
+        while (filesInProgress.length < connsPerAh && filesTodo.length) { cycle(); }
+    };
+
+    const serverUrl = ctx.pool.config.downloadAnnUrls[serverNum];
+    const getTop = () => {
+        getAnnFileNum(serverUrl, (num) => {
+            let n = 0;
+            if (topFile !== '') {
+                const topNum = topFile.replace(/^.*\/anns_([0-9]+).bin$/, (_, num) => num);
+                if (topFile === topNum) { throw new Error("Unexpected filename " + topFile); }
+                n = Number(topNum);
+                if (isNaN(n) || Math.floor(n) !== n || n < 0) {
+                    throw new Error("Unexpected filename " + topFile);
+                }
+            }
+            if (num - n > 300) { n = num - 300; }
+            for (; n <= num; n++) {
+                filesTodo.push(serverUrl + '/anns/anns_' + n + '.bin');
+            }
+            topFile = filesTodo[filesTodo.length - 1];
+            while (filesTodo.length > 500) { filesTodo.shift(); }
+            setTimeout(getTop, 2000);
+            again();
+            ctx.stats[serverUrl] = {
+                downloaded,
+                downloading: filesInProgress.length,
+                todo: filesTodo.length,
+            };
+            // debug(`[${serverUrl}] downloaded [${String(downloaded)}] ` +
+            //     `downloading [${filesInProgress.length}] todo [${filesTodo.length}]`);
         });
     };
-    ctx.pool.config.downloadAnnUrls.forEach((server, i) => {
-        getAnnFileNum(server, (num) => { again(server, i, num); });
-    });
+    getTop();
+};
+
+const pollAnnHandlers = (ctx) => {
+    for (let i = 0; i < ctx.pool.config.downloadAnnUrls.length; i++) {
+        pollAnnHandler(ctx, i);
+    }
 };
 
 const launchDeleter = (trashDir, retryCount) => {
@@ -679,7 +705,6 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
             '] is not a valid pkt address');
         process.exit(100);
     }
-    const dac = { inflight: {} };
     const pool = Pool.create(config.poolUrl);
     nThen((w) => {
         pool.getMasterConf(w());
@@ -696,22 +721,20 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
         console.log('Hardlinking announcements to workdir');
         mkLinks(config, w());
     }).nThen((_) => {
-        const ctx = {
-            dac,
+        const ctx /*:Context_t*/ = {
             config: config,
             miner: undefined,
             pool: pool,
             lock: Saferphore.create(1),
             lock2: Saferphore.create(1),
             newWorkLock: Saferphore.create(1),
-            work: undefined,
-            minerLastSignaled: +new Date()
+            minerLastSignaled: +new Date(),
+            stats: {},
         };
         mkMiner(ctx);
         debug("Got [" + pool.config.downloadAnnUrls.length + "] AnnHandlers");
         pollAnnHandlers(ctx);
         pool.onWork((work) => {
-            ctx.work = work;
             onNewWork(ctx, work, ()=>{});
             ctx.lock2.take((r) => {
                 deleteUselessAnns(config, work.height, r());
@@ -725,6 +748,23 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
                 }));
             });
         }, 500);
+
+        let totalDownloaded = 0;
+        setInterval(() => {
+            let downloaded = 0;
+            const downloading = [];
+            const todo = [];
+            for (let i = 0; i < ctx.pool.config.downloadAnnUrls.length; i++) {
+                const sx = ctx.stats[ctx.pool.config.downloadAnnUrls[i]];
+                downloaded += sx.downloaded;
+                downloading.push(sx.downloading);
+                todo.push(sx.todo);
+            }
+            downloaded -= totalDownloaded;
+            debug(`STATS: downloaded [${String(downloaded)}] ` +
+                `getting [${downloading.join(',')}] queued [${todo.join(',')}]`);
+            totalDownloaded += downloaded;
+        }, 10000);
     });
 };
 
