@@ -202,10 +202,6 @@ const getAnns = (ctx, req, res) => {
     }
 };
 
-const subscribe = (ctx, ws) => {
-    ctx.subscribers.push(ws);
-};
-
 const maxConnections = (ctx) => {
     return ctx.mut.cfg.maxConnections || 200;
 };
@@ -376,7 +372,7 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
                     if (isNaN(n)) { return ''; }
                     if (ctx.mut.highestAnnFile < n) {
                         ctx.mut.highestAnnFile = n;
-                        for (let i = ctx.subscribers.length; i >= 0; i--) {
+                        for (let i = ctx.subscribers.length - 1; i >= 0; i--) {
                             const s = ctx.subscribers[i];
                             if (s.readyState === WebSocket.OPEN) {
                                 try {
@@ -435,19 +431,12 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
         ctx.mut.ready = true;
     });
 
-    const wss = new WebSocket.Server({ noServer: true });
     const h = Http.createServer((req, res) => {
         onReq(ctx, req, res);
     });
-    h.on('upgrade', (req, sock, head) => {
-        if (req.url === '/subscribe') {
-            wss.handleUpgrade(req, sock, head, (ws) => {
-                subscribe(ctx, ws);
-            });
-        } else {
-            sock.write('HTTP/1.1 404 Not Found\r\n\r\n');
-            sock.destroy();
-        }
+    const wss = new WebSocket.Server({ server: h });
+    wss.on('connection', (ws) => {
+        ctx.subscribers.push(ws);
     });
     h.listen(cfg.port);
 };
