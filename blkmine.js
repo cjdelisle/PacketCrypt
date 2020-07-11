@@ -56,7 +56,7 @@ const debug = (...args) => {
 
 const getAnnFileNum = (
     server /*:string*/,
-    then /*:(annFileNum:number)=>void*/
+    then /*:(number, ?Array<string>)=>void*/
 ) => {
     const url = server + '/anns/index.json';
     Util.httpGetStr(url, (err, res) => {
@@ -65,9 +65,11 @@ const getAnnFileNum = (
             return true;
         }
         let num = NaN;
+        let urls;
         try {
             const obj = JSON.parse(res);
             num = Number(obj.highestAnnFile);
+            urls = obj.urls;
         } catch (e) { }
         if (isNaN(num)) {
             debug("in response from [" + url + "] could not parse [" + res + "]");
@@ -77,7 +79,7 @@ const getAnnFileNum = (
             debug("Ann server doesn't have any anns yet, trying again in 10 seconds");
             return void setTimeout(() => { getAnnFileNum(server, then); }, 10000);
         }
-        then(num);
+        then(num, urls);
     });
 };
 
@@ -652,19 +654,32 @@ const pollAnnHandler = (ctx /*:Context_t*/, serverNum /*:number*/) => {
 
     const serverUrl = ctx.pool.config.downloadAnnUrls[serverNum];
     const getTop = () => {
-        getAnnFileNum(serverUrl, (num) => {
+        getAnnFileNum(serverUrl, (num, urls) => {
             let n = 0;
             if (topFile !== '') {
-                const topNum = topFile.replace(/^.*\/anns_([0-9]+).bin$/, (_, num) => num);
+                const topNum = topFile.replace(/^.*_([0-9]+).bin$/, (_, num) => num);
                 if (topFile === topNum) { throw new Error("Unexpected filename " + topFile); }
                 n = Number(topNum);
                 if (isNaN(n) || Math.floor(n) !== n || n < 0) {
                     throw new Error("Unexpected filename " + topFile);
                 }
             }
-            if (num - n > 300) { n = num - 300; }
-            for (; n <= num; n++) {
-                filesTodo.push(serverUrl + '/anns/anns_' + n + '.bin');
+            if (urls) {
+                for (const url of urls) {
+                    const num = Number(url.replace(/^.*_([0-9]+).bin$/, (_, num) => num));
+                    if (isNaN(num)) {
+                        debug("Unexpeced file from server [" + url + "]");
+                    } else if (num <= n) {
+                        // already got it
+                    } else {
+                        filesTodo.push(url);
+                    }
+                }
+            } else {
+                if (num - n > 300) { n = num - 300; }
+                for (; n <= num; n++) {
+                    filesTodo.push(serverUrl + '/anns/anns_' + n + '.bin');
+                }
             }
             topFile = filesTodo[filesTodo.length - 1];
             while (filesTodo.length > 500) { filesTodo.shift(); }

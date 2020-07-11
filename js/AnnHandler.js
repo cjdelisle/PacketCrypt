@@ -11,7 +11,6 @@ const Spawn = require('child_process').spawn;
 const Crypto = require('crypto');
 
 const nThen = require('nthen');
-const WebSocket = require('ws');
 
 const Util = require('./Util.js');
 const Protocol = require('./Protocol.js');
@@ -44,7 +43,7 @@ type Context_t = {
     workdir: string,
     poolClient: PoolClient_t,
     pendingRequests: { [string]: PendingRequest_t },
-    subscribers: Array<WebSocket>,
+    index: Array<string>,
     mut: {
         hashNum: number,
         hashMod: number,
@@ -171,7 +170,7 @@ const getAnns = (ctx, req, res) => {
         res.setHeader('cache-control', 'max-age=8 stale-while-revalidate=2');
         res.end(JSON.stringify({
             highestAnnFile: ctx.mut.highestAnnFile,
-            notifyUrl: ctx.mut.cfg.url + '/subscribe',
+            urls: ctx.index,
         }));
         return;
     }
@@ -225,26 +224,6 @@ const onReq = (ctx, req, res) => {
     return void res.end(JSON.stringify({ error: "not found" }));
 };
 
-const dropConn = (ctx, sock) => {
-    if (sock.readyState !== WebSocket.CLOSING && sock.readyState !== WebSocket.CLOSED) {
-        try {
-            sock.close();
-        } catch (e) {
-            try {
-                sock.terminate();
-            } catch (ee) {
-                console.error("Unable to terminate ws");
-            }
-        }
-    }
-    const i = ctx.subscribers.indexOf(sock);
-    if (i === -1) {
-        console.error("Websocket object index is -1");
-        return;
-    }
-    ctx.subscribers.splice(i, 1);
-};
-
 module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
     process.on('uncaughtException', (err) => {
         // Too many of these whenever we write to http sockets which disappeared
@@ -255,7 +234,7 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
     const ctx /*:Context_t*/ = Object.freeze({
         workdir: cfg.root.rootWorkdir + '/ann_' + cfg.port,
         pendingRequests: {},
-        subscribers: [],
+        index: [],
         mut: {
             cfg: cfg,
             checkanns: undefined,
@@ -370,19 +349,9 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
                 f.replace(/anns_([0-9]*)\.bin/, (all, numS) => {
                     const n = Number(numS);
                     if (isNaN(n)) { return ''; }
-                    if (ctx.mut.highestAnnFile < n) {
-                        ctx.mut.highestAnnFile = n;
-                        for (let i = ctx.subscribers.length - 1; i >= 0; i--) {
-                            const s = ctx.subscribers[i];
-                            if (s.readyState === WebSocket.OPEN) {
-                                try {
-                                    s.send(ctx.mut.cfg.url + '/anns/' + f);
-                                    continue;
-                                } catch (e) {}
-                            }
-                            dropConn(ctx, s);
-                        }
-                    }
+                    ctx.index.push(f);
+                    while (ctx.index.length > 500) { ctx.index.shift(); }
+                    if (ctx.mut.highestAnnFile < n) { ctx.mut.highestAnnFile = n; }
                     return '';
                 });
             });
@@ -431,12 +400,7 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
         ctx.mut.ready = true;
     });
 
-    const h = Http.createServer((req, res) => {
+    Http.createServer((req, res) => {
         onReq(ctx, req, res);
-    });
-    const wss = new WebSocket.Server({ server: h });
-    wss.on('connection', (ws) => {
-        ctx.subscribers.push(ws);
-    });
-    h.listen(cfg.port);
+    }).listen(cfg.port);
 };
