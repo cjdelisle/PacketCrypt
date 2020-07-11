@@ -736,7 +736,7 @@ int BlockMiner_start(BlockMiner_t* ctx, PacketCrypt_BlockHeader_t* blockHeader)
 
     postLockCleanup(ctx);
 
-    prepareNextBlock(ctx, ctx->currentlyMining + 1);
+    prepareNextBlock(ctx, ctx->currentlyMining);
 
     return BlockMiner_start_OK;
 }
