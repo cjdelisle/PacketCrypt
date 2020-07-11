@@ -776,8 +776,9 @@ int BlockMiner_stop(BlockMiner_t* ctx)
     if (ctx->state == State_UNLOCKED) { return BlockMiner_stop_NOT_LOCKED; }
     if (ctx->state == State_LOCKED) {
         ctx->state = State_UNLOCKED;
-        ctx->currentlyMining = 0;
         postLockCleanup(ctx);
+        prepareNextBlock(ctx, ctx->currentlyMining);
+        ctx->currentlyMining = 0;
         return BlockMiner_stop_OK;
     }
     for (int i = 0; i < ctx->numWorkers; i++) {

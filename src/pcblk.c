@@ -30,6 +30,7 @@
 #include <unistd.h>
 #include <math.h>
 #include <time.h>
+#include <inttypes.h>
 
 #define DEBUGF(...) fprintf(stderr, "pcblk: " __VA_ARGS__)
 
@@ -78,10 +79,9 @@ typedef struct Context_s {
     int64_t nextAnn;
     int full;
 
+    uint64_t minHrm;
+
     FilePath_t filepath;
-#ifndef PCP2
-    FilePath_t contentpath;
-#endif
     BlockMiner_t* bm;
 
     PoolProto_Work_t* currentWork;
@@ -135,7 +135,7 @@ static int loadFile(Context_t* ctx, const char* fileName) {
     if (st.st_size != read(fileno, anns, st.st_size)) {
         DEBUGF("Failed to read [%s] errno=[%s]\n", ctx->filepath.path, strerror(errno));
         close(fileno);
-        ctx->nextAnn -= st.st_size;
+        ctx->nextAnn -= numAnns;
         return 0;
     }
 
@@ -145,7 +145,7 @@ static int loadFile(Context_t* ctx, const char* fileName) {
         // make sure we can delete it before we add the announcements,
         // better to lose the announcements than to fill the miner to the moon with garbage.
         DEBUGF("Failed to delete [%s] errno=[%s]\n", ctx->filepath.path, strerror(errno));
-        ctx->nextAnn -= st.st_size;
+        ctx->nextAnn -= numAnns;
         return 0;
     }
     return numAnns;
@@ -246,12 +246,6 @@ static bool restartMiner(Context_t* ctx)
     DEBUGF("Begin BlockMiner_lockForMining()\n");
     int res = BlockMiner_lockForMining(ctx->bm, ctx->coinbaseCommit,
         ctx->currentWork->height, ctx->currentWork->shareTarget);
-    uint64_t hrm = Difficulty_getHashRateMultiplier(
-        ctx->coinbaseCommit->annLeastWorkTarget,
-        ctx->coinbaseCommit->numAnns);
-    DEBUGF("BlockMiner_lockForMining(): count: %ld minTarget: %08x hashrateMultiplier: %ld\n",
-        (long)ctx->coinbaseCommit->numAnns, ctx->coinbaseCommit->annLeastWorkTarget,
-        (long)hrm);
 
     if (res) {
         if (res == BlockMiner_lockForMining_NO_ANNS) {
@@ -262,6 +256,21 @@ static bool restartMiner(Context_t* ctx)
         ctx->nextAnn = 0;
         return false;
     }
+    
+    uint64_t hrm = Difficulty_getHashRateMultiplier(
+        ctx->coinbaseCommit->annLeastWorkTarget,
+        ctx->coinbaseCommit->numAnns);
+    if (hrm < ctx->minHrm) {
+        DEBUGF("Hrm [%" PRIu64 "] less than half of previous [%" PRIu64 "] waiting for more anns\n",
+            hrm, ctx->minHrm);
+        assert(!BlockMiner_stop(ctx->bm));
+        ctx->nextAnn = 0;
+        return false;
+    }
+    ctx->minHrm = hrm / 2;
+    DEBUGF("BlockMiner_lockForMining(): count: %ld minTarget: %08x hashrateMultiplier: %ld\n",
+        (long)ctx->coinbaseCommit->numAnns, ctx->coinbaseCommit->annLeastWorkTarget,
+        (long)hrm);
 
     uint8_t* merkles = &ctx->currentWork->coinbaseAndMerkles[ctx->currentWork->coinbaseLen];
 
@@ -478,6 +487,7 @@ int main(int argc, char** argv) {
         uint64_t now = Time_nowMilliseconds();
         if (now - lastReport > 5000) {
             uint64_t hps = BlockMiner_getHashesPerSecond(ctx->bm);
+            if (!ctx->isMining) { hps = 0; }
             double ehps = 0;
             const char* unit = "";
             if (hps) {
