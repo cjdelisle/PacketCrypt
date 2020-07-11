@@ -10,7 +10,6 @@ const Fork = require('child_process').fork;
 const Fs = require('fs');
 const nThen = require('nthen');
 const Minimist = require('minimist');
-const MerkleTree = require('merkletreejs').MerkleTree;
 const Saferphore /*:any*/ = require('saferphore'); // flow doesn't like how saferphore exports
 
 const Pool = require('./js/PoolClient.js');
@@ -144,15 +143,6 @@ const downloadAnnFile = (
     };
     again();
 };
-
-/*
-if (searchBackward && err.statusCode === 404) {
-    debug("Backward search on server [" + server + "] complete");
-    return;
-}
-debug("Unable to get ann file at [" + url + "] [" + String(err) + "]");
-return true;
-*/
 
 const getAnnFileNum = (
     server /*:string*/,
@@ -297,83 +287,30 @@ type Share_t = {
 };
 */
 
-const mkMerkleProof = (() => {
-    const split = (content, out) => {
-        out = out || [];
-        if (content.length <= 32) {
-            const b = Buffer.alloc(32);
-            content.copy(b);
-            out.push(b);
-            return out;
-        }
-        out.push(content.slice(0, 32));
-        split(content.slice(32), out);
-        return out;
-    };
-
-    const mkProof = (mt, arr, blockNum) => {
-        const p = mt.getProof(arr[blockNum]);
-        const proofList = p.map((x) => x.data);
-        proofList.unshift(arr[blockNum]);
-        return Buffer.concat(proofList);
-    };
-
-    const mkMerkleProof = (content /*:Buffer*/, ident /*:number*/) => {
-        if (content.length <= 32) { throw new Error("Content is too short to make a tree"); }
-        const arr = split(content);
-        const blocknum = ident % arr.length;
-        const mt = new MerkleTree(arr, Util.b2hash32);
-        return mkProof(mt, arr, blocknum);
-    };
-
-    return mkMerkleProof;
-})();
-
 // This converts the format of the share which is output from pcblk to the
 // format expected by BlkHandler
 const convertShare = (
     buf /*:Buffer*/,
-    annContents /*:Array<Buffer>*/,
     version /*:number*/
 ) /*:Share_t*/ => {
     const coinbase = buf.slice(0, Protocol.COINBASE_COMMIT_LEN).toString('hex');
     buf = buf.slice(Protocol.COINBASE_COMMIT_LEN);
     const header = buf.slice(0, 80);
     const proof = buf.slice(84);
-    const contentProofIdx = Util.getShareId(header, proof).readUInt32LE(0);
-    const contentProofs = [];
-    for (let i = 0; i < 4; i++) {
-        if (!annContents[i] || annContents[i].length <= 32) { continue; }
-        contentProofs.push(mkMerkleProof(annContents[i], contentProofIdx));
-    }
 
+    const versionBuf = Util.mkVarInt(version);
     const submission = [
         header,
         Util.mkVarInt(Protocol.PC_PCP_TYPE),
         Util.mkVarInt(proof.length),
-        proof
+        proof,
+        Util.mkVarInt(Protocol.PC_VERSION_TYPE),
+        Util.mkVarInt(versionBuf.length),
+        versionBuf
     ];
 
-    if (version > 1) {
-        const versionBuf = Util.mkVarInt(version);
-        submission.push(
-            Util.mkVarInt(Protocol.PC_VERSION_TYPE),
-            Util.mkVarInt(versionBuf.length),
-            versionBuf
-        );
-    }
-
-    if (contentProofs.length) {
-        const cp = Buffer.concat(contentProofs);
-        submission.push(
-            Util.mkVarInt(Protocol.PC_CONTENTPROOFS_TYPE),
-            Util.mkVarInt(cp.length),
-            cp
-        );
-    }
-
     return {
-        contentProofIdx: contentProofIdx,
+        contentProofIdx: Util.getShareId(header, proof).readUInt32LE(0),
         toSubmit: {
             coinbase_commit: coinbase,
             header_and_proof: Buffer.concat(submission).toString('hex'),
@@ -416,33 +353,6 @@ const httpRes = (ctx /*:Context_t*/, res /*:IncomingMessage*/) => {
     });
 };
 
-const getAnnContent = (ctx, ann /*:Buffer*/, cb) => {
-    const length = ann.readUInt32LE(Protocol.ANN_CONTENT_LENGTH_OFFSET);
-    if (!length) { return void cb(); }
-    if (length <= 32) {
-        return void cb(undefined, ann.slice(Protocol.ANN_CONTENT_HASH_OFFSET,
-            Protocol.ANN_CONTENT_HASH_OFFSET + length));
-    }
-    const h = ann.slice(Protocol.ANN_CONTENT_HASH_OFFSET, Protocol.ANN_CONTENT_HASH_OFFSET + 32);
-    const file = ctx.config.dir + '/contentdir/ann_' + h.toString('hex') + '.bin';
-    Fs.readFile(file, (err, buf) => {
-        if (err) { return void cb(err); }
-        if (buf.length !== length) {
-            return void cb(new Error("Length of content file [" + file + "] is [" + buf.length +
-                "] but the announcement defined length is [" + length + "]"));
-        }
-        cb(undefined, buf);
-    });
-};
-
-const BLOCK_HEADER_OFFSET = 32+8+4+4;
-const PROOF_OFFSET = BLOCK_HEADER_OFFSET+80+4;
-const FIRST_ANN_OFFSET = PROOF_OFFSET+4;
-const getAnn = (share /*:Buffer*/, num /*:number*/) => {
-    const idx = FIRST_ANN_OFFSET + (num * 1024);
-    return share.slice(idx, idx + 1024);
-};
-
 const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) => {
     let fileBuf;
     nThen((w) => {
@@ -471,49 +381,36 @@ const uploadFile = (ctx /*:Context_t*/, filePath /*:string*/, cb /*:()=>void*/) 
                 return;
             }
         }));
-    }).nThen((w) => {
+    }).nThen((_) => {
         if (!fileBuf) { return; }
         splitShares(fileBuf).forEach((share, i) => {
-            const annContents = [];
-            let failed = false;
-            nThen((w) => {
-                if (ctx.config.version !== 1) { return; }
-                [0,1,2,3].forEach((num) => {
-                    const ann = getAnn(share, num);
-                    const length = ann.readUInt32LE(Protocol.ANN_CONTENT_LENGTH_OFFSET);
-                    if (length <= 32) { return; }
-                    getAnnContent(ctx, ann, w((err, buf) => {
-                        if (failed) { return; }
-                        if (!buf) {
-                            debug("Unable to submit share");
-                            debug(err);
-                            failed = true;
-                            return;
-                        }
-                        annContents[num] = buf;
-                    }));
-                });
-            }).nThen((w) => {
-                if (failed) { return; }
-                const shr = convertShare(share, annContents, ctx.config.version);
-                const handlerNum = shr.contentProofIdx % ctx.pool.config.submitBlockUrls.length;
-                const url = ctx.pool.config.submitBlockUrls[handlerNum];
-                debug("Uploading share [" + filePath + "] [" + i + "] to [" + url + "]");
-                const req = Util.httpPost(url, {
-                    'Content-Type': 'application/json',
-                    'x-pc-payto': ctx.config.paymentAddr,
-                    'x-pc-sver': Protocol.SOFT_VERSION,
-                }, (res) => {
-                    httpRes(ctx, res);
-                });
-                req.end(JSON.stringify(shr.toSubmit));
-                req.on('error', (err) => {
-                    debug("Failed to upload share [" + err + "]");
-                });
-                //console.log(JSON.stringify(shr.toSubmit));
+            if (!ctx.pool.work) {
+                debug("Dropping share because we have no work");
+                return;
+            }
+            const work = ctx.pool.work;
+            const shr = convertShare(share, ctx.config.version);
+            const sharePrevHash = share.slice(Protocol.COINBASE_COMMIT_LEN + 4).slice(0,32);
+            const currentWorkPrevHash = work.header.slice(4,36);
+            if (currentWorkPrevHash.compare(sharePrevHash)) {
+                debug("Dropping stale share");
+                return;
+            }
+            const handlerNum = shr.contentProofIdx % ctx.pool.config.submitBlockUrls.length;
+            const url = ctx.pool.config.submitBlockUrls[handlerNum];
+            debug("Uploading share [" + filePath + "] [" + i + "] to [" + url + "]");
+            const req = Util.httpPost(url, {
+                'Content-Type': 'application/json',
+                'x-pc-payto': ctx.config.paymentAddr,
+                'x-pc-sver': Protocol.SOFT_VERSION,
+            }, (res) => {
+                httpRes(ctx, res);
+            });
+            req.end(JSON.stringify(shr.toSubmit));
+            req.on('error', (err) => {
+                debug("Failed to upload share [" + err + "]");
             });
         });
-    }).nThen((w) => {
         cb();
     });
 };
@@ -686,9 +583,6 @@ const mkMiner = (ctx) => {
         args.push('--slowStart');
     }
     args.push(ctx.config.dir + '/wrkdir');
-    if (ctx.config.version === 1) {
-        args.push(ctx.config.dir + '/contentdir');
-    }
     debug(ctx.config.corePath + ' ' + args.join(' '));
     const miner = Spawn(ctx.config.corePath, args, {
         stdio: [ 'pipe', 1, 2 ]
@@ -722,81 +616,7 @@ const mkMiner = (ctx) => {
     ctx.miner = miner;
 };
 
-const downloadOldAnns = (dac, config, currentHeight, masterConf, done) => {
-    let nt = nThen;
-    debug("Downloading announcements to fill memory");
-
-    const serverCurrentNum = [];
-    masterConf.downloadAnnUrls.forEach((server, i) => {
-        nt = nt((w) => {
-            getAnnFileNum(server, w((num) => {
-                serverCurrentNum[i] = { server: server, currentAnnNum: num };
-            }));
-        }).nThen;
-    });
-    // we need to cycle around between AnnHandlers because if we only get
-    // announcements from one, we will get worse quality (older) announcements
-    // and then possibly fill up our memory limit while there are newer announcements
-    // which are skipped because they're on other AnnHandlers.
-
-    // When these are equal, we quit because we have enough announcements
-    let totalLen = 0;
-    const maxLen = (config.maxAnns || DEFAULT_MAX_ANNS) * 1024;
-
-    // This is deincremented as each server nolonger has any more announcements for us
-    let activeServers;
-    const again = (i) => {
-        if (!activeServers) {
-            debug("No more announcements available on any server, done");
-            return void done();
-        }
-        if (totalLen >= maxLen) {
-            debug("Downloaded enough announcements to fill available memory, done");
-            return void done();
-        }
-        if (i > serverCurrentNum.length) { i = 0; }
-        if (!serverCurrentNum[i]) { return void again(i + 1); }
-        const as = serverCurrentNum[i];
-        downloadAnnFile(dac, currentHeight, config, as.server, String(i), as.currentAnnNum, (err, res) => {
-            if (res) {
-                return void Fs.stat(res.annPath, (err, st) => {
-                    if (err) { throw err; }
-                    totalLen += st.size;
-                    as.currentAnnNum--;
-                    return void again(i + 1);
-                });
-            }
-            if (err && err.code === 'EEXIST') {
-                // We already have this file, search for the previous...
-                as.currentAnnNum--;
-                return void again(i + 1);
-            }
-            if (err && err.code === 'USELESS') {
-                debug("No more useful announcements on server [" + as.server + "]");
-                serverCurrentNum[i] = undefined;
-                activeServers--;
-                return void again(i + 1);
-            }
-            if (err && err.statusCode === 404) {
-                debug("Reached the end of useful announcements on [" + as.server + "]");
-                serverCurrentNum[i] = undefined;
-                activeServers--;
-                return void again(i + 1);
-            }
-            debug("Requesting ann file [" + as.currentAnnNum + "] from [" + as.server + "]" +
-                "got [" + JSON.stringify(err || null) + "] retrying...");
-            return true;
-        });
-    };
-
-    nt((_) => {
-        activeServers = serverCurrentNum.length;
-        again(0);
-    });
-};
-
 const pollAnnHandlers = (ctx) => {
-    const downloadSlots = [];
     const again = (server, i, num) => {
         let completed = false;
         setTimeout(() => {
@@ -866,9 +686,6 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
         Util.checkMkdir(config.dir + '/wrkdir', w());
         Util.checkMkdir(config.dir + '/anndir', w());
         Util.checkMkdir(config.dir + '/trash', w());
-        if (config.version === 1) {
-            Util.checkMkdir(config.dir + '/contentdir', w());
-        }
         Util.clearDir(config.dir + '/wrkdir', w());
     }).nThen((w) => {
         launchDeleter(config.dir + '/trash', 0);
@@ -878,11 +695,7 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
     }).nThen((w) => {
         console.log('Hardlinking announcements to workdir');
         mkLinks(config, w());
-    }).nThen((w) => {
-        if (!pool.work) { throw new Error(); }
-        if (!config.initialDl) { return; }
-        downloadOldAnns(dac, config, pool.work.height, pool.config, w());
-    }).nThen((w) => {
+    }).nThen((_) => {
         const ctx = {
             dac,
             config: config,
@@ -925,7 +738,7 @@ const getMinerVersion = (cfg, cb) => {
         if (data.indexOf(MAGIC2) === -1) {
             if (data.indexOf(MAGIC1) === -1) {
                 debug("pcblk not present or not working, if you are running the miner");
-                debug("from outside of the PacketCryp directory, make sure you pass --corePath");
+                debug("from outside of the PacketCrypt directory, make sure you pass --corePath");
                 process.exit(100);
             } else {
                 debug("pcblk is out of date, you may need to recompile");
@@ -963,7 +776,6 @@ const usage = () => {
         "                      # default is ./datastore/blkmine\n" +
         "        --slowStart   # wait 10 seconds when starting pcblk to allow time for gdb\n" +
         "                      # to be attached.\n" +
-        "        --initialDl   # perform an initial download of anns before mining\n" +
         "    <poolurl>         # the URL of the mining pool to connect to\n" +
         "\n" +
         "    See https://github.com/cjdelisle/PacketCrypt/blob/master/docs/blkmine.md\n" +
@@ -984,7 +796,7 @@ const main = (argv) => {
         slowStart: false,
         version: 1
     };
-    const a = Minimist(argv.slice(2), { boolean: [ 'slowStart', 'initialDl' ] });
+    const a = Minimist(argv.slice(2), { boolean: [ 'slowStart' ] });
     if (!/http(s)?:\/\/.*/.test(a._[0])) { process.exit(usage()); }
     const conf = {
         corePath: a.corePath || defaultConf.corePath,
@@ -996,7 +808,6 @@ const main = (argv) => {
         minerId: a.minerId || defaultConf.minerId,
         slowStart: a.slowStart === true || defaultConf.slowStart,
         version: defaultConf.version,
-        initialDl: a.initialDl || false,
     };
     if (!a.paymentAddr) {
         debug("WARNING: You have not passed the --paymentAddr flag\n" +
