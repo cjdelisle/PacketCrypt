@@ -65,9 +65,8 @@ typedef struct Context_s {
     PacketCrypt_Announce_t* annBuf;
     int64_t annBufSz;
     int64_t nextAnn;
-    int full;
 
-    uint64_t minHrm;
+    int64_t timeOfLastLock;
 
     FilePath_t filepath;
     BlockMiner_t* bm;
@@ -248,14 +247,6 @@ static bool restartMiner(Context_t* ctx)
     uint64_t hrm = Difficulty_getHashRateMultiplier(
         ctx->coinbaseCommit->annLeastWorkTarget,
         ctx->coinbaseCommit->numAnns);
-    if (hrm < ctx->minHrm) {
-        DEBUGF("Hrm [%" PRIu64 "] less than half of previous [%" PRIu64 "] waiting for more anns\n",
-            hrm, ctx->minHrm);
-        assert(!BlockMiner_stop(ctx->bm));
-        ctx->nextAnn = 0;
-        return false;
-    }
-    ctx->minHrm = hrm / 2;
     DEBUGF("BlockMiner_lockForMining(): count: %ld minTarget: %08x hashrateMultiplier: %ld\n",
         (long)ctx->coinbaseCommit->numAnns, ctx->coinbaseCommit->annLeastWorkTarget,
         (long)hrm);
@@ -494,15 +485,25 @@ int main(int argc, char** argv) {
             lastReport = now;
         }
 
-        // Check if there's a work.bin file for us
-        // We cannot safely unlock and relock the miner with additional anns because
-        // it is setup to process anns for block n+1 when mining block n, so don't do it.
-        if (!loadWork(ctx) && ctx->isMining) { continue; }
+        if (loadWork(ctx)) {
+            // new work
+        } else if (!ctx->isMining) {
+            // not mining yet
+        } else if (ctx->nextAnn < 0) {
+            // re-lock because there are a ton of new announcements
+        } else if (now - ctx->timeOfLastLock > 45000) {
+            // re-lock because 45 seconds went by without a block
+        } else {
+            continue;
+        }
 
         // Only applicable before we receive our first work, we can't really load
         // any anns because we don't know which ones might be useful.
         if (!ctx->currentWork) { continue; }
 
         ctx->isMining = restartMiner(ctx);
+        if (ctx->isMining) {
+            ctx->timeOfLastLock = now;
+        }
     }
 }
