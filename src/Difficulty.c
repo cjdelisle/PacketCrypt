@@ -147,10 +147,8 @@ static inline void getEffectiveWork(
     assert(BN_sqr(workOut, workOut, ctx));
     assert(BN_mul(workOut, workOut, blockWork, ctx));
 
-#ifdef PCP2
     // difficulty *= 1024
     assert(BN_lshift(workOut, workOut, 10));
-#endif
 
     // workOut /= annWork
     assert(BN_div(workOut, NULL, workOut, annWork, ctx));
@@ -159,9 +157,7 @@ static inline void getEffectiveWork(
     assert(bnAnnCount);
     setuint64(bnAnnCount, annCount);
 
-#ifdef PCP2
     assert(BN_sqr(bnAnnCount, bnAnnCount, ctx));
-#endif
 
     // workOut /= annCount
     assert(BN_div(workOut, NULL, workOut, bnAnnCount, ctx));
@@ -210,15 +206,11 @@ uint64_t Difficulty_getHashRateMultiplier(uint32_t annTar, uint64_t annCount)
     bnWorkForDiff(ctx, bnAnnWork, x);
 
     setuint64(bnAnnCount, annCount);
-#ifdef PCP2
     assert(BN_sqr(bnAnnCount, bnAnnCount, ctx));
-#endif
     assert(BN_mul(x, bnAnnWork, bnAnnCount, ctx));
 
-#ifdef PCP2
     // Difficulty jumps by 1024
     assert(BN_rshift(x, x, 10));
-#endif
 
     uint64_t out = BN_get_word(x);
 

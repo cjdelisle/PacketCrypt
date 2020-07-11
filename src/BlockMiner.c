@@ -46,9 +46,6 @@ typedef struct AnnounceEffectiveWork_s AnnounceEffectiveWork_t;
 typedef struct Ann_s {
     PacketCrypt_Announce_t ann;
     AnnounceEffectiveWork_t* aewPtr;
-    #ifndef PCP2
-        uint8_t* content;
-    #endif
     uint64_t _treePosition;
 } Ann_t;
 
@@ -57,9 +54,6 @@ struct AnnounceEffectiveWork_s {
     uint32_t effectiveWork;
     uint32_t initialWork;
     uint32_t parentBlock;
-    #ifndef PCP2
-        char* _pad;
-    #endif
 };
 
 typedef struct NextAnnounceEffectiveWork_s {
@@ -67,9 +61,6 @@ typedef struct NextAnnounceEffectiveWork_s {
     uint32_t effectiveWork;
     uint32_t initialWork;
     uint32_t parentBlock;
-    #ifndef PCP2
-        uint8_t* content;
-    #endif
 } NextAnnounceEffectiveWork_t;
 
 // exists just in order to force same alignment
@@ -81,9 +72,6 @@ union AnnounceEffectiveWorkLike {
 typedef struct AnnounceList_s AnnounceList_t;
 struct AnnounceList_s {
     PacketCrypt_Announce_t* someAnns;
-    #ifndef PCP2
-        uint8_t** contents;
-    #endif
     int noCopy;
     uint64_t count;
     AnnounceList_t* next;
@@ -249,20 +237,11 @@ static bool mine(Worker_t* w)
 
         for (int i = 0; i < HASHES_PER_CYCLE; i++) {
             CryptoCycle_init(&w->pcState, &hdrHash, ++lowNonce);
-            #ifndef PCP2
-                uint32_t proofIdx = hdrHash.ints[0] ^ lowNonce;
-            #endif
             MineResult_t res;
             for (int j = 0; j < 4; j++) {
                 uint64_t x = res.items[j] = CryptoCycle_getItemNo(&w->pcState) % w->bm->annCount;
                 CryptoCycle_Item_t* it = (CryptoCycle_Item_t*) &w->bm->anns[x].ann;
                 const uint8_t* contentProof = NULL;
-                #ifndef PCP2
-                    Buf32_t contentProofBuf;
-                    contentProof = ContentMerkle_getProofBlock(
-                        proofIdx, &contentProofBuf, w->bm->anns[x].content,
-                        w->bm->anns[x].ann.hdr.contentLength);
-                #endif
                 assert(CryptoCycle_update(&w->pcState, it, contentProof, 0, NULL));
             }
             CryptoCycle_smul(&w->pcState);

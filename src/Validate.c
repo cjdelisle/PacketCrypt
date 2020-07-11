@@ -125,7 +125,6 @@ static int checkPcHash(uint64_t indexesOut[PacketCrypt_NUM_ANNS],
                        const PacketCrypt_HeaderAndProof_t* hap,
                        const PacketCrypt_Coinbase_t* cb,
                        uint32_t shareTarget,
-                       const uint8_t** contents,
                        uint8_t workHashOut[static 32])
 {
     CryptoCycle_State_t pcState;
@@ -135,22 +134,11 @@ static int checkPcHash(uint64_t indexesOut[PacketCrypt_NUM_ANNS],
     Hash_COMPRESS32_OBJ(&hdrHash, &hap->blockHeader);
     CryptoCycle_init(&pcState, &hdrHash, hap->nonce2);
 
-#ifndef PCP2
-    uint32_t proofIdx = hap->nonce2 ^ hdrHash.ints[0];
-#endif
-
     for (int j = 0; j < 4; j++) {
-        const uint8_t* contentProof = NULL;
-#ifndef PCP2
-        Buf32_t contentProofBuf;
-        contentProof = ContentMerkle_getProofBlock(
-            proofIdx, &contentProofBuf, contents[j], hap->announcements[j].hdr.contentLength);
-#endif
         // This gets modded over the total anns in PacketCryptProof_hashProof()
         indexesOut[j] = CryptoCycle_getItemNo(&pcState);
         CryptoCycle_Item_t* it = (CryptoCycle_Item_t*) &hap->announcements[j];
-        Hash_eprintHex((uint8_t*)contentProof, 32);
-        if (Util_unlikely(!CryptoCycle_update(&pcState, it, contentProof, 0, NULL))) { return -1; }
+        if (Util_unlikely(!CryptoCycle_update(&pcState, it, NULL, 0, NULL))) { return -1; }
     }
     CryptoCycle_smul(&pcState);
     CryptoCycle_final(&pcState);
@@ -174,13 +162,9 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
                         uint32_t shareTarget,
                         const PacketCrypt_Coinbase_t* coinbaseCommitment,
                         const uint8_t blockHashes[static PacketCrypt_NUM_ANNS * 32],
-                        const uint8_t** annContents,
                         uint8_t workHashOut[static 32],
                         PacketCrypt_ValidateCtx_t* vctx)
 {
-#ifdef PCP2
-    annContents = NULL;
-#endif
     if (hapLen < PacketCrypt_HeaderAndProof_SIZEOF(0)) {
         return Validate_checkBlock_PCP_INVAL;
     }
@@ -193,7 +177,7 @@ int Validate_checkBlock(const PacketCrypt_HeaderAndProof_t* hap,
 
     // Check that final work result meets difficulty requirement
     uint64_t annIndexes[PacketCrypt_NUM_ANNS] = {0};
-    int chk = checkPcHash(annIndexes, hap, coinbaseCommitment, shareTarget, annContents, workHashOut);
+    int chk = checkPcHash(annIndexes, hap, coinbaseCommitment, shareTarget, workHashOut);
 
     Buf32_t annHashes[PacketCrypt_NUM_ANNS];
 

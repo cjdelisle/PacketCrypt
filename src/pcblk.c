@@ -34,19 +34,10 @@
 
 #define DEBUGF(...) fprintf(stderr, "pcblk: " __VA_ARGS__)
 
-static const int PROTOCOL_VERSION = (
-    #ifdef PCP2
-        2
-    #else
-        1
-    #endif
-);
+static const int PROTOCOL_VERSION = 2;
 
 static int usage() {
     fprintf(stderr, "Usage: ./pcblk OPTIONS <wrkdir>"
-#ifndef PCP2
-    " <contentdir>"
-#endif
         "\n"
         "PacketCrypt Block Miner: Protocol Version %d\n"
         "    OPTIONS:\n"
@@ -57,9 +48,6 @@ static int usage() {
         "                      # from mining duplicate shares, default is 0\n"
         "        --slowStart   # sleep for 10 seconds when starting up (time to attach gdb)\n"
         "    <wrkdir>          # a dir containing announcements grouped by parent block\n"
-#ifndef PCP2
-        "    <contentdir>      # a dir containing any announcement content which is needed\n"
-#endif
         "\n"
         "    See: https://github.com/cjdelisle/PacketCrypt/blob/master/docs/pcblk.md\n"
         "    for more information\n", PROTOCOL_VERSION);
