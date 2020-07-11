@@ -113,6 +113,7 @@ type AnnCompressor_t<X> = {
     size: ()=>number,
     vsize: ()=>number,
     anns: BinTree_t<AnnCompressorSlot_t>,
+    lostAnns: ()=>number,
 };
 type AnnCompressorConfig_t = {
     timespanMs: number,
@@ -327,7 +328,8 @@ const stats = (ctx) => {
   return 'annSlots:' + ctx.annCompressor.size() +
   ' shares:' + ctx.shares.size() +
   ' blocks:' + ctx.blocks.size() +
-  ' connections: ' + ctx.mut.connections;
+  ' conn: ' + ctx.mut.connections +
+  ' lost: ' + ctx.annCompressor.lostAnns();
 };
 
 const onEvents = (ctx, req, res, done) => {
@@ -715,6 +717,7 @@ const mkTree = /*::<X:{time:number,eventId:string}>*/() /*:BinTree_t<X>*/ => {
 const mkCompressor = /*::<X:{time:number,eventId:string,payTo:string,credit:number,accepted:number}>*/(
     cfg /*:AnnCompressorConfig_t*/
 ) /*:AnnCompressor_t<X>*/ => {
+    let lostAnns = 0;
     const tree = mkTree/*::<AnnCompressorSlot_t>*/();
     const cctx = Object.freeze({
         timespanMs: cfg.timespanMs || DEFAULT_ANN_COMPRESSOR_CFG.timespanMs,
@@ -757,7 +760,8 @@ const mkCompressor = /*::<X:{time:number,eventId:string,payTo:string,credit:numb
             }
             if (newerDs.eventIds === null) {
                 // this event has had it's event id block garbage collected
-                warn("Unable to add event, compressor entry dedup table was pruned");
+                //warn("Unable to add event, compressor entry dedup table was pruned");
+                lostAnns++;
                 return false;
             } else if (x.eventId in newerDs.eventIds) {
                 // dupe
@@ -793,7 +797,8 @@ const mkCompressor = /*::<X:{time:number,eventId:string,payTo:string,credit:numb
             let out = 0;
             cctx.anns.each((ds) => { out += ds.count; });
             return out;
-        }
+        },
+        lostAnns: () => lostAnns,
     });
     return cctx;
 };
