@@ -440,7 +440,7 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
         onReq(ctx, req, res);
     });
     h.on('upgrade', (req, sock, head) => {
-        if (req === '/subscribe') {
+        if (req.url === '/subscribe') {
             wss.handleUpgrade(req, sock, head, (ws) => {
                 subscribe(ctx, ws);
             });
