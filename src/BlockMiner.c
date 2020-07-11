@@ -355,16 +355,6 @@ static void freeQueue(BlockMiner_t* ctx)
     AnnounceList_t* l = ctx->queue;
     while (l) {
         AnnounceList_t* ll = l->next;
-        // Do not free all of the contents themselves because they get pointer-copied into
-        // the Ann_t.
-        // for (int i = 0, j = 0; i < l->count; i++) {
-        //     if (l->anns[i].hdr.contentLength > 32) {
-        //         free(l->contents[j++]);
-        //     }
-        // }
-        #ifndef PCP2
-            free(l->contents);
-        #endif
         if (!l->noCopy) {
             free(l->someAnns); 
         }
@@ -403,12 +393,6 @@ void BlockMiner_free(BlockMiner_t* ctx)
     pthread_mutex_unlock(&ctx->lock);
     pthread_cond_broadcast(&ctx->cond);
     waitState(ctx, ThreadState_SHUTDOWN);
-
-    for (size_t i = 0; i < ctx->annCapacity; i++) {
-        #ifndef PCP2
-            free(ctx->anns[i].content);
-        #endif
-    }
 
     free(ctx->anns);
     freeQueue(ctx);
@@ -499,6 +483,8 @@ int BlockMiner_addAnns(
     if (bm->readyForBlock >= 0) {
         prepareAnns(bm, l, bm->readyForBlock);
         qsort(bm->nextAew, bm->nextAewLen, sizeof bm->nextAew[0], ewComp);
+    } else {
+        assert(!bm->nextAew);
     }
     return 0;
 }
@@ -526,6 +512,13 @@ static void prepareNextBlock(BlockMiner_t* bm, uint32_t nextBlockHeight) {
     for (size_t i = 0; i < bm->annCount; i++) {
         // fix the reverse pointers
         bm->aew[i].ann->aewPtr = &bm->aew[i];
+    }
+
+    // There might be a nextAew in the case that we are not locking for the work we expected
+    // to be locking for.
+    if (bm->nextAew) {
+        assert(bm->readyForBlock);
+        updateAew(bm->nextAew, bm->nextAewLen, nextBlockHeight);
     }
 
     // This will be non-empty when prepareNextBlock gets called by lockForMining because
@@ -776,6 +769,7 @@ int BlockMiner_stop(BlockMiner_t* ctx)
     if (ctx->state == State_UNLOCKED) { return BlockMiner_stop_NOT_LOCKED; }
     if (ctx->state == State_LOCKED) {
         ctx->state = State_UNLOCKED;
+        fprintf(stderr, "pcblk: unlocked miner\n");
         postLockCleanup(ctx);
         prepareNextBlock(ctx, ctx->currentlyMining);
         ctx->currentlyMining = 0;
