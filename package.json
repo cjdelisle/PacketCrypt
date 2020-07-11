@@ -28,7 +28,8 @@
     "nthen": "^0.1.10",
     "saferphore": "0.0.1",
     "tweetnacl": "^1.0.1",
-    "write-file-atomic": "^2.4.3"
+    "write-file-atomic": "^2.4.3",
+    "ws": "^7.3.1"
   },
   "devDependencies": {
     "flow-bin": "^0.106.2",
