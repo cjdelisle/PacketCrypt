@@ -11,6 +11,7 @@ const Spawn = require('child_process').spawn;
 const Crypto = require('crypto');
 
 const nThen = require('nthen');
+const Saferphore = require('saferphore');
 
 const Util = require('./Util.js');
 const Protocol = require('./Protocol.js');
@@ -44,11 +45,17 @@ type Context_t = {
     poolClient: PoolClient_t,
     pendingRequests: { [string]: PendingRequest_t },
     index: Array<string>,
+
+    // Legacy
+    indexMap: {[number]:string},
+    // End legacy
+
     mut: {
         hashNum: number,
         hashMod: number,
 
         connections: number,
+        timeOfLastIndexWrite: number,
 
         payLog: ?WriteStream,
         cfg: AnnHandler_Config_t,
@@ -164,41 +171,27 @@ const onSubmit = (ctx, req, res) => {
 
 const getAnns = (ctx, req, res) => {
     if (Util.badMethod('GET', req, res)) { return; }
-    const fileName = req.url.split('/').pop();
-    if (fileName === 'index.json') {
-        res.setHeader('content-type', 'application/json');
-        res.setHeader('cache-control', 'max-age=8 stale-while-revalidate=2');
-        res.end(JSON.stringify({
-            highestAnnFile: ctx.mut.highestAnnFile,
-            urls: ctx.index,
-        }));
-        return;
-    }
-    let fileNo = NaN;
+    let fileName = req.url.split('/').pop();
+
+    // Legacy
     fileName.replace(/^anns_([0-9]+)\.bin$/, (all, a) => {
-        fileNo = Number(a);
+        const fn = ctx.indexMap[Number(a)];
+        if (fn) { fileName = fn; }
         return '';
     });
-    if (isNaN(fileNo)) {
-        res.statusCode = 404;
-        return void res.end();
-    }
-    if (!ctx.mut.anndirLongpoll) { throw new Error(); }
-    if (fileNo === ctx.mut.highestAnnFile+1) {
-        ctx.mut.anndirLongpoll.onReq(req, res);
-    } else {
-        Fs.readFile(ctx.workdir + '/anndir/' + fileName, (err, ret) => {
-            if (err && err.code === 'ENOENT') {
-                res.statusCode = 404;
-                return void res.end();
-            } else if (err) {
-                console.error("Error reading file [" + JSON.stringify(err) + "]");
-                res.statusCode = 500;
-                return void res.end();
-            }
-            res.end(ret);
-        });
-    }
+    // End Legacy
+
+    Fs.readFile(ctx.workdir + '/anndir/' + fileName, (err, ret) => {
+        if (err && err.code === 'ENOENT') {
+            res.statusCode = 404;
+            return void res.end();
+        } else if (err) {
+            console.error("Error reading file [" + JSON.stringify(err) + "]");
+            res.statusCode = 500;
+            return void res.end();
+        }
+        res.end(ret);
+    });
 };
 
 const maxConnections = (ctx) => {
@@ -224,6 +217,40 @@ const onReq = (ctx, req, res) => {
     return void res.end(JSON.stringify({ error: "not found" }));
 };
 
+const indexSema = Saferphore.create(1);
+const writeIndexIfNeeded = (ctx) => {
+    const now = +new Date();
+    if (now - ctx.mut.timeOfLastIndexWrite < 1000) { return; }
+    indexSema.take((ra) => {
+        if (now - ctx.mut.timeOfLastIndexWrite < 1000) { ra()(); return; }
+        const index = JSON.stringify({
+            highestAnnFile: ctx.mut.highestAnnFile,
+            files: ctx.index,
+        });
+        Fs.writeFile(ctx.workdir + '/tmpdir/index.json', index, (err) => {
+            if (err) {
+                console.error("Unable to write index.json");
+                // try again in a few milliseconds
+                ra()();
+                return;
+            }
+            Fs.rename(
+                ctx.workdir + '/tmpdir/index.json',
+                ctx.workdir + '/anndir/index.json',
+                (err) => {
+                    ra()();
+                    if (err) {
+                        console.error("Unable to move index.json");
+                        // try again in a few milliseconds
+                        return;
+                    }
+                    ctx.mut.timeOfLastIndexWrite = now;
+                }
+            );
+        });
+    });
+};
+
 module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
     process.on('uncaughtException', (err) => {
         // Too many of these whenever we write to http sockets which disappeared
@@ -235,6 +262,11 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
         workdir: cfg.root.rootWorkdir + '/ann_' + cfg.port,
         pendingRequests: {},
         index: [],
+
+        // Legacy
+        indexMap: {},
+        // End Legacy
+
         mut: {
             cfg: cfg,
             checkanns: undefined,
@@ -242,6 +274,7 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
             highestAnnFile: -1,
             ready: false,
             payLog: undefined,
+            timeOfLastIndexWrite: 0,
 
             connections: 0,
 
@@ -265,8 +298,6 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
             Util.checkMkdir(ctx.workdir + '/indir', w());
             Util.checkMkdir(ctx.workdir + '/outdir', w());
             Util.checkMkdir(ctx.workdir + '/anndir', w());
-            //Util.checkMkdir(ctx.workdir + '/statedir', w());
-            //Util.checkMkdir(ctx.workdir + '/contentdir', w());
 
             Util.checkMkdir(ctx.workdir + '/tmpdir', w());
             Util.checkMkdir(ctx.workdir + '/uploaddir', w());
@@ -333,25 +364,53 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
                 });
             });
 
-            const lp = ctx.mut.anndirLongpoll = Util.longPollServer(ctx.workdir + '/anndir');
             Fs.readdir(ctx.workdir + '/anndir', w((err, files) => {
                 if (!files) { throw err; }
-                ctx.mut.highestAnnFile = files.
-                    map((f) => (f.replace(/anns_([0-9]*)\.bin/, (all, numS) => (numS)))).
-                    map(Number).
-                    filter((n) => (!isNaN(n))).
-                    reduce((a,c) => (c > a ? c : a), -1);
+                const fileByNum = {};
+                const nums = [];
+                for (const f of files) {
+                    f.replace(/ann.*_([0-9]*)\.bin/, (all, numS) => {
+                        const num = Number(numS)
+                        fileByNum[num] = f;
+                        nums.push(num);
+                        return '';
+                    });
+                }
+                nums.sort();
+                while (nums.length > 500) { nums.shift(); }
+                for (const n of nums) {
+                    const f = fileByNum[n];
+                    ctx.index.push(f);
+                    ctx.indexMap[n] = f;
+                }
+                ctx.mut.highestAnnFile = nums[nums.length - 1];
+                writeIndexIfNeeded(ctx);
             }));
-            lp.onFileUpdate((f) => {
+            Util.longPollServer(ctx.workdir + '/anndir').onFileUpdate((f) => {
                 // this triggers even if a file is deleted, but that's not a big deal
                 // because we're looking for the highest number and we'll never "delete"
                 // anything higher than the highest that exists.
-                f.replace(/anns_([0-9]*)\.bin/, (all, numS) => {
+                f.replace(/ann.*_([0-9]+)\.bin/, (_, numS) => {
                     const n = Number(numS);
                     if (isNaN(n)) { return ''; }
                     ctx.index.push(f);
-                    while (ctx.index.length > 500) { ctx.index.shift(); }
+
+                    // Legacy
+                    ctx.indexMap[n] = f;
+                    // End Legacy
+
+                    while (ctx.index.length > 500) {
+                        const ff = ctx.index.shift();
+
+                        // Legacy
+                        ff.replace(/ann*_([0-9]+)\.bin/, (_, n) => {
+                            delete ctx.indexMap[n];
+                            return '';
+                        });
+                        // End Legacy
+                    }
                     if (ctx.mut.highestAnnFile < n) { ctx.mut.highestAnnFile = n; }
+                    writeIndexIfNeeded(ctx);
                     return '';
                 });
             });
@@ -369,26 +428,6 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
                             if (!err) { return; }
                             console.error("Failed to delete [" + path + "] [" + err.message + "]");
                             failed = true;
-                        }));
-                    }).nThen((w) => {
-                        const path = ctx.workdir + '/statedir/' + (f.replace('anns_', 'state_'));
-                        if (failed) { return; }
-                        Fs.unlink(path, w((err) => {
-                            if (!err) { return; }
-                            console.error("Failed to delete [" + path + "] [" + err.message + "]");
-                        }));
-                    }).nThen((w) => {
-                        const haf = ctx.workdir + '/anndir/anns_' + ctx.mut.highestAnnFile + '.bin';
-                        Fs.stat(haf, w((err, _) => {
-                            if (err && err.code === 'ENOENT') {
-                                // Lets just have them restart the server in this case
-                                // There are no ann files left and it's better to reload from scratch.
-                                console.error("Please restart");
-                                if (ctx.mut.checkanns) { ctx.mut.checkanns.kill('SIGINT'); }
-                                process.exit(100);
-                            } else if (err) {
-                                console.error("Failed to stat [" + haf + "] [" + err.message + "]");
-                            }
                         }));
                     }).nThen(done);
                 }, ()=>{});

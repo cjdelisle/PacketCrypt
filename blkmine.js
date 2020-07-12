@@ -69,7 +69,8 @@ const getAnnFileNum = (
         try {
             const obj = JSON.parse(res);
             num = Number(obj.highestAnnFile);
-            urls = obj.urls;
+            const files = obj.files;
+            if (files) { urls = files.map((u) => server + '/anns/' + u); }
         } catch (e) { }
         if (isNaN(num)) {
             debug("in response from [" + url + "] could not parse [" + res + "]");
@@ -615,7 +616,7 @@ const downloadAnnFile = (
 const connsPerAh = 20;
 const pollAnnHandler = (ctx /*:Context_t*/, serverNum /*:number*/) => {
 
-    let topFile = '';
+    let topFile;
     const filesTodo = [];
     const filesInProgress = [];
     let downloaded = 0;
@@ -656,7 +657,7 @@ const pollAnnHandler = (ctx /*:Context_t*/, serverNum /*:number*/) => {
     const getTop = () => {
         getAnnFileNum(serverUrl, (num, urls) => {
             let n = 0;
-            if (topFile !== '') {
+            if (topFile) {
                 const topNum = topFile.replace(/^.*_([0-9]+).bin$/, (_, num) => num);
                 if (topFile === topNum) { throw new Error("Unexpected filename " + topFile); }
                 n = Number(topNum);

@@ -230,11 +230,12 @@ static int validateAnns(LocalWorker_t* lw, int annCount, Result_t* res) {
     return goodCount;
 }
 
-static void writeAnns(LocalWorker_t* lw, int annFileNo, StateAndOutput_t* anns) {
+static void writeAnns(LocalWorker_t* lw, int annFileNo, int hashNum, StateAndOutput_t* anns) {
 
     if (anns->outCount == 0) { return; }
 
-    snprintf(lw->annFile.name, FilePath_NAME_SZ, "anns_%d.bin", annFileNo);
+    snprintf(lw->annFile.name, FilePath_NAME_SZ, "anns_%u_%d_%d.bin",
+        anns->parentBlockHeight, hashNum, annFileNo);
     strcpy(lw->tmpFile.name, lw->annFile.name);
     int annFileno = open(lw->tmpFile.path, O_EXCL | O_CREAT | O_WRONLY, 0666);
     if (annFileno < 0) {
@@ -291,6 +292,7 @@ static void tryWriteAnnsCritical(
   Worker_t* w,
   Output_t* output,
   uint32_t parentBlockHeight,
+  int hashNum,
   bool newBlock
 ) {
     // If we don't manage a write, it's because there was nothing to write.
@@ -319,7 +321,7 @@ static void tryWriteAnnsCritical(
     next->timeOfLastWrite = Time_nowMilliseconds() / 1000;
 
     assert(!pthread_mutex_unlock(&output->lock));
-    writeAnns(&w->lw, afn, current);
+    writeAnns(&w->lw, afn, hashNum, current);
     assert(!pthread_mutex_lock(&output->lock));
 }
 
@@ -386,13 +388,13 @@ static bool processAnns1(Worker_t* w, Result_t* res, int fileNo, int annCount) {
                 validCount = 0;
                 break;
             }
-            tryWriteAnnsCritical(w, output, w->lw.inBuf.parentBlockHeight, true);
+            tryWriteAnnsCritical(w, output, w->lw.inBuf.parentBlockHeight, w->lw.inBuf.hashNum, true);
             DEBUGF("New parentBlockHeight [%u]\n", w->lw.inBuf.parentBlockHeight);
         } else if (outCount + validCount >= OUT_ANN_CAP ||
             (timeOfLastWrite + WRITE_EVERY_SECONDS < now))
         {
             // file is full (or WRITE_EVERY_SECONDS seconds have elapsed), write it out
-            tryWriteAnnsCritical(w, output, w->lw.inBuf.parentBlockHeight, false);
+            tryWriteAnnsCritical(w, output, w->lw.inBuf.parentBlockHeight, w->lw.inBuf.hashNum, false);
         }
         goodCount = dedupeCritical(w, output, annCount);
     } while (0);
@@ -781,15 +783,6 @@ int main(int argc, const char** argv) {
     DEBUGF0("Got request to stop, stopping threads...\n");
 
     WorkQueue_stop(mt->g.q);
-
-    // We just use a local worker in order to have access to the FilePath_t
-    // We are in the main thread though.
-    for (int i = 0; i < (1<<STATE_OUTPUT_BITS); i++) {
-        StateAndOutput_t* sao = mt->g.output[i].stateAndOutput;
-        DEBUGF("Writing [%d] anns to disk for block [%d]\n",
-            sao->outCount, sao->parentBlockHeight);
-        writeAnns(&mt->workers[0].lw, mt->g.nextAnnFileNo++, sao);
-    }
 
     destroyMaster(mt);
     DEBUGF0("Graceful shutdown complete\n");
