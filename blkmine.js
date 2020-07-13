@@ -657,6 +657,7 @@ const pollAnnHandler = (ctx /*:Context_t*/, serverNum /*:number*/) => {
     const getTop = () => {
         getAnnFileNum(serverUrl, (num, urls) => {
             let n = 0;
+            let newFiles = false;
             if (topFile) {
                 const topNum = topFile.replace(/^.*_([0-9]+).bin$/, (_, num) => num);
                 if (topFile === topNum) { throw new Error("Unexpected filename " + topFile); }
@@ -673,6 +674,7 @@ const pollAnnHandler = (ctx /*:Context_t*/, serverNum /*:number*/) => {
                     } else if (num <= n) {
                         // already got it
                     } else {
+                        newFiles = true;
                         filesTodo.push(url);
                     }
                 }
@@ -680,9 +682,12 @@ const pollAnnHandler = (ctx /*:Context_t*/, serverNum /*:number*/) => {
                 if (num - n > 300) { n = num - 300; }
                 for (; n <= num; n++) {
                     filesTodo.push(serverUrl + '/anns/anns_' + n + '.bin');
+                    newFiles = true;
                 }
             }
-            topFile = filesTodo[filesTodo.length - 1];
+            if (newFiles) {
+                topFile = filesTodo[filesTodo.length - 1];
+            }
             while (filesTodo.length > 500) { filesTodo.shift(); }
             setTimeout(getTop, 2000);
             again();
