@@ -51,6 +51,10 @@ const main = () => {
         dir = msg.directory;
         pfx = msg.prefix;
     });
+    process.stdin.on('close', () => {
+        console.error("deleter: Parent process is gone, exiting");
+        process.exit(0);
+    });
     again();
 };
 main();

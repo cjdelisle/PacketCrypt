@@ -710,7 +710,11 @@ const pollAnnHandlers = (ctx) => {
 };
 
 const launchDeleter = (trashDir, retryCount) => {
-    const deleter = Fork('./js/FileDeleter.js');
+    // We need stdin to be a pipe to the parent process, the deleter will
+    // exit when that pipe closes.
+    const deleter = Fork('./js/FileDeleter.js', {
+        stdio: ['pipe', 1, 2, 'ipc']
+    });
     deleter.send({ directory: trashDir, prefix: 'anns_' });
     deleter.on('close', () => {
         if (retryCount > 10) {
