@@ -227,7 +227,7 @@ module.exports.longPollServer = (dir /*:string*/) /*:Util_LongPollServer_t*/ => 
             if (!r) { return; }
             delete requests[file];
             r.forEach((obj) => {
-                if (!obj.closed) {
+                if (obj.resp.socket.writable) {
                     obj.resp.end(ret);
                 }
                 clearTimeout(obj.to);
@@ -253,9 +253,6 @@ module.exports.longPollServer = (dir /*:string*/) /*:Util_LongPollServer_t*/ => 
             }, 30000);
             x.push(obj);
             checkFile(file);
-            req.socket.on('close', () => {
-                obj.closed = true;
-            });
         },
         onFileUpdate: (f) => { ee.on('update', f); }
     };
