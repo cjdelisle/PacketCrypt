@@ -38,6 +38,7 @@ type Context_t = {
     poolClient: PoolClient_t,
     rpcClient: Rpc_Client_t,
     mut: {
+        lastSubmission: number,
         connections: number,
         hashNum: number,
         hashMod: number,
@@ -266,7 +267,9 @@ const onSubmit = (ctx, req, res) => {
         if (failed) { return; }
         if (!currentWork) { return; }
         const shareTarget = currentWork.shareTarget;
-        if (submitRet === 'RESUBMIT_AS_BLOCK') {
+        const now = +new Date();
+        if (submitRet === 'RESUBMIT_AS_BLOCK' && now - ctx.mut.lastSubmission > 120000) {
+            ctx.mut.lastSubmission = now;
             if (!blockTemplate) { throw new Error(); }
 
             const wholeBlock =
@@ -313,7 +316,7 @@ const onSubmit = (ctx, req, res) => {
                 }
             }));
             return;
-        } else if (submitRet === 'OK') {
+        } else if (submitRet === 'OK' || submitRet === 'RESUBMIT_AS_BLOCK') {
             const result = {
                 result: {
                     type: 'share',
@@ -372,6 +375,7 @@ module.exports.create = (cfg /*:BlkHandler_Config_t*/) => {
             lastBlockHash: undefined,
             logStream: undefined,
             connections: 0,
+            lastSubmission: 0,
 
             hashNum: -1,
             hashMod: -1
@@ -416,6 +420,8 @@ module.exports.create = (cfg /*:BlkHandler_Config_t*/) => {
         ctx.mut.ready = true;
     });
     ctx.poolClient.onWork((w) => {
+        // Lets allow immediate blocks once again
+        ctx.mut.lastSubmission = 0;
         const hash = Buffer.from(w.lastHash).reverse().toString('hex');
         if (!ctx.mut.lastBlockHash) {
             // first start
