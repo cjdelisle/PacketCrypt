@@ -77,7 +77,11 @@ const onBlock = (ctx /*:Context_t*/) => {
     let done;
     nThen((w) => {
         // Make work entry
+        const startTime = +new Date();
+        console.error("begin getrawblocktemplate");
         ctx.rpcClient.getRawBlockTemplate(w((err, ret) => {
+            const time = (+new Date()) - startTime;
+            console.error("getrawblocktemplate done in " + String(time) + "ms");
             if (err || !ret) {
                 console.error("Error getting block template, trying again in 10 seconds...");
                 console.error(err);
@@ -180,40 +184,26 @@ const onBlock = (ctx /*:Context_t*/) => {
     }).nThen((w) => {
         ctx.mut.state = state;
         const work = state.work;
-        console.error("Block " + work.height + " " + work.lastHash.toString('hex'));
-        let retrying = false;
+        const lastHash = work.lastHash.reverse().toString('hex');
+        console.error("Next block prepared " + work.height);
         const again = () => {
-            if (!ctx.mut.longPollId) {
-                ctx.rpcClient.getBlockTemplate(w((err, ret) => {
-                    if (err || !ret || !ret.result) {
-                        console.error(err);
+            //console.error('getBestBlockHash');
+            ctx.rpcClient.getBestBlockHash(w((err, ret) => {
+                //console.error('getBestBlockHash done');
+                if (err || !ret || !ret.result) {
+                    console.error(err);
+                    setTimeout(w(again), 1000);
+                    return;
+                } else {
+                    if (lastHash !== ret.result) {
+                        console.error("Block found " + ret.result);
+                        done = true;
+                        onBlock(ctx);
+                    } else {
                         setTimeout(w(again), 1000);
-                        return;
                     }
-                    ctx.mut.longPollId = ret.result.longpollid;
-                    again();
-                }));
-                return;
-            }
-            ctx.rpcClient.getBlockTemplateLongpoll(ctx.mut.longPollId, w((err, ret) => {
-                if (err || !ret) {
-                    // couldn't make the block for whatever reason, try again
-                    if (!retrying) {
-                        console.error(err);
-                        retrying = true;
-                    }
-                    setTimeout(w(again), 100);
-                    return;
                 }
-                retrying = false;
-                ctx.mut.longPollId = ret.result.longpollid;
-                const lastHashLittle = reverseBuffer(work.lastHash).toString('hex');
-                if (ret.result.previousblockhash === lastHashLittle) {
-                    again();
-                    return;
-                }
-                done = true;
-                onBlock(ctx);
+                
             }));
         };
         again();
