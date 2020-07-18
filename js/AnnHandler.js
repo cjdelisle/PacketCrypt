@@ -82,7 +82,11 @@ const launchCheckanns = (ctx /*:Context_t*/) => {
     });
     checkanns.on('close', Util.once(() => {
         console.error("checkanns has died, relaunching in 1 second");
-        setTimeout(() => { launchCheckanns(ctx); }, 1000);
+        nThen((w) => {
+            Util.clearDir(ctx.workdir + '/tmpdir', w());
+        }).nThen((w) => {
+            setTimeout(() => { launchCheckanns(ctx); }, 1000);
+        });
     }));
 };
 
