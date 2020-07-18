@@ -370,7 +370,7 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
                 const nums = [];
                 for (const f of files) {
                     f.replace(/ann.*_([0-9]*)\.bin/, (all, numS) => {
-                        const num = Number(numS)
+                        const num = Number(numS);
                         fileByNum[num] = f;
                         nums.push(num);
                         return '';
