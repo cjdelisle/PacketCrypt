@@ -147,7 +147,7 @@ config.payMaker = {
     // If this set to zero, the payMaker will accept log uploads but will
     // not send any changes of payout data to pktd.
     //updateCycle: 0, // to disable
-    updateCycle: 30,
+    updateCycle: 120,
 
     // How many seconds backward to keep history in memory
     historyDepth: 60*60*24*30,
