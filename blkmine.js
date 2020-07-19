@@ -781,6 +781,11 @@ const launch = (config /*:Config_BlkMiner_t*/) => {
             const todo = [];
             for (let i = 0; i < ctx.pool.config.downloadAnnUrls.length; i++) {
                 const sx = ctx.stats[ctx.pool.config.downloadAnnUrls[i]];
+                if (!sx) {
+                    downloading.push('unknown');
+                    todo.push('unknown');
+                    continue;
+                }
                 downloaded += sx.downloaded;
                 downloading.push(sx.downloading);
                 todo.push(sx.todo);
