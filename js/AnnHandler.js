@@ -387,7 +387,9 @@ module.exports.create = (cfg /*:AnnHandler_Config_t*/) => {
                     ctx.index.push(f);
                     ctx.indexMap[n] = f;
                 }
-                ctx.mut.highestAnnFile = nums[nums.length - 1];
+                if (typeof(nums[nums.length - 1]) === 'number') {
+                    ctx.mut.highestAnnFile = nums[nums.length - 1];
+                }
                 writeIndexIfNeeded(ctx);
             }));
             Util.longPollServer(ctx.workdir + '/anndir').onFileUpdate((f) => {
