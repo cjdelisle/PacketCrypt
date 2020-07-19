@@ -176,7 +176,7 @@ int main(int argc, const char** argv) {
             for (int i = 0; i < files.count; i++) {
                 //DEBUGF("Re-opening file [%s]\n", files.names[i]);
                 int newOutFileNo = open(files.names[i], O_WRONLY | O_CREAT | O_APPEND, 0666);
-                if (newOutFileNo > 10) {
+                if (newOutFileNo > 100) {
                     DEBUGF("WARN using a lot of filenos, opened file [%s] with fileno [%d]\n",
                         files.names[i], newOutFileNo);
                 }
