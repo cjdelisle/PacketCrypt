@@ -147,8 +147,8 @@ static inline void getEffectiveWork(
     assert(BN_sqr(workOut, workOut, ctx));
     assert(BN_mul(workOut, workOut, blockWork, ctx));
 
-    // difficulty *= 1024
-    assert(BN_lshift(workOut, workOut, 10));
+    // difficulty /= 1024
+    assert(BN_rshift(workOut, workOut, 10));
 
     // workOut /= annWork
     assert(BN_div(workOut, NULL, workOut, annWork, ctx));
