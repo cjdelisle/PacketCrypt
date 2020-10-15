@@ -75,6 +75,7 @@ export type Rpc_BlockTemplate_t = {
 };
 export type Rpc_Client_Rpc_t<T> = (err: ?Error, ret: ?Rpc_Client_Res_t<T>) => void;
 export type Rpc_Client_t = {
+    getBestBlockHash: (cb:Rpc_Client_Rpc_t<string>)=>void,
     getBlockTemplate: (Rpc_Client_Rpc_t<Rpc_BlockTemplate_t>)=>void,
     getRawBlockTemplate: (Rpc_Client_Rpc_t<Protocol_RawBlockTemplate_t>)=>void,
     getBlockTemplateLongpoll: (longpollId: string, cb:Rpc_Client_Rpc_t<Rpc_BlockTemplate_t>)=>void,
