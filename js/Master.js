@@ -45,6 +45,7 @@ type Context_t = {
     workdir: string,
     rpcClient: Rpc_Client_t,
     longPollServer: Util_LongPollServer_t,
+    hashCache: {[string]:string},
     mut: {
         cfg: Master_Config_t,
         longPollId: void|string,
@@ -291,6 +292,36 @@ const onReq = (ctx /*:Context_t*/, req, res) => {
         return;
     }
 
+    let maybehash;
+    req.url.replace(/.*\/hashbefore_([0-9a-f]{64})\.hex$/, (_, h) => { maybehash = h; return ''; });
+    if (maybehash) {
+        const hash = maybehash;
+        const resHash = (h) => {
+            res.setHeader("content-type", "text/plain");
+            res.setHeader("cache-control", "max-age=999999999");
+            res.end(h);
+        };
+        if (hash in ctx.hashCache) {
+            resHash(ctx.hashCache[hash]);
+        } else {
+            ctx.rpcClient.getBlock(hash, (err, ret) => {
+                if (err) {
+                } else if (!ret) {
+                } else if (!ret.result) {
+                } else if (!ret.result.previousblockhash) {
+                } else if (!/^[a-f0-9]{64}$/.test(ret.result.previousblockhash)) {
+                } else {
+                    ctx.hashCache[hash] = ret.result.previousblockhash;
+                    resHash(ret.result.previousblockhash);
+                    return;
+                }
+                res.statusCode = 500;
+                res.end(String(err));
+            });
+        }
+        return;
+    }
+
     res.statusCode = 404;
     res.end('');
     return;
@@ -305,6 +336,7 @@ module.exports.create = (cfg /*:Master_Config_t*/) => {
             workdir: workdir,
             rpcClient: Rpc.create(cfg.root.rpc),
             longPollServer: Util.longPollServer(workdir),
+            hashCache: {},
             mut: {
                 cfg: cfg,
                 longPollId: undefined,
