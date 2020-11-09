@@ -19,6 +19,7 @@ export type Protocol_PcConfigJson_t = {
     annVersions?: Array<number>,
     softVersion: ?number,
     mineOldAnns?: number,
+    annTarget?: number,
 };
 
 export type Protocol_RawBlockTemplate_t = {
@@ -78,7 +79,7 @@ export type Protocol_BlockEvent_t = Protocol_Event_t & {
 module.exports.VERSION = 3;
 // This is the "soft" version, if there's a mismatch,
 // the miner will start up but with an upgrade recommendation.
-module.exports.SOFT_VERSION = 1;
+module.exports.SOFT_VERSION = 2;
 
 // Ordered least preferential to most preferential
 // These are just the versions which this implementation is *capable* of mining

@@ -46,6 +46,7 @@ type Context_t = {
     rpcClient: Rpc_Client_t,
     longPollServer: Util_LongPollServer_t,
     hashCache: {[string]:string},
+    keyCache: {[number]:string},
     mut: {
         cfg: Master_Config_t,
         longPollId: void|string,
@@ -230,6 +231,7 @@ const mkConfig = module.exports.mkConfig = (
         softVersion: Protocol.SOFT_VERSION,
         annVersions: cfg.annVersions || [0],
         mineOldAnns: cfg.mineOldAnns || 0,
+        annTarget: cfg.annMinWork,
     };
 };
 
@@ -322,6 +324,33 @@ const onReq = (ctx /*:Context_t*/, req, res) => {
         return;
     }
 
+    let keyNum;
+    req.url.replace(/.*\/sigkey_([0-9]+)\.hex$/, (_, num) => ((keyNum = Number(num)) + ''));
+    if (keyNum) {
+        const complete = (h) => {
+            res.setHeader("content-type", "text/plain");
+            res.setHeader("cache-control", "max-age=999999999");
+            res.end(h);
+        };
+        if (!ctx.mut.state) {
+        } else if (!ctx.mut.state.work) {
+        } else if (keyNum > ctx.mut.state.work.height) {
+            res.statusCode = 404;
+            res.end('');
+            return;
+        } else if (keyNum in ctx.keyCache) {
+            complete(ctx.keyCache[keyNum]);
+            return;
+        } else {
+            const keyPair = Util.getKeypair(ctx.mut.cfg.root, keyNum);
+            ctx.keyCache[keyNum] = Buffer.from(keyPair.publicKey).toString('hex');
+            complete(ctx.keyCache[keyNum]);
+        }
+        res.statusCode = 500;
+        res.end('');
+        return;
+    }
+
     res.statusCode = 404;
     res.end('');
     return;
@@ -337,6 +366,7 @@ module.exports.create = (cfg /*:Master_Config_t*/) => {
             rpcClient: Rpc.create(cfg.root.rpc),
             longPollServer: Util.longPollServer(workdir),
             hashCache: {},
+            keyCache: {},
             mut: {
                 cfg: cfg,
                 longPollId: undefined,
