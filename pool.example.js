@@ -107,7 +107,7 @@ config.master = {
     // Average number of shares per block, reducing this number will reduce
     // load on your block handlers, but increasing it will allow payment
     // to be spread more evenly between block miners.
-    shareWorkDivisor: 128,
+    shareWorkDivisor: 4,
 
     // Which versions of announcements we will accept
     annVersions: [1],
@@ -167,7 +167,7 @@ config.payMaker = {
     blockPayoutFraction: 0.5,
 
     // This constant will affect how far back into history we pay our announcement miners
-    pplnsAnnConstantX: 32,
+    pplnsAnnConstantX: 0.125,
 
     // This constant will affect how far back into history we pay our block miners
     pplnsBlkConstantX: 2,
