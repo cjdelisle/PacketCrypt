@@ -229,7 +229,7 @@ const onBlock = (ctx /*:Context_t*/) => {
         ctx.mut.state = state;
         const work = state.work;
         const lastHash = work.lastHash.reverse().toString('hex');
-        console.error("Next block prepared " + work.height);
+        console.error("Next block " + work.height + " " + lastHash);
         const again = () => {
             //console.error('getBestBlockHash');
             ctx.rpcClient.getBestBlockHash(w((err, ret) => {

@@ -195,6 +195,7 @@ const onShare = (ctx, elem /*:ShareEvent_t*/, warn) => {
 
 const getPayableAnnWork = (elem /*:AnnsEvent_t*/) => {
     let payableAnnCount = Math.max(0, elem.accepted - elem.unsigned);
+    if (elem.target > 0x207fffff) { return 0; }
     if (elem.totalLen) {
         // for every 16KB of data, we deduct 1 announcement worth of payment
         payableAnnCount = Math.max(0, payableAnnCount - (elem.totalLen >> 14));
