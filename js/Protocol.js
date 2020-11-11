@@ -86,7 +86,7 @@ export type Protocol_BlockInfo_t = {|
         "difficulty": number,
         "previousblockhash": string,
     |},
-    sigKey: string,
+    sigKey?: string,
 |};
 
 */
@@ -142,7 +142,7 @@ const workEncode = module.exports.workEncode = (work /*:Protocol_Work_t*/) /*:Bu
 // 80 + 32 + 4 + 4 + 4 + 1024 + 1024
 module.exports.workFromRawBlockTemplate = (
     x /*:Protocol_RawBlockTemplate_t*/,
-    signingKey /*:Buffer*/,
+    signingKey /*:?Buffer*/,
     shareTarget /*:number*/,
     annTarget /*:number*/
 ) /*:Protocol_Work_t*/ => {
@@ -153,7 +153,7 @@ module.exports.workFromRawBlockTemplate = (
         shareTarget: shareTarget,
         annTarget: annTarget,
         header: header,
-        signingKey: signingKey,
+        signingKey: signingKey || Buffer.alloc(32, 0),
         lastHash: header.slice(4, 4+32),
         proof: x.merklebranch.map(Util.bufFromHex),
         binary: Buffer.alloc(0),

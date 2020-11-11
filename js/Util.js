@@ -538,6 +538,7 @@ const joinVarInt = module.exports.joinVarInt = (bufs /*:Array<Buffer>*/) /*:Buff
 };
 
 const getKeypair = module.exports.getKeypair = (rootCfg /*:Config_t*/, height /*:number*/) => {
+    if (!rootCfg.privateSeed) { return; }
     const h = Buffer.alloc(4);
     h.writeUInt32LE(height, 0);
     const secBuf = Buffer.from(rootCfg.privateSeed, 'utf8');

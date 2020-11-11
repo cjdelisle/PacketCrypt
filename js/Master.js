@@ -38,14 +38,10 @@ export type Master_Config_t = {
     mineOldAnns?: number,
 };
 
-type State_t = {
+type State_t = {|
     work: Protocol_Work_t,
-    keyPair: {
-        secretKey: Uint8Array,
-        publicKey: Uint8Array
-    },
     blockTemplate: Buffer
-};
+|};
 
 type Context_t = {
     workdir: string,
@@ -97,9 +93,10 @@ const populateBlkInfo = (ctx /*:Context_t*/, hash /*:string*/, done) => {
             // work is "next" height, but ann miners grab the prev hash out of the
             // template block header to get a hash to work with.
             const keyPair = Util.getKeypair(ctx.mut.cfg.root, ret.result.height + 1);
+            const sigKey = keyPair ? Buffer.from(keyPair.publicKey).toString('hex') : undefined;
             ctx.blkInfo[hash] = {
                 header: ret.result,
-                sigKey: Buffer.from(keyPair.publicKey).toString('hex'),
+                sigKey: sigKey,
             };
             if (confs < CHAIN_HISTORY_DEPTH) {
                 populateBlkInfo(ctx, ret.result.previousblockhash, done);
@@ -157,11 +154,11 @@ const onBlock = (ctx /*:Context_t*/) => {
             }
 
             const keyPair = Util.getKeypair(ctx.mut.cfg.root, ret.result.height);
-            let work = Protocol.workFromRawBlockTemplate(ret.result, keyPair.publicKey,
+            const sigKey = keyPair ? keyPair.publicKey : undefined;
+            let work = Protocol.workFromRawBlockTemplate(ret.result, sigKey,
                 ctx.mut.shareTar, ctx.mut.cfg.annMinWork);
             newState = Object.freeze({
                 work: work,
-                keyPair: keyPair,
                 blockTemplate: Protocol.blockTemplateEncode(ret.result)
             });
         }));
@@ -194,7 +191,6 @@ const onBlock = (ctx /*:Context_t*/) => {
                     newState.work.height + "]");
                 state = Object.freeze({
                     work: work,
-                    keyPair: newState.keyPair,
                     blockTemplate: blockTemplate
                 });
             } else {

@@ -199,7 +199,11 @@ const onSubmit = (ctx, req, res) => {
             if (!isZero(sigKey)) {
                 // Signing keys...
                 const keys = Util.getKeypair(ctx.mut.cfg.root, parentNum + 1);
-                if (Buffer.compare(keys.publicKey, sigKey)) {
+                if (!keys) {
+                    errorEnd(400, `announcement [${num}] needs signing key ` +
+                        `[${sigKey.toString('hex')}] but no key is configured`);
+                    return;
+                } else if (Buffer.compare(keys.publicKey, sigKey)) {
                     errorEnd(400, 'announcement [' + num + '] invalid signing key ' +
                         'want [' + keys.publicKey.toString('hex') + '] got [' +
                         sigKey.toString('hex') + ']');
