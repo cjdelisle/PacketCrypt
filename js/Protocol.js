@@ -8,7 +8,8 @@
 const Util = require('./Util.js');
 
 /*::
-export type Protocol_PcConfigJson_t = {
+export type Protocol_PcConfigJson_t = {|
+    tipHash: string,
     currentHeight: number,
     masterUrl: string,
     submitAnnUrls: Array<string>,
@@ -20,17 +21,17 @@ export type Protocol_PcConfigJson_t = {
     softVersion: ?number,
     mineOldAnns?: number,
     annTarget?: number,
-};
+|};
 
-export type Protocol_RawBlockTemplate_t = {
+export type Protocol_RawBlockTemplate_t = {|
     height: number,
     header: string,
     coinbase_no_witness: string,
     merklebranch: Array<string>,
     transactions: Array<string>
-};
+|};
 
-export type Protocol_Work_t = {
+export type Protocol_Work_t = {|
     height: number,
     coinbase_no_witness: Buffer,
     shareTarget: number,
@@ -40,13 +41,13 @@ export type Protocol_Work_t = {
     signingKey: Buffer,
     proof: Array<Buffer>,
     binary: Buffer,
-};
+|};
 
-export type Protocol_Event_t = {
+export type Protocol_Event_t = {|
     time: number,
     eventId: string
-};
-export type Protocol_AnnsEvent_t = Protocol_Event_t & {
+|};
+export type Protocol_AnnsEvent_t = Protocol_Event_t & {|
     type: "anns",
     accepted: number,
     dup: number,
@@ -58,20 +59,35 @@ export type Protocol_AnnsEvent_t = Protocol_Event_t & {
     unsigned: number,
     totalLen: number,
     target: number
-};
-export type Protocol_ShareEvent_t = Protocol_Event_t & {
+|};
+export type Protocol_ShareEvent_t = Protocol_Event_t & {|
     type: "share",
     block: bool,
     headerHash?: string,
     payTo: string,
     target: number
-};
-export type Protocol_BlockEvent_t = Protocol_Event_t & {
+|};
+export type Protocol_BlockEvent_t = Protocol_Event_t & {|
     type: "block",
     hash: string,
     height: number,
     difficulty: number,
-};
+|};
+export type Protocol_BlockInfo_t = {|
+    header: {|
+        "hash": string,
+        "height": number,
+        "version": number,
+        "versionHex": string,
+        "merkleroot": string,
+        "time": number,
+        "nonce": number,
+        "bits": string,
+        "difficulty": number,
+        "previousblockhash": string,
+    |},
+    sigKey: string,
+|};
 
 */
 

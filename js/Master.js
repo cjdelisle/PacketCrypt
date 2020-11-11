@@ -8,6 +8,7 @@
 const Fs = require('fs');
 const Http = require('http');
 const nThen = require('nthen');
+const { hash } = require('tweetnacl');
 const WriteFileAtomic = require('write-file-atomic');
 
 const Protocol = require('./Protocol.js');
@@ -17,7 +18,12 @@ const Util = require('./Util.js');
 /*::
 import type { WriteStream } from 'fs'
 import type { IncomingMessage, ServerResponse } from 'http'
-import type { Protocol_RawBlockTemplate_t, Protocol_Work_t, Protocol_PcConfigJson_t } from './Protocol.js'
+import type {
+    Protocol_RawBlockTemplate_t,
+    Protocol_Work_t,
+    Protocol_PcConfigJson_t,
+    Protocol_BlockInfo_t,
+} from './Protocol.js'
 import type { Rpc_Client_t } from './Rpc.js';
 import type { Util_LongPollServer_t } from './Util.js';
 import type { Config_t } from './Config.js';
@@ -45,8 +51,7 @@ type Context_t = {
     workdir: string,
     rpcClient: Rpc_Client_t,
     longPollServer: Util_LongPollServer_t,
-    hashCache: {[string]:string},
-    keyCache: {[number]:string},
+    blkInfo: {[string]:Protocol_BlockInfo_t},
     mut: {
         cfg: Master_Config_t,
         longPollId: void|string,
@@ -58,19 +63,58 @@ type Context_t = {
 }
 */
 
+const CHAIN_HISTORY_DEPTH = 1000;
+
 const headers = (res) => {
     res.setHeader("cache-control", "max-age=1000");
     res.setHeader("content-type", "application/octet-stream");
 };
 
-const reverseBuffer = (buf) => {
-    const out = Buffer.alloc(buf.length);
-    for (let i = 0; i < buf.length; i++) { out[out.length-1-i] = buf[i]; }
-    return out;
-};
-
 const computeShareTar = (blockTarget /*:number*/, divisor /*:number*/) => {
     return Util.workMultipleToTarget( Util.getWorkMultiple(blockTarget) / divisor );
+};
+
+const populateBlkInfo = (ctx /*:Context_t*/, hash /*:string*/, done) => {
+    if (hash in ctx.blkInfo) {
+        return void done();
+    }
+    ctx.rpcClient.getBlockHeader(hash, true, (err, ret) => {
+        if (err) {
+        } else if (!ret) {
+        } else if (!ret.result) {
+        } else if (!ret.result.previousblockhash) {
+        } else if (!/^[a-f0-9]{64}$/.test(ret.result.previousblockhash)) {
+        } else {
+            // These are not fixed and we want to be able to cache the result forever
+            const confs = ret.result.confirmations;
+            delete ret.result.confirmations;
+            delete ret.result.nextblockhash;
+
+            console.error(`Got block header [${hash} @ ${ret.result.height}]`);
+
+            // We add 1 to the height when computing the keypair because originally
+            // the signing keys were attached to the work and the height given in the
+            // work is "next" height, but ann miners grab the prev hash out of the
+            // template block header to get a hash to work with.
+            const keyPair = Util.getKeypair(ctx.mut.cfg.root, ret.result.height + 1);
+            ctx.blkInfo[hash] = {
+                header: ret.result,
+                sigKey: Buffer.from(keyPair.publicKey).toString('hex'),
+            };
+            if (confs < CHAIN_HISTORY_DEPTH) {
+                populateBlkInfo(ctx, ret.result.previousblockhash, done);
+            } else {
+                done();
+            }
+            return;
+        }
+        console.error(`Error getting block header [${hash}], trying again in 5 seconds...`);
+        console.error(err);
+        console.error(ret);
+        setTimeout(() => {
+            populateBlkInfo(ctx, hash, done);
+        }, 5000);
+    });
 };
 
 const onBlock = (ctx /*:Context_t*/) => {
@@ -94,8 +138,9 @@ const onBlock = (ctx /*:Context_t*/) => {
                 w.abort();
                 return;
             }
-            const keyPair = Util.getKeypair(ctx.mut.cfg.root, ret.result.height);
+            
             const header = Util.bufFromHex(ret.result.header);
+            populateBlkInfo(ctx, header.slice(4, 4+32).reverse().toString('hex'), w());
             const blockTar = header.readUInt32LE(72);
             if (blockTar !== ctx.mut.blockTar) {
                 if (typeof(ctx.mut.cfg.shareWorkDivisor) === 'number') {
@@ -111,6 +156,7 @@ const onBlock = (ctx /*:Context_t*/) => {
                 ctx.mut.blockTar = blockTar;
             }
 
+            const keyPair = Util.getKeypair(ctx.mut.cfg.root, ret.result.height);
             let work = Protocol.workFromRawBlockTemplate(ret.result, keyPair.publicKey,
                 ctx.mut.shareTar, ctx.mut.cfg.annMinWork);
             newState = Object.freeze({
@@ -218,9 +264,11 @@ const onBlock = (ctx /*:Context_t*/) => {
 
 const mkConfig = module.exports.mkConfig = (
     cfg /*:Master_Config_t*/,
+    tipHash /*:string*/,
     height /*:number*/
 ) /*:Protocol_PcConfigJson_t*/ => {
     return {
+        tipHash,
         currentHeight: height,
         masterUrl: cfg.root.masterUrl,
         submitAnnUrls: cfg.root.annHandlers.map((x) => (x.url + '/submit')),
@@ -237,13 +285,14 @@ const mkConfig = module.exports.mkConfig = (
 
 const configReq = module.exports.configReq = (
     cfg /*:Master_Config_t*/,
+    tipHash /*:string*/,
     height /*:number*/,
     _req /*:IncomingMessage*/,
     res /*:ServerResponse*/
 ) => {
     res.setHeader('content-type', 'application/json');
     res.setHeader('cache-control', 'max-age=8 stale-while-revalidate=2');
-    res.end(JSON.stringify(mkConfig(cfg, height), null, '\t'));
+    res.end(JSON.stringify(mkConfig(cfg, tipHash, height), null, '\t'));
 };
 
 const onReq = (ctx /*:Context_t*/, req, res) => {
@@ -254,7 +303,7 @@ const onReq = (ctx /*:Context_t*/, req, res) => {
     }
     const state = ctx.mut.state;
     if (req.url.endsWith('/config.json')) {
-        configReq(ctx.mut.cfg, state.work.height, req, res);
+        configReq(ctx.mut.cfg, state.work.lastHash.toString('hex'), state.work.height, req, res);
         return;
     }
     let worknum = -1;
@@ -295,64 +344,16 @@ const onReq = (ctx /*:Context_t*/, req, res) => {
     }
 
     let maybehash;
-    req.url.replace(/.*\/hashbefore_([0-9a-f]{64})\.hex$/, (_, h) => { maybehash = h; return ''; });
-    if (maybehash) {
-        const hash = maybehash;
-        const resHash = (h) => {
-            res.setHeader("content-type", "text/plain");
-            res.setHeader("cache-control", "max-age=999999999");
-            res.end(h);
-        };
-        if (hash in ctx.hashCache) {
-            resHash(ctx.hashCache[hash]);
-        } else {
-            ctx.rpcClient.getBlock(hash, (err, ret) => {
-                if (err) {
-                } else if (!ret) {
-                } else if (!ret.result) {
-                } else if (!ret.result.previousblockhash) {
-                } else if (!/^[a-f0-9]{64}$/.test(ret.result.previousblockhash)) {
-                } else {
-                    ctx.hashCache[hash] = ret.result.previousblockhash;
-                    resHash(ret.result.previousblockhash);
-                    return;
-                }
-                res.statusCode = 500;
-                res.end(String(err));
-            });
-        }
-        return;
-    }
-
-    let keyNum;
-    req.url.replace(/.*\/sigkey_([0-9]+)\.hex$/, (_, num) => ((keyNum = Number(num)) + ''));
-    if (keyNum) {
-        const complete = (h) => {
-            res.setHeader("content-type", "text/plain");
-            res.setHeader("cache-control", "max-age=999999999");
-            res.end(h);
-        };
-        if (!ctx.mut.state) {
-        } else if (!ctx.mut.state.work) {
-        } else if (keyNum > ctx.mut.state.work.height) {
-            res.statusCode = 404;
-            res.end('');
-            return;
-        } else if (keyNum in ctx.keyCache) {
-            complete(ctx.keyCache[keyNum]);
-            return;
-        } else {
-            const keyPair = Util.getKeypair(ctx.mut.cfg.root, keyNum);
-            ctx.keyCache[keyNum] = Buffer.from(keyPair.publicKey).toString('hex');
-            complete(ctx.keyCache[keyNum]);
-        }
-        res.statusCode = 500;
-        res.end('');
+    req.url.replace(/.*\/blkinfo_([0-9a-f]{64})\.json$/, (_, h) => { maybehash = h; return ''; });
+    if (maybehash && maybehash in ctx.blkInfo) {
+        res.setHeader("content-type", "application/json");
+        res.setHeader("cache-control", "max-age=999999999");
+        res.end(JSON.stringify(ctx.blkInfo[maybehash], null, '\t'));
         return;
     }
 
     res.statusCode = 404;
-    res.end('');
+    res.end('Not found');
     return;
 };
 
@@ -365,8 +366,7 @@ module.exports.create = (cfg /*:Master_Config_t*/) => {
             workdir: workdir,
             rpcClient: Rpc.create(cfg.root.rpc),
             longPollServer: Util.longPollServer(workdir),
-            hashCache: {},
-            keyCache: {},
+            blkInfo: {},
             mut: {
                 cfg: cfg,
                 longPollId: undefined,

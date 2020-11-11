@@ -83,6 +83,7 @@ export type Rpc_Client_t = {
     checkPcShare: (share: Rpc_Share_t, cb:Rpc_Client_Rpc_t<string>)=>void,
     submitBlock: (blk: string, cb:Rpc_Client_Rpc_t<any>)=>void,
     getBlock: (hash: string, cb:Rpc_Client_Rpc_t<any>)=>void,
+    getBlockHeader: (hash: string, verbose: bool, cb:Rpc_Client_Rpc_t<any>)=>void,
     configureMiningPayouts: (po:{[string]:number}, cb:Rpc_Client_Rpc_t<any>)=>void,
 
     batch: (()=>void, (err: ?Error, ret: ?Rpc_Client_Res_t<any>)=>void)=>void,
