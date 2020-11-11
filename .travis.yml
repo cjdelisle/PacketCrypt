@@ -1,11 +1,5 @@
 dist: xenial
 lang: c
-notifications:
-  irc:
-    channels:
-      - "chat.freenode.net#pkt"
-    on_success: change
-    on_failure: always
 script:
   - bash -x ./.travis.sh
 matrix:
