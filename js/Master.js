@@ -94,7 +94,7 @@ const populateBlkInfo = (ctx /*:Context_t*/, hash /*:string*/, done) => {
             // work is "next" height, but ann miners grab the prev hash out of the
             // template block header to get a hash to work with.
             const keyPair = Util.getKeypair(ctx.mut.cfg.root, ret.result.height + 1);
-            const sigKey = keyPair ? Buffer.from(keyPair.publicKey).toString('hex') : undefined;
+            const sigKey = keyPair ? Buffer.from(keyPair.publicKey).toString('hex') : null;
             ctx.blkInfo[hash] = {
                 header: ret.result,
                 sigKey: sigKey,
