@@ -31,6 +31,7 @@ import type { Config_t } from './Config.js';
 export type Master_Config_t = {
     root: Config_t,
     port: number,
+    host?: string,
     annMinWork: number,
     shareWorkDivisor?: number,
     shareMinWork?: number,
@@ -374,7 +375,7 @@ module.exports.create = (cfg /*:Master_Config_t*/) => {
         });
         Http.createServer((req, res) => {
             onReq(ctx, req, res);
-        }).listen(cfg.port);
+        }).listen(cfg.port, cfg.host);
         console.error("This pool master is configured to run with the following workers:");
         cfg.root.annHandlers.forEach((h) => { console.error(" - AnnHandler: " + h.url); });
         cfg.root.blkHandlers.forEach((h) => { console.error(" - BlkHandler: " + h.url); });

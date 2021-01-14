@@ -30,6 +30,7 @@ import type { Rpc_Client_t } from './Rpc.js';
 export type BlkHandler_Config_t = {
     url: string,
     port: number,
+    host?: string,
     maxConnections?: number,
     root: Config_t
 }
@@ -472,5 +473,5 @@ module.exports.create = (cfg /*:BlkHandler_Config_t*/) => {
 
     Http.createServer((req, res) => {
         onReq(ctx, req, res);
-    }).listen(cfg.port);
+    }).listen(cfg.port, cfg.host);
 };

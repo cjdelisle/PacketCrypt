@@ -87,6 +87,9 @@ config.blkHandlers = [
         // Which port to run this block handler on
         port: 8082,
 
+        // What address to bind to, set to localhost if proxying
+        host: '::',
+
         // Maximum number of simultanious connections to accept before sending 500 errors
         maxConnections: 50,
 
@@ -99,10 +102,13 @@ config.master = {
     // Which port to run the master on
     port: 8080,
 
+    // What address to bind to, set to localhost if proxying
+    host: '::',
+
     // Minimum work for an announcement
     // This number is effectively a bandwidth divisor, every time you
     // double this number you will reduce your bandwidth by a factor of two.
-    annMinWork:   Util.annWorkToTarget(131076),
+    annMinWork:   Util.annWorkToTarget(128),
 
     // Average number of shares per block, reducing this number will reduce
     // load on your block handlers, but increasing it will allow payment
@@ -142,6 +148,9 @@ config.payMaker = {
 
     // Which port to run the paymaker on
     port: 8083,
+
+    // What address to bind to, set to localhost if proxying
+    host: '::',
 
     // Seconds between sending updates to pktd
     // If this set to zero, the payMaker will accept log uploads but will
@@ -183,8 +192,6 @@ config.payMaker = {
 
     // A function which pre-treats updates before they're sent to pktd
     updateHook: (x /*:PayMaker_Result_t*/) => {
-        // Make the results reflect expected payout per day
-        Util.normalize(x.result, 4800000);
         return x;
     },
 

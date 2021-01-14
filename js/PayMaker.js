@@ -122,6 +122,7 @@ type AnnCompressorConfig_t = {
 export type PayMaker_Config_t = {
     url: string,
     port: number,
+    host?: string,
     maxConnections: ?number,
     updateCycle: number,
     historyDepth: number,
@@ -835,7 +836,7 @@ module.exports.create = (cfg /*:PayMaker_Config_t*/) => {
         });
         Http.createServer((req, res) => {
             onReq(ctx, req, res);
-        }).listen(cfg.port);
+        }).listen(cfg.port, cfg.host);
         loadData(ctx, w());
     }).nThen((_) => {
         if (cfg.updateCycle > 0) {
