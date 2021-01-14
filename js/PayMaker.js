@@ -194,8 +194,11 @@ const onShare = (ctx, elem /*:ShareEvent_t*/, warn) => {
     }
 };
 
-const getPayableAnnWork = (elem /*:AnnsEvent_t*/) => {
-    let payableAnnCount = Math.max(0, elem.accepted - elem.unsigned);
+const getPayableAnnWork = (elem /*:AnnsEvent_t*/, payUnsigned /*:bool*/) => {
+    let payableAnnCount = elem.accepted;
+    if (!payUnsigned) {
+        payableAnnCount = Math.max(0, elem.accepted - elem.unsigned);
+    }
     if (elem.target > 0x207fffff) { return 0; }
     if (elem.totalLen) {
         // for every 16KB of data, we deduct 1 announcement worth of payment
@@ -219,7 +222,7 @@ const onAnns = (ctx, elem /*:AnnsEvent_t*/, warn) => {
             // we can't credit these anns because we don't know the diff at that time
             elem.credit = 0;
         } else {
-            elem.credit = getPayableAnnWork(elem) / diff;
+            elem.credit = getPayableAnnWork(elem, ctx.mut.cfg.root.privateSeed === null) / diff;
             // console.log("ann payable work:", getPayableAnnWork(elem));
             // console.log("difficulty:", diff);
         }
