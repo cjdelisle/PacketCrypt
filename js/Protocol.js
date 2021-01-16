@@ -370,8 +370,8 @@ module.exports.shareFileEncode = (share /*:Protocol_ShareFile_t*/) /*:Buffer*/ =
 };
 
 module.exports.coinbaseCommitDecode = (buf /*:Buffer*/) /*:Protocol_CoinbaseCommit_t*/ => {
-    let i = 0;
-    const _magic = buf.readUInt32LE(0); i += 4;
+    // Skip the push bytes and magic
+    let i = 8;
     const annMinWork = buf.readUInt32LE(0); i += 4;
     const merkleRoot = buf.slice(i, i + 32); i += 32;
     const annCountLow = BigInt(buf.readUInt32LE(i)); i += 4;

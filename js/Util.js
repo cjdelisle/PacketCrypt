@@ -389,10 +389,11 @@ module.exports.deleteResults = (dir /*:string*/, minHeight /*:number*/, regex /*
     });
 };
 
-const compactToDbl = (c) => {
+const compactToDbl = (c /*:number*/) /*:number*/ => {
     if (c < 1) { return 0; }
     return (c & 0x007fffff) * Math.pow(256, (c >> 24) - 3);
 };
+module.exports.compactToDbl = compactToDbl;
 const dblToCompact = (d) => {
     let exp = 3;
     while (d > 0x007fffff) {
@@ -407,7 +408,8 @@ const dblToCompact = (d) => {
 
 // work = 2**256 / (target + 1)
 const TWO_TO_THE_256 = 1.157920892373162e+77;
-const workForTar = (target) => (TWO_TO_THE_256 / (target + 1));
+const workForTar = (target /*:number*/) /*:number*/ => (TWO_TO_THE_256 / (target + 1));
+module.exports.workForTar = workForTar;
 const tarForWork = (work) => {
     if (work <= 0) {
         return TWO_TO_THE_256;
