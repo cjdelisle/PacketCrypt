@@ -246,7 +246,9 @@ const onAnns = (ctx, elem /*:AnnsEvent_t*/, warn) => {
             // console.log("ann payable work:", getPayableAnnWork(elem));
             // console.log("difficulty:", diff);
         }
-        elem.encryptions = Util.getWorkMultiple(elem.target) * 4096 * elem.accepted;
+        // Multiply by 4096 because getWorkMultiple divides, and then by 2 because even at
+        // difficulty 1, still 50% of the hashes are not valid.
+        elem.encryptions = Util.getWorkMultiple(elem.target) * 4096 * 2 * elem.accepted;
         ctx.annCompressor.insertWarn(elem, warn);
     }
 };
@@ -526,6 +528,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
 
     const annMinerStats = {};
     let totalKbps = 0;
+    let totalEncryptionsPerSecond = 0;
     for (const payTo in payoutAnnStats) {
         const pas = payoutAnnStats[payTo];
         const snc = pas.secondNewestCredit;
@@ -533,7 +536,9 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         const apms = snc.accepted / ctx.annCompressor.timespanMs;
         const kbps = Math.floor(apms * 1000 * 8);
 
-        const encryptionsPerSecond = snc.encryptions * 1000 / ctx.annCompressor.timespanMs;
+        const encryptionsPerSecond =
+            Math.floor(snc.encryptions * 1000 / ctx.annCompressor.timespanMs);
+        totalEncryptionsPerSecond += encryptionsPerSecond;
         const minerLifetime = pas.lastSeen - pas.firstSeen;
         const timespan = pas.lastSeen - earliestAnnPayout;
 
@@ -550,8 +555,10 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
 
     const blkMinerStats = {};
     for (const payTo in blockMinerWork) {
+        const encryptionsPerSecond = blockMinerWork[payTo] / ENCRYPTIONS_PER_SECOND_WINDOW * 1000;
+        totalEncryptionsPerSecond += encryptionsPerSecond;
         blkMinerStats[payTo] = {
-            encryptionsPerSecond: blockMinerWork[payTo] / ENCRYPTIONS_PER_SECOND_WINDOW * 1000,
+            encryptionsPerSecond,
             lastSeen: mostRecentlySeen[payTo],
         };
     }
