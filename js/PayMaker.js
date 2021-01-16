@@ -436,7 +436,7 @@ const onEvents = (ctx, req, res, done) => {
     });
 };
 
-const ENCRYPTIONS_PER_SECOND_WINDOW = 1000 * 60;
+const ENCRYPTIONS_PER_SECOND_WINDOW = 1000 * 60 * 10;
 
 const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
     // 1. Walk backward through blocks until the total reaches blockPayoutFraction

@@ -278,7 +278,8 @@ const onSubmit = (ctx, req, res) => {
         const shareTarget = currentWork.shareTarget;
         const now = +new Date();
         const cbc = Protocol.coinbaseCommitDecode(coinbaseCommit);
-        const encryptions = Number(Util.getEffectiveWork(shareTarget, cbc.annMinWork, cbc.annCount));
+        // Multiply by 2 because even at difficulty 1, 50% of all hashes are no good
+        const encryptions = Number(Util.getEffectiveWork(shareTarget, cbc.annMinWork, cbc.annCount)) * 2;
         if (submitRet === 'RESUBMIT_AS_BLOCK' && now - ctx.mut.lastSubmission > 120000) {
             ctx.mut.lastSubmission = now;
             if (!blockTemplate) { throw new Error(); }
