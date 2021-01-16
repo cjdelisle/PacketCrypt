@@ -277,6 +277,7 @@ const onSubmit = (ctx, req, res) => {
         if (!currentWork) { return; }
         const shareTarget = currentWork.shareTarget;
         const now = +new Date();
+        const cbc = Protocol.coinbaseCommitDecode(coinbaseCommit);
         if (submitRet === 'RESUBMIT_AS_BLOCK' && now - ctx.mut.lastSubmission > 120000) {
             ctx.mut.lastSubmission = now;
             if (!blockTemplate) { throw new Error(); }
@@ -310,7 +311,9 @@ const onSubmit = (ctx, req, res) => {
                             time: +new Date(),
                             eventId: shareId.toString('hex'),
                             headerHash: headerHash,
-                            target: shareTarget
+                            target: shareTarget,
+                            annCount: cbc.annCount,
+                            annMinWork: cbc.annMinWork,
                         },
                         error: [],
                         warn: warn
@@ -333,7 +336,9 @@ const onSubmit = (ctx, req, res) => {
                     block: false,
                     time: +new Date(),
                     eventId: shareId.toString('hex'),
-                    target: shareTarget
+                    target: shareTarget,
+                    annCount: cbc.annCount,
+                    annMinWork: cbc.annMinWork,
                 },
                 error: [],
                 warn: warn

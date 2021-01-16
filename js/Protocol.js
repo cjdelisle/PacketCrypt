@@ -8,6 +8,8 @@
 const Util = require('./Util.js');
 
 /*::
+const BigInt = (number)=>number;
+
 export type Protocol_PcConfigJson_t = {|
     tipHash: string,
     currentHeight: number,
@@ -65,7 +67,9 @@ export type Protocol_ShareEvent_t = Protocol_Event_t & {|
     block: bool,
     headerHash?: string,
     payTo: string,
-    target: number
+    target: number,
+    annCount?: number,
+    annMinWork?: number,
 |};
 export type Protocol_BlockEvent_t = Protocol_Event_t & {|
     type: "block",
@@ -87,6 +91,11 @@ export type Protocol_BlockInfo_t = {|
         "previousblockhash": string,
     |},
     sigKey: ?string,
+|};
+export type Protocol_CoinbaseCommit_t = {|
+    annMinWork: number,
+    annCount: number,
+    merkleRoot: Buffer,
 |};
 
 */
@@ -355,6 +364,20 @@ module.exports.shareFileEncode = (share /*:Protocol_ShareFile_t*/) /*:Buffer*/ =
     shareBuf.copy(msg, i); i += shareBuf.length;
     if (i !== msg.length) { throw new Error(i + ' !== ' + msg.length); }
     return msg;
+};
+
+module.exports.coinbaseCommitDecode = (buf /*:Buffer*/) /*:Protocol_CoinbaseCommit_t*/ => {
+    let i = 0;
+    const _magic = buf.readUInt32LE(0); i += 4;
+    const annMinWork = buf.readUInt32LE(0); i += 4;
+    const merkleRoot = buf.slice(i, i + 32); i += 32;
+    const annCountLow = BigInt(buf.readUInt32LE(i)); i += 4;
+    const annCountHigh = (BigInt(buf.readUInt32LE(i)) * BigInt(2) ** BigInt(32)); i += 4;
+    return {
+        annMinWork,
+        merkleRoot,
+        annCount: annCountHigh + annCountLow,
+    };
 };
 
 // $FlowFixMe: I want to do this
