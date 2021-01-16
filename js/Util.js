@@ -30,6 +30,8 @@ import type { IncomingMessage, ServerResponse } from 'http'
 import type { WriteStream } from 'fs'
 
 import type { Config_t } from './Config.js'
+import type { BigInt_t } from './Protocol.js'
+import { BigInt } from './Protocol.js'
 
 export type Util_LongPollServer_t = {
     onReq: (IncomingMessage, ServerResponse)=>void,
@@ -728,6 +730,29 @@ module.exports.normalize = (
     if (sum === 0) { return; }
     const multiplier = desiredSum / sum;
     Object.keys(obj).forEach((k) => { obj[k] *= multiplier; });
+};
+
+// effective_work = work**3 / 1024 / ann_work / ann_count**2
+const getEffectiveWork0 = (
+    work /*: BigInt_t*/,
+    annWork /*:BigInt_t*/,
+    annCount /*:BigInt_t*/
+) /*:BigInt_t*/ => {
+    let out = work ** BigInt(3);
+    out >>>= 10;
+    out /= annWork;
+    out /= (annCount * annCount);
+    return out;
+};
+
+module.exports.getEffectiveWork = (
+    blockTar /*:number*/,
+    annTar /*:number*/,
+    annCount /*:BigInt_t*/
+) /*:BigInt_t*/ => {
+    const blkWork = BigInt(Math.floor(workForTar(compactToDbl(blockTar))));
+    const annWork = BigInt(Math.floor(workForTar(compactToDbl(annTar))));
+    return getEffectiveWork0(blkWork, annWork, annCount);
 };
 
 // $FlowFixMe I want to

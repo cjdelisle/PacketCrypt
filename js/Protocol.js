@@ -8,7 +8,9 @@
 const Util = require('./Util.js');
 
 /*::
-const BigInt = (number)=>number;
+export type BigInt_t = number;
+const BigInt = (n: number):BigInt_t => (n: BigInt_t);
+module.exports.BigInt = BigInt;
 
 export type Protocol_PcConfigJson_t = {|
     tipHash: string,
@@ -70,6 +72,7 @@ export type Protocol_ShareEvent_t = Protocol_Event_t & {|
     target: number,
     annCount?: string,
     annMinWork?: number,
+    encryptions?: number,
 |};
 export type Protocol_BlockEvent_t = Protocol_Event_t & {|
     type: "block",
@@ -93,7 +96,7 @@ export type Protocol_BlockInfo_t = {|
     sigKey: ?string,
 |};
 export type Protocol_CoinbaseCommit_t = {|
-    annMinWork: number,
+    annMinWork: BigInt_t,
     annCount: number,
     merkleRoot: Buffer,
 |};

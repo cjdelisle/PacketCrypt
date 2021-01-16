@@ -278,6 +278,7 @@ const onSubmit = (ctx, req, res) => {
         const shareTarget = currentWork.shareTarget;
         const now = +new Date();
         const cbc = Protocol.coinbaseCommitDecode(coinbaseCommit);
+        const encryptions = Number(Util.getEffectiveWork(shareTarget, cbc.annMinWork, cbc.annCount));
         if (submitRet === 'RESUBMIT_AS_BLOCK' && now - ctx.mut.lastSubmission > 120000) {
             ctx.mut.lastSubmission = now;
             if (!blockTemplate) { throw new Error(); }
@@ -314,6 +315,7 @@ const onSubmit = (ctx, req, res) => {
                             target: shareTarget,
                             annCount: cbc.annCount.toString(),
                             annMinWork: cbc.annMinWork,
+                            encryptions,
                         },
                         error: [],
                         warn: warn
@@ -339,6 +341,7 @@ const onSubmit = (ctx, req, res) => {
                     target: shareTarget,
                     annCount: cbc.annCount.toString(),
                     annMinWork: cbc.annMinWork,
+                    encryptions,
                 },
                 error: [],
                 warn: warn
