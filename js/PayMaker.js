@@ -65,7 +65,8 @@ type ShareEvent_t = Protocol_ShareEvent_t & {
     workMul: number,
 };
 type AnnsEvent_t = Protocol_AnnsEvent_t & {
-    credit: number
+    credit: number,
+    workMul: number,
 };
 type Event_t = ShareEvent_t & AnnsEvent_t & Protocol_BlockEvent_t;
 
@@ -108,6 +109,7 @@ type PayoutAnnStat_t = {|
     secondNewestCredit: ?AnnCompressorCredit_t,
 |};
 type AnnCompressorCredit_t = {
+    workMul: number,
     credit: number,
     accepted: number,
 };
@@ -246,6 +248,7 @@ const onAnns = (ctx, elem /*:AnnsEvent_t*/, warn) => {
             // console.log("ann payable work:", getPayableAnnWork(elem));
             // console.log("difficulty:", diff);
         }
+        elem.workMul = Util.getWorkMultiple(elem.target);
         ctx.annCompressor.insertWarn(elem, warn);
     }
 };
@@ -528,7 +531,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         const kbps = Math.floor(apms * 1000 * 8);
 
         // credit is multiples of "minimum diff" which is 4096
-        const hpms = snc.credit * 4096 / ctx.annCompressor.timespanMs;
+        const hpms = snc.workMul * 4096 / ctx.annCompressor.timespanMs;
         const minerLifetime = pas.lastSeen - pas.firstSeen;
         const timespan = pas.lastSeen - earliestAnnPayout;
 
@@ -785,7 +788,7 @@ const mkTree = /*::<X:{time:number,eventId:string}>*/() /*:BinTree_t<X>*/ => {
     });
 };
 
-const mkCompressor = /*::<X:{time:number,eventId:string,payTo:string,credit:number,accepted:number}>*/(
+const mkCompressor = /*::<X:{workMul:number,time:number,eventId:string,payTo:string,credit:number,accepted:number}>*/(
     cfg /*:AnnCompressorConfig_t*/
 ) /*:AnnCompressor_t<X>*/ => {
     let lostAnns = 0;
@@ -839,7 +842,10 @@ const mkCompressor = /*::<X:{time:number,eventId:string,payTo:string,credit:numb
                 return false;
             } else {
                 newerDs.eventIds[x.eventId] = true;
-                const c = newerDs.credits[x.payTo] = (newerDs.credits[x.payTo] || { credit: 0, accepted: 0 });
+                const c = newerDs.credits[x.payTo] = (newerDs.credits[x.payTo] || {
+                    workMul: 0, credit: 0, accepted: 0
+                });
+                c.workMul += x.workMul;
                 c.credit += x.credit;
                 c.accepted += x.accepted;
                 newerDs.count++;
