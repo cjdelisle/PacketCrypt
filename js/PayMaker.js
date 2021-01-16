@@ -525,16 +525,16 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         const snc = pas.secondNewestCredit;
         if (!snc) { continue; }
         const apms = snc.accepted / ctx.annCompressor.timespanMs;
-        const kbps = apms * 1000 * 8;
+        const kbps = Math.floor(apms * 1000 * 8);
 
-        const hpms = snc.credit / ctx.annCompressor.timespanMs;
+        // credit is multiples of "minimum diff" which is 4096
+        const hpms = snc.credit * 4096 / ctx.annCompressor.timespanMs;
         const minerLifetime = pas.lastSeen - pas.firstSeen;
         const timespan = pas.lastSeen - earliestAnnPayout;
 
         totalKbps += kbps;
-        //const diff = ctx.
-        let warmupPercent = minerLifetime / timespan;
-        //if (warmupPercent > 95) { warmupPercent = 100; }
+        let warmupPercent = Math.floor(minerLifetime / timespan * 100);
+        if (warmupPercent > 90) { warmupPercent = 100; }
         annMinerStats[payTo] = {
             kbps,
             warmupPercent,
