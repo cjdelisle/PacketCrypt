@@ -68,7 +68,7 @@ export type Protocol_ShareEvent_t = Protocol_Event_t & {|
     headerHash?: string,
     payTo: string,
     target: number,
-    annCount?: number,
+    annCount?: string,
     annMinWork?: number,
 |};
 export type Protocol_BlockEvent_t = Protocol_Event_t & {|
