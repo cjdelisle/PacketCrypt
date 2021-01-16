@@ -210,11 +210,11 @@ const getPayableAnnWork = (elem /*:AnnsEvent_t*/, payUnsigned /*:bool*/) => {
 const onAnns = (ctx, elem /*:AnnsEvent_t*/, warn) => {
     if (!Util.isValidPayTo(elem.payTo)) {
         warn("Invalid payTo address [" + elem.payTo + "]");
-    } else if (typeof(elem.accepted) !== 'number') {
+    } else if (typeof (elem.accepted) !== 'number') {
         warn("accepted missing or not a number");
-    } else if (typeof(elem.unsigned) !== 'number') {
+    } else if (typeof (elem.unsigned) !== 'number') {
         warn("unsigned missing or not a number");
-    } else if (typeof(elem.totalLen) !== 'number') {
+    } else if (typeof (elem.totalLen) !== 'number') {
         warn("totalLen missing or not a number");
     } else {
         const diff = getDifficulty(ctx, elem.time);
@@ -231,9 +231,9 @@ const onAnns = (ctx, elem /*:AnnsEvent_t*/, warn) => {
 };
 
 const onBlock = (ctx, elem /*:Protocol_BlockEvent_t*/, warn) => {
-    if (typeof(elem.height) !== 'number') {
+    if (typeof (elem.height) !== 'number') {
         warn("height is missing or invalid");
-    } else if (typeof(elem.difficulty) !== 'number') {
+    } else if (typeof (elem.difficulty) !== 'number') {
         warn("difficulty is missing or not a number");
     } else {
         ctx.blocks.insert(elem);
@@ -266,11 +266,11 @@ const handleEvents = (ctx, fileName, dataStr) => {
         // Commented out because in testing it didn't reduce anything.
         //elem.eventId = Buffer.from(elem.eventId, 'hex').toString('base64');
 
-        if (typeof(elem.type) !== 'string') {
+        if (typeof (elem.type) !== 'string') {
             warn("type field is missing or not a string");
-        } else if (typeof(elem.eventId) !== 'string') {
+        } else if (typeof (elem.eventId) !== 'string') {
             warn("eventId is missing or not a string");
-        } else if (typeof(elem.time) !== 'number') {
+        } else if (typeof (elem.time) !== 'number') {
             warn("time is missing or not a number");
         } else if (elem.time < earliestValidTime(ctx)) {
             // too old
@@ -307,7 +307,7 @@ const getNewestTimestamp = (dataStr) => {
     if (dataStr.length > 10000) {
         dataStr = dataStr.slice(dataStr.length - 10000);
     }
-    for (;;) {
+    for (; ;) {
         let i = dataStr.lastIndexOf('\n');
         let toParse = dataStr;
         if (i < 0) {
@@ -317,7 +317,7 @@ const getNewestTimestamp = (dataStr) => {
         }
         try {
             const obj = JSON.parse(toParse);
-            if (typeof(obj.time) === 'number') {
+            if (typeof (obj.time) === 'number') {
                 return obj.time;
             }
         } catch (e) { }
@@ -330,11 +330,11 @@ const getNewestTimestamp = (dataStr) => {
 };
 
 const stats = (ctx) => {
-  return 'annSlots:' + ctx.annCompressor.size() +
-  ' shares:' + ctx.shares.size() +
-  ' blocks:' + ctx.blocks.size() +
-  ' conn: ' + ctx.mut.connections +
-  ' lost: ' + ctx.annCompressor.lostAnns();
+    return 'annSlots:' + ctx.annCompressor.size() +
+        ' shares:' + ctx.shares.size() +
+        ' blocks:' + ctx.blocks.size() +
+        ' conn: ' + ctx.mut.connections +
+        ' lost: ' + ctx.annCompressor.lostAnns();
 };
 
 const onEvents = (ctx, req, res, done) => {
@@ -368,7 +368,7 @@ const onEvents = (ctx, req, res, done) => {
         }));
     }).nThen((w) => {
         if (failed) { return; }
-        hash = Crypto.createHash('sha256').update(dataStr).digest('hex').slice(0,32);
+        hash = Crypto.createHash('sha256').update(dataStr).digest('hex').slice(0, 32);
         console.error("/events Processing file [" + hash + "] [" + stats(ctx) + "]");
         newestTimestamp = getNewestTimestamp(dataStr);
         if (newestTimestamp === null) {
@@ -407,7 +407,7 @@ const onEvents = (ctx, req, res, done) => {
         }));
         handleEvents(ctx, fileName, dataStr);
         if (newestTimestamp && ctx.mut.mostRecentEventTime < newestTimestamp) {
-          ctx.mut.mostRecentEventTime = newestTimestamp;
+            ctx.mut.mostRecentEventTime = newestTimestamp;
         }
         garbageCollect(ctx);
         console.error("/events done processing [" + hash + "]");
@@ -479,7 +479,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
             (payouts[ctx.mut.cfg.defaultAddress] || 0) + remaining;
     }
 
-    let latestPayout = (()=>{
+    let latestPayout = (() => {
         const m = ctx.shares.max();
         const t0 = m ? m.time : 0;
         const a = ctx.annCompressor.max();
@@ -523,7 +523,7 @@ const sendUpdate = (ctx) => {
                 if (err) {
                     if ((err /*:any*/).code === -32603 && i < 20) {
                         // This is pktd being dumb
-                        setTimeout(() => { again(i+1); }, 1000);
+                        setTimeout(() => { again(i + 1); }, 1000);
                         return;
                     }
                     console.error("sendUpdate:", err);
@@ -557,7 +557,7 @@ const onWhoToPay = (ctx, req, res) => {
     let maxtime = Infinity;
     if (req.url.indexOf('?') > -1) {
         const q = Querystring.parse(req.url.slice(req.url.indexOf('?') + 1));
-        if (typeof(q.maxtime) === 'string' && !isNaN(Number(q.maxtime))) {
+        if (typeof (q.maxtime) === 'string' && !isNaN(Number(q.maxtime))) {
             maxtime = Number(q.maxtime);
         }
     }
@@ -592,12 +592,6 @@ const onReq = (ctx /*:Context_t*/, req, res) => {
         ctx.mut.connections--;
     });
 
-    if (req.headers.authorization !== authLine) {
-        res.setHeader("WWW-Authenticate", "Basic realm=paymaker");
-        res.writeHead(401);
-        res.end("401 Unauthorized");
-        return;
-    }
     if (req.url.endsWith('/stats')) {
         return void onStats(ctx, req, res);
     }
@@ -607,8 +601,14 @@ const onReq = (ctx /*:Context_t*/, req, res) => {
         return;
     }
     if (req.url.endsWith('/events')) {
+        if (req.headers.authorization !== authLine) {
+            res.setHeader("WWW-Authenticate", "Basic realm=paymaker");
+            res.writeHead(401);
+            res.end("401 Unauthorized");
+            return;
+        }
         ctx.oes.take((returnAfter) => {
-            onEvents(ctx, req, res, returnAfter(()=>{}));
+            onEvents(ctx, req, res, returnAfter(() => { }));
         });
         return;
     }
@@ -659,7 +659,7 @@ const loadData = (ctx /*:Context_t*/, done) => {
                     return '';
                 });
                 console.error("Loading data from [" + fileName + "] [" +
-                    dateFile + "] [" + Math.floor(i * 100 / files.length) + "%] [" + stats(ctx) +"]");
+                    dateFile + "] [" + Math.floor(i * 100 / files.length) + "%] [" + stats(ctx) + "]");
                 Fs.readFile(fileName, 'utf8', w((err, ret) => {
                     // These files should not be deleted
                     if (err) { throw err; }
@@ -676,7 +676,7 @@ const loadData = (ctx /*:Context_t*/, done) => {
 };
 
 const mkTree = /*::<X:{time:number,eventId:string}>*/() /*:BinTree_t<X>*/ => {
-    const tree = new RBTree((a,b) => {
+    const tree = new RBTree((a, b) => {
         if (a === b) { return 0; }
         if (a.time === b.time) {
             if (a.eventId < b.eventId) { return -1; }
@@ -707,7 +707,7 @@ const mkTree = /*::<X:{time:number,eventId:string}>*/() /*:BinTree_t<X>*/ => {
             }
             if (oldSize - tree.size !== toRemove.length) {
                 console.error(`WARNING: removed [${toRemove.length}] items but only ` +
-                  `[${oldSize - tree.size}] items actually were removed`);
+                    `[${oldSize - tree.size}] items actually were removed`);
             }
             return oldSize - tree.size;
         },
@@ -741,8 +741,8 @@ const mkCompressor = /*::<X:{time:number,eventId:string,payTo:string,credit:numb
                     newerDs = {
                         time: ds.time + cctx.timespanMs,
                         eventId: 'COMPRESSED_EVENTS_' + ds.time + cctx.timespanMs,
-                        credits: { },
-                        eventIds: { },
+                        credits: {},
+                        eventIds: {},
                         count: 0,
                     };
                     cctx.anns.insert(newerDs);
@@ -757,8 +757,8 @@ const mkCompressor = /*::<X:{time:number,eventId:string,payTo:string,credit:numb
                 newerDs = {
                     time: t,
                     eventId: 'COMPRESSED_EVENTS_' + String(t),
-                    credits: { },
-                    eventIds: { },
+                    credits: {},
+                    eventIds: {},
                     count: 0,
                 };
                 cctx.anns.insert(newerDs);
@@ -792,7 +792,7 @@ const mkCompressor = /*::<X:{time:number,eventId:string,payTo:string,credit:numb
             });
             return ret;
         },
-        insert: (x /*:X*/) => cctx.insertWarn(x, (_)=>{}),
+        insert: (x /*:X*/) => cctx.insertWarn(x, (_) => { }),
         each: (x) => tree.each(x),
         reach: (x) => tree.reach(x),
         min: () => tree.min(),
@@ -811,10 +811,9 @@ const mkCompressor = /*::<X:{time:number,eventId:string,payTo:string,credit:numb
 module.exports.create = (cfg /*:PayMaker_Config_t*/) => {
     const workdir = cfg.root.rootWorkdir + '/paymaker_' + String(cfg.port);
     let ctx /*:Context_t*/;
-    if (typeof(cfg.blockPayoutFraction) !== 'number' ||
+    if (typeof (cfg.blockPayoutFraction) !== 'number' ||
         cfg.blockPayoutFraction > 1 ||
-        cfg.blockPayoutFraction < 0)
-    {
+        cfg.blockPayoutFraction < 0) {
         console.error("WARNING: blockPayoutFraction [" + cfg.blockPayoutFraction +
             "] is not a number between 0 and 1, defaulting to 0.5");
         cfg.blockPayoutFraction = 0.5;
