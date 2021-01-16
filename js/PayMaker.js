@@ -60,13 +60,12 @@ import type { Config_t } from './Config.js';
 import type { Rpc_Client_t } from './Rpc.js';
 import type { Protocol_AnnsEvent_t, Protocol_ShareEvent_t, Protocol_BlockEvent_t } from './Protocol.js'
 
-type ShareEvent_t = Protocol_ShareEvent_t & {
+type ShareEvent_t = Protocol_ShareEvent_t & {|
     credit: number,
-    workMul: number,
-};
+|};
 type AnnsEvent_t = Protocol_AnnsEvent_t & {
     credit: number,
-    workMul: number,
+    encryptions: number,
 };
 type Event_t = ShareEvent_t & AnnsEvent_t & Protocol_BlockEvent_t;
 
@@ -91,13 +90,13 @@ export type PayMaker_Result_t = {|
             lastSeen: number,
             kbps: number,
             warmupPercent: number,
-            hashesPerSecond: number,
+            encryptionsPerSecond: number,
         |},
     },
     blkMinerStats: {
         [string]: {|
             lastSeen: number,
-            hashesPerSecond: number,
+            encryptionsPerSecond: number,
         |},
     },
     result: { [string]: number },
@@ -108,11 +107,11 @@ type PayoutAnnStat_t = {|
     lastSeen: number,
     secondNewestCredit: ?AnnCompressorCredit_t,
 |};
-type AnnCompressorCredit_t = {
-    workMul: number,
+type AnnCompressorCredit_t = {|
+    encryptions: number,
     credit: number,
     accepted: number,
-};
+|};
 type AnnCompressorSlot_t = {
     time: number, // when this slot ends
     eventId: string,
@@ -120,11 +119,11 @@ type AnnCompressorSlot_t = {
     eventIds: { [string]: bool } | null,
     count: number,
 };
-type AnnCompressor_t<X> = {
+type AnnCompressor_t = {
     timespanMs: number,
     slotsToKeepEvents: number,
-    insertWarn: (X, (any)=>void) => bool,
-    insert: (X) => bool,
+    insertWarn: (AnnsEvent_t, (any)=>void) => bool,
+    insert: (AnnsEvent_t) => bool,
     gcOld: (x:number) => number,
     min: () => ?AnnCompressorSlot_t,
     max: () => ?AnnCompressorSlot_t,
@@ -160,7 +159,7 @@ type Context_t = {
     workdir: string,
     rpcClient: Rpc_Client_t,
     blocks: BinTree_t<Protocol_BlockEvent_t>,
-    annCompressor: AnnCompressor_t<AnnsEvent_t>,
+    annCompressor: AnnCompressor_t,
     shares: BinTree_t<ShareEvent_t>,
     oes: typeof _flow_typeof_saferphore,
     startTime: number,
@@ -208,10 +207,9 @@ const onShare = (ctx, elem /*:ShareEvent_t*/, warn) => {
         } else {
             // console.log("Difficulty: " + diff);
             // console.log("ShareTarget: " + Util.getWorkMultiple(elem.target));
-            const workMul = Util.getWorkMultiple(elem.target);
-            elem.workMul = workMul;
-            elem.credit = workMul / diff;
+            elem.credit = Util.getWorkMultiple(elem.target) / diff;
         }
+        elem.target = diff;
         ctx.shares.insert(elem);
     }
 };
@@ -248,7 +246,7 @@ const onAnns = (ctx, elem /*:AnnsEvent_t*/, warn) => {
             // console.log("ann payable work:", getPayableAnnWork(elem));
             // console.log("difficulty:", diff);
         }
-        elem.workMul = Util.getWorkMultiple(elem.target);
+        elem.encryptions = Util.getWorkMultiple(elem.target) * 4096 * elem.accepted;
         ctx.annCompressor.insertWarn(elem, warn);
     }
 };
@@ -438,6 +436,8 @@ const onEvents = (ctx, req, res, done) => {
     });
 };
 
+const ENCRYPTIONS_PER_SECOND_WINDOW = 1000 * 60;
+
 const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
     // 1. Walk backward through blocks until the total reaches blockPayoutFraction
     //   if we reach the beginning, pay everything that is left to defaultAddress
@@ -454,6 +454,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
     const mostRecentlySeen = {};
     const warn = [];
     let earliestBlockPayout = Infinity;
+    const encryptionCountCutoff = (+new Date()) - ENCRYPTIONS_PER_SECOND_WINDOW;
     ctx.shares.reach((s) => {
         if (s.time > maxtime) { return; }
         // console.error('share');
@@ -461,7 +462,9 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         earliestBlockPayout = s.time;
         let toPay = s.credit / ctx.mut.cfg.pplnsBlkConstantX;
         if (toPay >= remaining) { toPay = remaining; }
-        blockMinerWork[s.payTo] = (blockMinerWork[s.payTo] || 0) + s.workMul;
+        if (s.time > encryptionCountCutoff && s.encryptions) {
+            blockMinerWork[s.payTo] = (blockMinerWork[s.payTo] || 0) + s.encryptions;
+        }
         if (!mostRecentlySeen[s.payTo]) { mostRecentlySeen[s.payTo] = s.time; }
         payouts[s.payTo] = (payouts[s.payTo] || 0) + toPay;
         remaining -= toPay;
@@ -530,8 +533,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         const apms = snc.accepted / ctx.annCompressor.timespanMs;
         const kbps = Math.floor(apms * 1000 * 8);
 
-        // credit is multiples of "minimum diff" which is 4096
-        const hpms = snc.workMul * 4096 / ctx.annCompressor.timespanMs;
+        const encryptionsPerSecond = snc.encryptions * 1000 / ctx.annCompressor.timespanMs;
         const minerLifetime = pas.lastSeen - pas.firstSeen;
         const timespan = pas.lastSeen - earliestAnnPayout;
 
@@ -541,18 +543,16 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         annMinerStats[payTo] = {
             kbps,
             warmupPercent,
-            hashesPerSecond: hpms * 1000,
+            encryptionsPerSecond,
             lastSeen: pas.lastSeen,
         }
     }
 
     const blkMinerStats = {};
     for (const payTo in blockMinerWork) {
-        const lastSeen = mostRecentlySeen[payTo];
-        const hpms = blockMinerWork[payTo] / (lastSeen - earliestBlockPayout);
         blkMinerStats[payTo] = {
-            hashesPerSecond: hpms * 1000,
-            lastSeen
+            encryptionsPerSecond: blockMinerWork[payTo] / ENCRYPTIONS_PER_SECOND_WINDOW * 1000,
+            lastSeen: mostRecentlySeen[payTo],
         };
     }
 
@@ -788,16 +788,14 @@ const mkTree = /*::<X:{time:number,eventId:string}>*/() /*:BinTree_t<X>*/ => {
     });
 };
 
-const mkCompressor = /*::<X:{workMul:number,time:number,eventId:string,payTo:string,credit:number,accepted:number}>*/(
-    cfg /*:AnnCompressorConfig_t*/
-) /*:AnnCompressor_t<X>*/ => {
+const mkCompressor = (cfg /*:AnnCompressorConfig_t*/) /*:AnnCompressor_t*/ => {
     let lostAnns = 0;
     const tree = mkTree/*::<AnnCompressorSlot_t>*/();
     const cctx = Object.freeze({
         timespanMs: cfg.timespanMs || DEFAULT_ANN_COMPRESSOR_CFG.timespanMs,
         slotsToKeepEvents: cfg.slotsToKeepEvents || DEFAULT_ANN_COMPRESSOR_CFG.slotsToKeepEvents,
         anns: tree,
-        insertWarn: (x /*:X*/, warn) => {
+        insertWarn: (x /*:AnnsEvent_t*/, warn) => {
             let newerDs;
             cctx.anns.reach((ds) => {
                 // Keep searching back
@@ -843,9 +841,9 @@ const mkCompressor = /*::<X:{workMul:number,time:number,eventId:string,payTo:str
             } else {
                 newerDs.eventIds[x.eventId] = true;
                 const c = newerDs.credits[x.payTo] = (newerDs.credits[x.payTo] || {
-                    workMul: 0, credit: 0, accepted: 0
+                    encryptions: 0, credit: 0, accepted: 0
                 });
-                c.workMul += x.workMul;
+                c.encryptions += x.encryptions;
                 c.credit += x.credit;
                 c.accepted += x.accepted;
                 newerDs.count++;
@@ -864,7 +862,7 @@ const mkCompressor = /*::<X:{workMul:number,time:number,eventId:string,payTo:str
             });
             return ret;
         },
-        insert: (x /*:X*/) => cctx.insertWarn(x, (_) => { }),
+        insert: (x /*:AnnsEvent_t*/) => cctx.insertWarn(x, (_) => { }),
         each: (x) => tree.each(x),
         reach: (x) => tree.reach(x),
         min: () => tree.min(),
