@@ -739,7 +739,7 @@ const getEffectiveWork0 = (
     annCount /*:BigInt_t*/
 ) /*:BigInt_t*/ => {
     let out = work ** BigInt(3);
-    out >>>= BigInt(10);
+    out >>= BigInt(10);
     out /= annWork;
     out /= (annCount * annCount);
     return out;
