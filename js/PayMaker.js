@@ -78,19 +78,18 @@ type BinTree_t<X> = {
     reach: ((x:X) => ?bool)=>void,
     size: ()=>number,
 };
-
 export type PayMaker_Result_t = {|
     warn: Array<string>,
     error: Array<string>,
     totalKbps: number,
-    blkPayoutTimeWindow: number,
-    annPayoutTimeWindow: number,
+    blkPayoutWarmupPeriod: number,
+    annPayoutWarmupPeriod: number,
     latestPayout: number,
     annMinerStats: {
         [string]: {|
             lastSeen: number,
             kbps: number,
-            power: number,
+            warmupPercent: number,
             hashesPerSecond: number,
         |},
     },
@@ -101,6 +100,12 @@ export type PayMaker_Result_t = {|
         |},
     },
     result: { [string]: number },
+|};
+type PayoutAnnStat_t = {|
+    accepted: number,
+    firstSeen: number,
+    lastSeen: number,
+    secondNewestCredit: ?AnnCompressorCredit_t,
 |};
 type AnnCompressorCredit_t = {
     credit: number,
@@ -469,8 +474,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
     // Now we do announcements
     remaining = 1 - ctx.mut.cfg.blockPayoutFraction;
     let earliestAnnPayout = Infinity;
-    const payoutAnns = {};
-    const recentStats /*:{[string]: { time: number, credit: AnnCompressorCredit_t } }*/ = {};
+    const payoutAnnStats /*:{[string]: PayoutAnnStat_t }*/ = {};
     ctx.annCompressor.reach((a) => {
         if (a.time > maxtime) { return; }
         // console.error('ann');
@@ -481,8 +485,19 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
             earliestAnnPayout = a.time;
             let toPay = credit.credit / ctx.mut.cfg.pplnsAnnConstantX;
             if (toPay >= remaining) { toPay = remaining; }
-            if (!recentStats[payTo]) { recentStats[payTo] = { time: a.time, credit }; }
-            payoutAnns[payTo] = (payoutAnns[payTo] || 0) + credit.accepted;
+            let ps = payoutAnnStats[payTo];
+            if (!ps) {
+                ps = payoutAnnStats[payTo] = {
+                    accepted: 0,
+                    firstSeen: 0,
+                    lastSeen: a.time,
+                    secondNewestCredit: null
+                };
+            } else if (ps.secondNewestCredit === null) {
+                ps.secondNewestCredit = credit;
+            }
+            ps.firstSeen = a.time;
+            ps.accepted += credit.accepted;
             payouts[payTo] = (payouts[payTo] || 0) + toPay;
             remaining -= toPay;
             if (remaining === 0) { return false; }
@@ -505,22 +520,26 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
 
     const annMinerStats = {};
     let totalKbps = 0;
-    for (const payTo in recentStats) {
-        const rspt = recentStats[payTo];
-        const apms = rspt.credit.accepted / ctx.annCompressor.timespanMs;
-        const hpms = rspt.credit.credit / ctx.annCompressor.timespanMs;
-        const totalTimeMs = latestPayout - earliestAnnPayout;
-        const apmsEver = payoutAnns[payTo] / totalTimeMs;
+    for (const payTo in payoutAnnStats) {
+        const pas = payoutAnnStats[payTo];
+        const snc = pas.secondNewestCredit;
+        if (!snc) { continue; }
+        const apms = snc.accepted / ctx.annCompressor.timespanMs;
         const kbps = apms * 1000 * 8;
+
+        const hpms = snc.credit / ctx.annCompressor.timespanMs;
+        const minerLifetime = pas.lastSeen - pas.firstSeen;
+        const timespan = pas.lastSeen - earliestAnnPayout;
+
         totalKbps += kbps;
         //const diff = ctx.
-        let power = apms / apmsEver * 100;
-        //if (power > 95) { power = 100; }
+        let warmupPercent = minerLifetime / timespan;
+        //if (warmupPercent > 95) { warmupPercent = 100; }
         annMinerStats[payTo] = {
             kbps,
-            power,
+            warmupPercent,
             hashesPerSecond: hpms * 1000,
-            lastSeen: rspt.time,
+            lastSeen: pas.lastSeen,
         }
     }
 
@@ -538,8 +557,8 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         error: [],
         warn: warn,
         totalKbps,
-        blkPayoutTimeWindow: latestPayout - earliestBlockPayout,
-        annPayoutTimeWindow: latestPayout - earliestAnnPayout,
+        blkPayoutWarmupPeriod: latestPayout - earliestBlockPayout,
+        annPayoutWarmupPeriod: latestPayout - earliestAnnPayout,
         latestPayout: latestPayout,
         annMinerStats,
         blkMinerStats,
