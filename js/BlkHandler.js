@@ -277,7 +277,7 @@ const onSubmit = (ctx, req, res) => {
         if (!currentWork) { return; }
         const shareTarget = currentWork.shareTarget;
         const now = +new Date();
-        if (submitRet === 'RESUBMIT_AS_BLOCK' && now - ctx.mut.lastSubmission > 10000) {
+        if (submitRet === 'RESUBMIT_AS_BLOCK' && now - ctx.mut.lastSubmission > 120000) {
             ctx.mut.lastSubmission = now;
             if (!blockTemplate) { throw new Error(); }
 
