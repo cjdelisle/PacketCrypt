@@ -19,10 +19,10 @@ const Bech32 = require('bech32');
 const Agent = require('agentkeepalive');
 
 const keepaliveAgent = new Agent({
-  maxSockets: 500,
-  maxFreeSockets: 10,
-  timeout: 60000, // 60 seconds
-  freeSocketTimeout: 30000, // 30 seconds
+    maxSockets: 500,
+    maxFreeSockets: 10,
+    timeout: 60000, // 60 seconds
+    freeSocketTimeout: 30000, // 30 seconds
 });
 
 /*::
@@ -37,10 +37,14 @@ export type Util_LongPollServer_t = {
     onFileUpdate: ((string)=>void)=>void
 };
 export type Util_Mutex_t = ((()=>void)=>void)=>void;
+export type Util_KeyPair_t = {
+    secretKey: Uint8Array,
+    publicKey: Uint8Array,
+}
 */
 
-const checkMkdir = module.exports.checkMkdir = (path /*:string*/, cb /*:()=>void*/) => {
-    if (path.endsWith('/')) { path = path.slice(0,-1); }
+const checkMkdir = (path /*:string*/, cb /*:()=>void*/) => {
+    if (path.endsWith('/')) { path = path.slice(0, -1); }
     Fs.stat(path, (err, _st) => {
         if (err && err.code === 'ENOENT') {
             return void checkMkdir(path.replace(/\/[^\/]+$/, ''), () => {
@@ -55,8 +59,9 @@ const checkMkdir = module.exports.checkMkdir = (path /*:string*/, cb /*:()=>void
         cb();
     });
 };
+module.exports.checkMkdir = checkMkdir;
 
-const clearDir = module.exports.clearDir = (path /*:string*/, cb /*:()=>void*/) => {
+const clearDir = (path /*:string*/, cb /*:()=>void*/) => {
     Fs.readdir(path, (err, files) => {
         if (err) {
             if (err.code === 'ENOENT') { return void cb(); }
@@ -90,12 +95,13 @@ const clearDir = module.exports.clearDir = (path /*:string*/, cb /*:()=>void*/) 
         });
     });
 };
+module.exports.clearDir = clearDir;
 
 module.exports.bufFromHex = (
     x /*:string*/
-) /*:Buffer*/ => ( Buffer.from(x, 'hex') );
+) /*:Buffer*/ => (Buffer.from(x, 'hex'));
 
-const once = module.exports.once = /*::<F:Function>*/(f /*:F*/) /*:F*/ => {
+module.exports.once = /*::<F:Function>*/(f /*:F*/) /*:F*/ => {
     let guard = false;
     return ((function () {
         if (guard) { return; }
@@ -108,7 +114,7 @@ const MAX_FAST_RECONNECTS = 10;
 const FAST_RECONNECT_MS = 1000;
 const RECONNECT_MS = 10000;
 
-const httpGet = module.exports.httpGet = (
+const httpGet = (
     url /*:string*/,
     cb /*:(?Error|{statusCode:number}, ?Buffer|string)=>?bool*/
 ) => {
@@ -127,7 +133,7 @@ const httpGet = module.exports.httpGet = (
             ended = true;
             if (cb(err, res) === true) {
                 const reconnectMs = (reconnects > MAX_FAST_RECONNECTS) ?
-                RECONNECT_MS : FAST_RECONNECT_MS;
+                    RECONNECT_MS : FAST_RECONNECT_MS;
                 setTimeout(again, reconnectMs);
                 console.error("Reconnect to [" + url + "] in [" + reconnectMs + "]ms");
                 reconnects++;
@@ -145,7 +151,7 @@ const httpGet = module.exports.httpGet = (
                 res.on('data', (d) => { data.push(d); });
                 res.on('error', (e) => { cb1(e); });
                 res.on('end', () => {
-                    if (typeof(data[0]) === 'string') {
+                    if (typeof (data[0]) === 'string') {
                         return cb1(undefined, data.join(''));
                     }
                     return cb1(undefined, Buffer.concat(data));
@@ -174,35 +180,38 @@ const httpGet = module.exports.httpGet = (
     };
     again();
 };
+module.exports.httpGet = httpGet;
 
-const httpGetBin = module.exports.httpGetBin = (
+const httpGetBin = (
     url /*:string*/,
     cb /*:(?Error|{statusCode:number}, ?Buffer)=>?bool*/
-) => {
+) /*:void*/ => {
     return httpGet(url, (err, buf) => {
         if (err) { return cb(err); }
-        if (typeof(buf) === 'string') { return cb(undefined, Buffer.from(buf, 'utf8')); }
+        if (typeof (buf) === 'string') { return cb(undefined, Buffer.from(buf, 'utf8')); }
         return cb(undefined, buf);
     });
 };
+module.exports.httpGetBin = httpGetBin;
 
-const httpGetStr = module.exports.httpGetStr = (
+module.exports.httpGetStr = (
     url /*:string*/,
     cb /*:(?Error|{statusCode:number}, ?string)=>?bool*/
-) => {
+) /*:void*/ => {
     return httpGet(url, (err, buf) => {
         if (!buf) { return cb(err); }
-        if (typeof(buf) === 'string') { return cb(undefined, buf); }
+        if (typeof (buf) === 'string') { return cb(undefined, buf); }
         return cb(undefined, buf.toString('utf8'));
     });
 };
 
-const listRemove = module.exports.listRemove = ((list, item) => {
+const listRemove = /*::<T>*/(list /*:Array<T>*/, item /*:T*/) /*:bool*/ => {
     const idx = list.indexOf(item);
     if (idx < 0) { return false; }
     list.splice(idx, 1);
     return true;
-} /*:<T>(Array<any>, T)=>bool*/);
+};
+module.exports.listRemove = listRemove;
 
 const emptyResponse = (resp) => {
     resp.statusCode = 300;
@@ -258,11 +267,11 @@ module.exports.longPollServer = (dir /*:string*/) /*:Util_LongPollServer_t*/ => 
     };
 };
 
-const httpPost = module.exports.httpPost = (
+const httpPost = (
     url /*:string*/,
     headers /*:{ [key: string] : mixed, ... }*/,
     cb /*:(IncomingMessage)=>void*/
-) => {
+) /*:Http.ClientRequest*/ => {
     let hostname;
     let port;
     let path;
@@ -284,8 +293,9 @@ const httpPost = module.exports.httpPost = (
         agent: keepaliveAgent
     }, cb);
 };
+module.exports.httpPost = httpPost;
 
-const createMutex = module.exports.createMutex = () /*:Util_Mutex_t*/ => {
+module.exports.createMutex = () /*:Util_Mutex_t*/ => {
     let locked = false;
     let to;
     const withLock = (f /*:(()=>void)=>void*/) => {
@@ -305,8 +315,8 @@ const createMutex = module.exports.createMutex = () /*:Util_Mutex_t*/ => {
     return withLock;
 };
 
-const isValidPayTo = module.exports.isValidPayTo = (payTo /*:string*/) /*bool*/ => {
-    if (typeof(payTo) !== 'string') { return false; }
+const isValidPayTo = (payTo /*:string*/) /*:bool*/ => {
+    if (typeof (payTo) !== 'string') { return false; }
     if (payTo.length > 64) { return false; }
     if (!payTo.indexOf('pkt1')) {
         // segwit addr
@@ -339,19 +349,21 @@ const isValidPayTo = module.exports.isValidPayTo = (payTo /*:string*/) /*bool*/ 
     }
     return false;
 };
+module.exports.isValidPayTo = isValidPayTo;
 
 if (!isValidPayTo('p7A4miQjxjmLPfbGyqRqyqTb5be9p527zS')) { throw new Error(); }
 
-const badMethod = module.exports.badMethod = (
+module.exports.badMethod = (
     meth /*:string*/,
     req /*:IncomingMessage*/,
     res /*:ServerResponse*/
-) => {
+) /*:bool*/ => {
     if (req.method !== meth) {
         res.statusCode = 405;
         res.end();
         return true;
     }
+    return false;
 };
 
 module.exports.deleteResults = (dir /*:string*/, minHeight /*:number*/, regex /*:RegExp*/) => {
@@ -393,7 +405,7 @@ const dblToCompact = (d) => {
 
 // work = 2**256 / (target + 1)
 const TWO_TO_THE_256 = 1.157920892373162e+77;
-const workForTar = (target) => ( TWO_TO_THE_256 / (target + 1) );
+const workForTar = (target) => (TWO_TO_THE_256 / (target + 1));
 const tarForWork = (work) => {
     if (work <= 0) {
         return TWO_TO_THE_256;
@@ -401,20 +413,20 @@ const tarForWork = (work) => {
     return (TWO_TO_THE_256 - work) / work;
 };
 
-const annWorkToTarget = module.exports.annWorkToTarget = (work /*:number*/) => {
-  return dblToCompact(tarForWork(work));
+module.exports.annWorkToTarget = (work /*:number*/) /*:number*/ => {
+    return dblToCompact(tarForWork(work));
 };
 
-const workMultipleToTarget = module.exports.workMultipleToTarget = (work /*:number*/) => {
+module.exports.workMultipleToTarget = (work /*:number*/) /*:number*/ => {
     const tar = tarForWork(work * 4096);
     return dblToCompact(tar);
 };
 
-const getWorkMultiple = module.exports.getWorkMultiple = (target /*:number*/) => {
+module.exports.getWorkMultiple = (target /*:number*/) /*:number*/ => {
     return workForTar(compactToDbl(target)) / 4096;
 };
 
-const isWorkUselessExponential = module.exports.isWorkUselessExponential = (target /*:number*/, age /*:number*/) => {
+const isWorkUselessExponential = (target /*:number*/, age /*:number*/) /*:bool*/ => {
     if (age < 3) { return false; }
     age -= 3;
     const tar = compactToDbl(target);
@@ -422,6 +434,7 @@ const isWorkUselessExponential = module.exports.isWorkUselessExponential = (targ
     const degradedWork = work / Math.pow(2, age);
     return degradedWork < 0.25; // lets be safe and check that it's less than 0.25 rather than less than 1.
 };
+module.exports.isWorkUselessExponential = isWorkUselessExponential;
 
 // readdir
 // open each file, check offsets 8 (work bits) and 12 (parent block height)
@@ -490,7 +503,7 @@ module.exports.deleteUselessAnns = (
     });
 };
 
-const mkVarInt = module.exports.mkVarInt = (num /*:number*/) => {
+const mkVarInt = (num /*:number*/) /*:Buffer*/ => {
     if (num <= 0xfc) { return Buffer.from([num]); }
     if (num <= 0xffff) {
         const b = Buffer.alloc(3);
@@ -506,18 +519,20 @@ const mkVarInt = module.exports.mkVarInt = (num /*:number*/) => {
     }
     throw new Error("64 bit varint unimplemented");
 };
+module.exports.mkVarInt = mkVarInt;
 
-const parseVarInt = module.exports.parseVarInt = (buf /*:Buffer*/) /*:[number,number]*/ => {
+const parseVarInt = (buf /*:Buffer*/) /*:[number,number]*/ => {
     if (buf.length < 1) { throw new Error("ran out of data"); }
-    if (buf[0] <= 0xfc) { return [ buf[0], 1 ]; }
+    if (buf[0] <= 0xfc) { return [buf[0], 1]; }
     if (buf.length < 3) { throw new Error("ran out of data"); }
-    if (buf[0] <= 0xfd) { return [ buf.readUInt16LE(1), 3 ]; }
+    if (buf[0] <= 0xfd) { return [buf.readUInt16LE(1), 3]; }
     if (buf.length < 5) { throw new Error("ran out of data"); }
-    if (buf[0] <= 0xfe) { return [ buf.readUInt32LE(1), 5 ]; }
+    if (buf[0] <= 0xfe) { return [buf.readUInt32LE(1), 5]; }
     throw new Error("64 bit varint is unimplemented");
 };
+module.exports.parseVarInt = parseVarInt;
 
-const splitVarInt = module.exports.splitVarInt = (buf /*:Buffer*/) /*:Array<Buffer>*/ => {
+const splitVarInt = (buf /*:Buffer*/) /*:Array<Buffer>*/ => {
     const out = [];
     while (buf.length) {
         const x = parseVarInt(buf);
@@ -527,8 +542,9 @@ const splitVarInt = module.exports.splitVarInt = (buf /*:Buffer*/) /*:Array<Buff
     }
     return out;
 };
+module.exports.splitVarInt = splitVarInt;
 
-const joinVarInt = module.exports.joinVarInt = (bufs /*:Array<Buffer>*/) /*:Buffer*/ => {
+module.exports.joinVarInt = (bufs /*:Array<Buffer>*/) /*:Buffer*/ => {
     const all = [];
     bufs.forEach((b) => {
         all.push(mkVarInt(b.length));
@@ -537,7 +553,7 @@ const joinVarInt = module.exports.joinVarInt = (bufs /*:Array<Buffer>*/) /*:Buff
     return Buffer.concat(all);
 };
 
-const getKeypair = module.exports.getKeypair = (rootCfg /*:Config_t*/, height /*:number*/) => {
+module.exports.getKeypair = (rootCfg /*:Config_t*/, height /*:number*/) /*:?Util_KeyPair_t*/ => {
     if (!rootCfg.privateSeed) { return; }
     const h = Buffer.alloc(4);
     h.writeUInt32LE(height, 0);
@@ -546,12 +562,13 @@ const getKeypair = module.exports.getKeypair = (rootCfg /*:Config_t*/, height /*
     return Tweetnacl.sign.keyPair.fromSeed(s);
 };
 
-const b2hash32 = module.exports.b2hash32 = (content /*:Buffer*/) => {
+const b2hash32 = (content /*:Buffer*/) /*:Buffer*/ => {
     return Blake2b(32).update(content).digest(Buffer.alloc(32));
 };
+module.exports.b2hash32 = b2hash32;
 
 const Util_log2ceil = (x) => Math.ceil(Math.log2(x));
-const annComputeContentHash = module.exports.annComputeContentHash = (buf /*:Buffer*/) => {
+const annComputeContentHash = (buf /*:Buffer*/) /*:Buffer*/ => {
     if (buf.length < 32) {
         const out = Buffer.alloc(32);
         buf.copy(out);
@@ -564,17 +581,18 @@ const annComputeContentHash = module.exports.annComputeContentHash = (buf /*:Buf
     } else {
         const halfLen = 1 << (Util_log2ceil(buf.length) - 1);
         b = Buffer.concat([
-            annComputeContentHash(buf.slice(0,halfLen)),
+            annComputeContentHash(buf.slice(0, halfLen)),
             annComputeContentHash(buf.slice(halfLen))
         ]);
     }
     return b2hash32(b);
 };
+module.exports.annComputeContentHash = annComputeContentHash;
 
 module.exports.getShareId = (header /*:Buffer*/, proof /*:Buffer*/) /*:Buffer*/ => {
     const hh = b2hash32(header);
     hh.writeUInt32LE((hh.readUInt32LE(0) ^ proof.readUInt32LE(0)) >>> 0, 0);
-    return hh.slice(0,16);
+    return hh.slice(0, 16);
 };
 
 module.exports.openPayLog = (path /*:string*/, cb /*:(WriteStream)=>void*/) => {
@@ -657,7 +675,7 @@ module.exports.uploadPayLogs = (
             }).nThen((w) => {
                 if (failed) { return; }
                 if (fileBuf.length > 0) {
-                    const id = Crypto.createHash('sha256').update(fileBuf).digest('hex').slice(0,32);
+                    const id = Crypto.createHash('sha256').update(fileBuf).digest('hex').slice(0, 32);
                     let c;
                     try {
                         c = JSON.parse(reply);
@@ -701,9 +719,9 @@ module.exports.uploadPayLogs = (
     });
 };
 
-const normalize = module.exports.normalize = (
-  obj /*:{[string]:number}*/,
-  desiredSum /*:number*/
+module.exports.normalize = (
+    obj /*:{[string]:number}*/,
+    desiredSum /*:number*/
 ) => {
     let sum = 0;
     Object.keys(obj).forEach((k) => { sum += obj[k]; });
@@ -712,4 +730,5 @@ const normalize = module.exports.normalize = (
     Object.keys(obj).forEach((k) => { obj[k] *= multiplier; });
 };
 
+// $FlowFixMe I want to
 Object.freeze(module.exports);

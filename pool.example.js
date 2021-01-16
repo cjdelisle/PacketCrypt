@@ -9,14 +9,12 @@ const Master = require('./js/Master.js');
 const PayMaker = require('./js/PayMaker.js');
 const AnnHandler = require('./js/AnnHandler.js');
 const BlkHandler = require('./js/BlkHandler.js');
-const Tracker = require('./js/Tracker.js');
 const Util = require('./js/Util.js');
 
 /*::
 import type { Master_Config_t } from './js/Master.js'
 import type { AnnHandler_Config_t } from './js/AnnHandler.js'
 import type { BlkHandler_Config_t } from './js/BlkHandler.js'
-import type { Tracker_Config_t } from './js/Tracker.js'
 import type { Config_t } from './js/Config.js'
 import type { PayMaker_Result_t } from './js/PayMaker.js'
 */
@@ -108,7 +106,7 @@ config.master = {
     // Minimum work for an announcement
     // This number is effectively a bandwidth divisor, every time you
     // double this number you will reduce your bandwidth by a factor of two.
-    annMinWork:   Util.annWorkToTarget(128),
+    annMinWork: Util.annWorkToTarget(128),
 
     // Average number of shares per block, reducing this number will reduce
     // load on your block handlers, but increasing it will allow payment
@@ -159,14 +157,14 @@ config.payMaker = {
     updateCycle: 120,
 
     // How many seconds backward to keep history in memory
-    historyDepth: 60*60*24*30,
+    historyDepth: 60 * 60 * 24 * 30,
 
     // Maximum number of simultanious connections to accept before sending 500 errors
     maxConnections: 200,
 
     annCompressor: {
         // Store data in 1 minute aggregations
-        timespanMs: 1000*60,
+        timespanMs: 1000 * 60,
 
         // Allow data to be submitted to any of the last 10 aggregations
         slotsToKeepEvents: 10,
@@ -205,9 +203,6 @@ const main = (argv, config) => {
     if (argv.indexOf('--payMaker') > -1) {
         return void PayMaker.create(config.payMaker);
     }
-    if (argv.indexOf('--tracker') > -1) {
-        return void Tracker.create(config.tracker);
-    }
     for (let i = 0; i < config.annHandlers.length; i++) {
         if (argv.indexOf('--ann' + i) === -1) { continue; }
         return void AnnHandler.create(config.annHandlers[i]);
@@ -220,7 +215,6 @@ const main = (argv, config) => {
     console.log("Usage:");
     console.log("    --master     # launch the master node");
     console.log("    --payMaker   # launch the paymaker on the master node server");
-    console.log("    --tracker    # launch a tracker which follows a remote master");
     console.log();
     console.log("    --ann<n>     # launch an announcement validator node");
     console.log("    --blk<n>     # launch a block validator node");

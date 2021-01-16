@@ -86,7 +86,7 @@ export type Protocol_BlockInfo_t = {|
         "difficulty": number,
         "previousblockhash": string,
     |},
-    sigKey?: string,
+    sigKey: ?string,
 |};
 
 */
@@ -100,7 +100,7 @@ module.exports.SOFT_VERSION = 1;
 // Ordered least preferential to most preferential
 // These are just the versions which this implementation is *capable* of mining
 // the versions which the pool will accept are defined in pool.example.js
-module.exports.SUPPORTED_ANN_VERSIONS = [0,1];
+module.exports.SUPPORTED_ANN_VERSIONS = [0, 1];
 
 module.exports.COINBASE_COMMIT_LEN = 48;
 
@@ -121,7 +121,7 @@ const bufferFromInt = (i) => {
     return b;
 };
 
-const workEncode = module.exports.workEncode = (work /*:Protocol_Work_t*/) /*:Buffer*/ => {
+const workEncode = (work /*:Protocol_Work_t*/) /*:Buffer*/ => {
     const height = bufferFromInt(work.height);
     const cnwlen = bufferFromInt(work.coinbase_no_witness.length);
     const shareTarget = bufferFromInt(work.shareTarget);
@@ -138,11 +138,12 @@ const workEncode = module.exports.workEncode = (work /*:Protocol_Work_t*/) /*:Bu
         merkles
     ]);
 };
+module.exports.workEncode = workEncode;
 
 // 80 + 32 + 4 + 4 + 4 + 1024 + 1024
 module.exports.workFromRawBlockTemplate = (
     x /*:Protocol_RawBlockTemplate_t*/,
-    signingKey /*:?Buffer*/,
+    signingKey /*:?Uint8Array*/,
     shareTarget /*:number*/,
     annTarget /*:number*/
 ) /*:Protocol_Work_t*/ => {
@@ -153,8 +154,8 @@ module.exports.workFromRawBlockTemplate = (
         shareTarget: shareTarget,
         annTarget: annTarget,
         header: header,
-        signingKey: signingKey || Buffer.alloc(32, 0),
-        lastHash: header.slice(4, 4+32),
+        signingKey: signingKey ? Buffer.from(signingKey) : Buffer.alloc(32, 0),
+        lastHash: header.slice(4, 4 + 32),
         proof: x.merklebranch.map(Util.bufFromHex),
         binary: Buffer.alloc(0),
     };
@@ -162,7 +163,7 @@ module.exports.workFromRawBlockTemplate = (
     return Object.freeze(out);
 };
 
-const workDecode = module.exports.workDecode = (work /*:Buffer*/) /*:Protocol_Work_t*/ => {
+const workDecode = (work /*:Buffer*/) /*:Protocol_Work_t*/ => {
     let i = 0;
     const header = work.slice(i, i += 80);
     const signingKey = work.slice(i, i += 32);
@@ -174,7 +175,7 @@ const workDecode = module.exports.workDecode = (work /*:Buffer*/) /*:Protocol_Wo
     const merkles = work.slice(i);
     const proof = [];
     for (let x = 0; x < merkles.length; x += 32) {
-        proof.push(merkles.slice(x, x+32));
+        proof.push(merkles.slice(x, x + 32));
     }
     return Object.freeze({
         header: header,
@@ -185,13 +186,15 @@ const workDecode = module.exports.workDecode = (work /*:Buffer*/) /*:Protocol_Wo
         coinbase_no_witness: coinbase_no_witness,
         proof: proof,
         binary: work,
-        lastHash: header.slice(4,36)
+        lastHash: header.slice(4, 36)
     });
 };
+module.exports.workDecode = workDecode;
 
-const BLOCK_TEMPLATE_VERSION = module.exports.BLOCK_TEMPLATE_VERSION = 1;
+const BLOCK_TEMPLATE_VERSION = 1;
+module.exports.BLOCK_TEMPLATE_VERSION = BLOCK_TEMPLATE_VERSION;
 
-module.exports.blockTemplateEncode = (rbt /*:Protocol_RawBlockTemplate_t*/) => {
+module.exports.blockTemplateEncode = (rbt /*:Protocol_RawBlockTemplate_t*/) /*:Buffer*/ => {
     return Util.joinVarInt([
         Util.mkVarInt(BLOCK_TEMPLATE_VERSION),
         Util.mkVarInt(rbt.height),
@@ -261,8 +264,8 @@ export type Protocol_AnnResult_t = {
     payTo: string,
 };
 */
-module.exports.annPostEncode = (post /*:Protocol_AnnPost_t*/) => {
-    const out = Buffer.alloc(4+1+1+2+32+32+4+4+64);
+module.exports.annPostEncode = (post /*:Protocol_AnnPost_t*/) /*:Buffer*/ => {
+    const out = Buffer.alloc(4 + 1 + 1 + 2 + 32 + 32 + 4 + 4 + 64);
     let i = 0;
     if (post.version) { out.writeUInt32LE(post.version, i); } i += 4;
     out[i++] = post.hashNum;
@@ -303,18 +306,20 @@ export type Protocol_ShareFile_t = {
     share: Protocol_Share_t
 };
 */
-const shareEncode = module.exports.shareEncode = (share /*:Protocol_Share_t*/) => {
-    return Buffer.concat([ share.coinbaseCommit, share.blockHeader, share.packetCryptProof ]);
+const shareEncode = (share /*:Protocol_Share_t*/) /*:Buffer*/ => {
+    return Buffer.concat([share.coinbaseCommit, share.blockHeader, share.packetCryptProof]);
 };
+module.exports.shareEncode = shareEncode;
 
-const shareDecode = module.exports.shareDecode = (buf /*:Buffer*/) /*:Protocol_Share_t*/ => {
+const shareDecode = (buf /*:Buffer*/) /*:Protocol_Share_t*/ => {
     const out = {};
     let i = 0;
-    out.coinbaseCommit = buf.slice(i, (i += 32+8+4+4));
+    out.coinbaseCommit = buf.slice(i, (i += 32 + 8 + 4 + 4));
     out.blockHeader = buf.slice(i, (i += 80));
     out.packetCryptProof = buf.slice(i);
     return out;
 };
+module.exports.shareDecode = shareDecode;
 
 module.exports.shareFileDecode = (buf /*:Buffer*/) /*:Protocol_ShareFile_t*/ => {
     const out = {};
@@ -333,9 +338,9 @@ module.exports.shareFileDecode = (buf /*:Buffer*/) /*:Protocol_ShareFile_t*/ => 
     return out;
 };
 
-module.exports.shareFileEncode = (share /*:Protocol_ShareFile_t*/) => {
+module.exports.shareFileEncode = (share /*:Protocol_ShareFile_t*/) /*:Buffer*/ => {
     const shareBuf = shareEncode(share.share);
-    const msg = Buffer.alloc(4+1+1+2+(32*share.hashes.length)+64+share.work.binary.length+shareBuf.length);
+    const msg = Buffer.alloc(4 + 1 + 1 + 2 + (32 * share.hashes.length) + 64 + share.work.binary.length + shareBuf.length);
     let i = 0;
     msg.writeUInt32LE(0, i); i += 4;
     msg[i++] = share.hashNum;
@@ -345,11 +350,12 @@ module.exports.shareFileEncode = (share /*:Protocol_ShareFile_t*/) => {
         share.hashes[x].copy(msg, i);
         i += 32;
     }
-    Buffer.from(share.payTo.slice(0,64), 'utf8').copy(msg, i); i += 64;
+    Buffer.from(share.payTo.slice(0, 64), 'utf8').copy(msg, i); i += 64;
     share.work.binary.copy(msg, i); i += share.work.binary.length;
     shareBuf.copy(msg, i); i += shareBuf.length;
     if (i !== msg.length) { throw new Error(i + ' !== ' + msg.length); }
     return msg;
 };
 
+// $FlowFixMe: I want to do this
 Object.freeze(module.exports);

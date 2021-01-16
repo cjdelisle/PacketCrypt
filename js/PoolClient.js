@@ -6,7 +6,8 @@
  */
 /*@flow*/
 
-const EventEmitter = require('events').EventEmitter;
+const Events = require('events');
+const EventEmitter = Events.EventEmitter;
 
 const Protocol = require('./Protocol.js');
 const Util = require('./Util.js');
@@ -59,7 +60,7 @@ const DISCONNECTED_MS = 15 * 1000;
 const CONNECTION_CHECKER_PERIOD_MS = 5 * 1000;
 
 const startLongPoll2 = (pool /*:PoolClient_t*/) => {
-    const url = workUrl2(pool, pool.currentHeight+1);
+    const url = workUrl2(pool, pool.currentHeight + 1);
     Util.httpGetBin(url, (err, res) => {
         if (!res) {
             if (err && (err /*:any*/).code === 'ECONNRESET') {
@@ -97,13 +98,13 @@ const connectionChecker = (pool, first) => {
             return true;
         }
         const config /*:Protocol_PcConfigJson_t*/ = JSON.parse(data);
-        const v = typeof(config.version) === 'undefined' ? undefined : config.version;
+        const v = typeof (config.version) === 'undefined' ? undefined : config.version;
         if (v !== Protocol.VERSION) {
             console.error("Pool version is [" + String(v) + "] and this miner requires version [" +
                 Protocol.VERSION + "] please upgrade");
             process.exit(100);
         }
-        const sv = typeof(config.softVersion) === 'undefined' ? undefined : config.softVersion;
+        const sv = typeof (config.softVersion) === 'undefined' ? undefined : config.softVersion;
         if (sv && sv > Protocol.SOFT_VERSION) {
             console.error("Pool soft version is [" + String(sv) + "], upgrading is recommended");
         }

@@ -61,7 +61,7 @@ const parentNumInRange = (ctx, num) => {
 };
 
 const COMMIT_PATTERN = Buffer.from(
-    "6a3009f91102fcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfc"+
+    "6a3009f91102fcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfc" +
     "fcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfc", 'hex');
 const COMMIT_PATTERN_OS = 2;
 
@@ -122,7 +122,7 @@ const onSubmit = (ctx, req, res) => {
             if (failed) { return; }
             if (data.length === 0) {
                 errorEnd(400, 'no content');
-            } else if (typeof(data[0]) === 'string') {
+            } else if (typeof (data[0]) === 'string') {
                 errorEnd(400, 'content not binary');
             } else {
                 rawUpload = Buffer.concat(data);
@@ -145,7 +145,7 @@ const onSubmit = (ctx, req, res) => {
         }
         const proofLen = Util.parseVarInt(headerAndProof.slice(81));
         const proof = headerAndProof.slice(81 + proofLen[1], 81 + proofLen[1] + proofLen[0]);
-        shareId = Util.getShareId(headerAndProof.slice(0,80), proof);
+        shareId = Util.getShareId(headerAndProof.slice(0, 80), proof);
 
         currentWork = ctx.poolClient.work;
         if (!currentWork) {
@@ -154,8 +154,8 @@ const onSubmit = (ctx, req, res) => {
 
         // If the previous block hash doesn't match that of the current work, then the
         // share is for the wrong work (maybe it's too old?)
-        const sharePrevHash = headerAndProof.slice(4,36);
-        const currentWorkPrevHash = currentWork.header.slice(4,36);
+        const sharePrevHash = headerAndProof.slice(4, 36);
+        const currentWorkPrevHash = currentWork.header.slice(4, 36);
         if (currentWorkPrevHash.compare(sharePrevHash)) {
             return void errorEnd(400, "Share is for wrong work, expecting previous hash [" +
                 currentWorkPrevHash.toString('hex') + "] but got [" +
@@ -165,9 +165,9 @@ const onSubmit = (ctx, req, res) => {
         // Swap the header from the current work over top of the header in the hap
         do {
             const header = Buffer.from(currentWork.header);
-            const merkleRoot = headerAndProof.slice(36,68);
+            const merkleRoot = headerAndProof.slice(36, 68);
             merkleRoot.copy(header, 36);
-            const nonce = headerAndProof.slice(76,80);
+            const nonce = headerAndProof.slice(76, 80);
             nonce.copy(header, 76);
             header.copy(headerAndProof);
         } while (0);
@@ -181,7 +181,7 @@ const onSubmit = (ctx, req, res) => {
         }));
 
         let nt = nThen;
-        [0,1,2,3].forEach((num) => {
+        [0, 1, 2, 3].forEach((num) => {
             if (failed) { return; }
             const os = 4 + (1024 * num);
             const ann = proof.slice(os, os + 1024);
@@ -204,12 +204,16 @@ const onSubmit = (ctx, req, res) => {
                     errorEnd(400, `announcement [${num}] needs signing key ` +
                         `[${sigKey.toString('hex')}] but no key is configured`);
                     return;
-                } else if (Buffer.compare(keys.publicKey, sigKey)) {
-                    errorEnd(400, 'announcement [' + num + '] invalid signing key ' +
-                        'want [' + keys.publicKey.toString('hex') + '] got [' +
-                        sigKey.toString('hex') + ']');
-                    return;
+                } else {
+                    const pubKey = Buffer.from(keys.publicKey);
+                    if (Buffer.compare(pubKey, sigKey)) {
+                        errorEnd(400, 'announcement [' + num + '] invalid signing key ' +
+                            'want [' + pubKey.toString('hex') + '] got [' +
+                            sigKey.toString('hex') + ']');
+                        return;
+                    }
                 }
+
                 signatures.push(Tweetnacl.sign.detached(ann, keys.secretKey));
             }
 
@@ -296,7 +300,7 @@ const onSubmit = (ctx, req, res) => {
                     }
                 } else {
                     const headerHash = Crypto.createHash('sha256').update(
-                        Crypto.createHash('sha256').update(headerAndProof.slice(0,80)).digest()
+                        Crypto.createHash('sha256').update(headerAndProof.slice(0, 80)).digest()
                     ).digest().reverse().toString('hex');
                     const result = {
                         result: {
@@ -349,7 +353,7 @@ const onSubmit = (ctx, req, res) => {
 };
 
 const maxConnections = (ctx) => {
-  return ctx.mut.cfg.maxConnections || 50;
+    return ctx.mut.cfg.maxConnections || 50;
 };
 
 const onReq = (ctx, req, res) => {
@@ -418,7 +422,7 @@ module.exports.create = (cfg /*:BlkHandler_Config_t*/) => {
                     ctx.poolClient.config.paymakerUrl + '/events',
                     ctx.mut.cfg.root.paymakerHttpPasswd,
                     false,
-                    ()=>{}
+                    () => { }
                 );
             });
         }, 60000);
@@ -463,7 +467,7 @@ module.exports.create = (cfg /*:BlkHandler_Config_t*/) => {
                 height: height,
                 difficulty: diff,
                 time: +new Date(),
-                eventId: hash.slice(0,32)
+                eventId: hash.slice(0, 32)
             });
             console.log(out);
             if (!ctx.mut.logStream) { throw new Error(); }

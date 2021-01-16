@@ -31,7 +31,7 @@
     "write-file-atomic": "^2.4.3"
   },
   "devDependencies": {
-    "flow-bin": "^0.106.2",
+    "flow-bin": "^0.142.0",
     "jshint": "^2.11.1"
   },
   "license": "(LGPL-2.1-only OR LGPL-3.0-only)"

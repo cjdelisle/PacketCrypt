@@ -68,7 +68,7 @@ const headers = (res) => {
 };
 
 const computeShareTar = (blockTarget /*:number*/, divisor /*:number*/) => {
-    return Util.workMultipleToTarget( Util.getWorkMultiple(blockTarget) / divisor );
+    return Util.workMultipleToTarget(Util.getWorkMultiple(blockTarget) / divisor);
 };
 
 const populateBlkInfo = (ctx /*:Context_t*/, hash /*:string*/, done) => {
@@ -136,14 +136,14 @@ const onBlock = (ctx /*:Context_t*/) => {
                 w.abort();
                 return;
             }
-            
+
             const header = Util.bufFromHex(ret.result.header);
-            populateBlkInfo(ctx, header.slice(4, 4+32).reverse().toString('hex'), w());
+            populateBlkInfo(ctx, header.slice(4, 4 + 32).reverse().toString('hex'), w());
             const blockTar = header.readUInt32LE(72);
             if (blockTar !== ctx.mut.blockTar) {
-                if (typeof(ctx.mut.cfg.shareWorkDivisor) === 'number') {
+                if (typeof (ctx.mut.cfg.shareWorkDivisor) === 'number') {
                     ctx.mut.shareTar = computeShareTar(blockTar, ctx.mut.cfg.shareWorkDivisor);
-                } else if (typeof(ctx.mut.cfg.shareMinWork) === 'number') {
+                } else if (typeof (ctx.mut.cfg.shareMinWork) === 'number') {
                     ctx.mut.shareTar = ctx.mut.cfg.shareMinWork;
                 } else {
                     // nothing specified, pick a reasonable default.
@@ -248,7 +248,7 @@ const onBlock = (ctx /*:Context_t*/) => {
                         setTimeout(w(again), 1000);
                     }
                 }
-                
+
             }));
         };
         again();
@@ -259,7 +259,7 @@ const onBlock = (ctx /*:Context_t*/) => {
     });
 };
 
-const mkConfig = module.exports.mkConfig = (
+const mkConfig = (
     cfg /*:Master_Config_t*/,
     tipHash /*:string*/,
     height /*:number*/
@@ -279,8 +279,9 @@ const mkConfig = module.exports.mkConfig = (
         annTarget: cfg.annMinWork,
     };
 };
+module.exports.mkConfig = mkConfig;
 
-const configReq = module.exports.configReq = (
+const configReq = (
     cfg /*:Master_Config_t*/,
     tipHash /*:string*/,
     height /*:number*/,
@@ -291,6 +292,7 @@ const configReq = module.exports.configReq = (
     res.setHeader('cache-control', 'max-age=8 stale-while-revalidate=2');
     res.end(JSON.stringify(mkConfig(cfg, tipHash, height), null, '\t'));
 };
+module.exports.configReq = configReq;
 
 const onReq = (ctx /*:Context_t*/, req, res) => {
     if (!ctx.mut.state) {
@@ -306,7 +308,7 @@ const onReq = (ctx /*:Context_t*/, req, res) => {
     let worknum = -1;
     req.url.replace(/.*\/work_([0-9]+)\.bin$/, (_, num) => ((worknum = Number(num)) + ''));
     if (worknum < 0 || isNaN(worknum)) {
-    } else if (worknum === (state.work.height+1)) {
+    } else if (worknum === (state.work.height + 1)) {
         headers(res);
         ctx.longPollServer.onReq(req, res);
         return;

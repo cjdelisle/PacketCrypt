@@ -7,7 +7,6 @@
 /*@flow*/
 /*::
 import type { Master_Config_t } from './Master.js'
-import type { Tracker_Config_t } from './Tracker.js'
 import type { AnnHandler_Config_t } from './AnnHandler.js'
 import type { BlkHandler_Config_t } from './BlkHandler.js'
 import type { Rpc_Config_t } from './Rpc.js'
@@ -22,7 +21,6 @@ export type Config_t = {
     annHandlers: Array<AnnHandler_Config_t>,
     blkHandlers: Array<BlkHandler_Config_t>,
     master: Master_Config_t,
-    tracker: Tracker_Config_t,
     rpc: Rpc_Config_t,
     payMaker: PayMaker_Config_t
 };
