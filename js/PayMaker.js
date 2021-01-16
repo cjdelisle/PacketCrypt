@@ -61,7 +61,8 @@ import type { Rpc_Client_t } from './Rpc.js';
 import type { Protocol_AnnsEvent_t, Protocol_ShareEvent_t, Protocol_BlockEvent_t } from './Protocol.js'
 
 type ShareEvent_t = Protocol_ShareEvent_t & {
-    credit: number
+    credit: number,
+    workMul: number,
 };
 type AnnsEvent_t = Protocol_AnnsEvent_t & {
     credit: number
@@ -78,17 +79,29 @@ type BinTree_t<X> = {
     size: ()=>number,
 };
 
-export type PayMaker_Result_t = {
+export type PayMaker_Result_t = {|
     warn: Array<string>,
     error: Array<string>,
-    earliestBlockPayout: number,
-    earliestAnnPayout: number,
+    totalKbps: number,
+    blkPayoutTimeWindow: number,
+    annPayoutTimeWindow: number,
     latestPayout: number,
-    payoutShares: { [string]: number },
-    payoutAnns: { [string]: number },
-    lastSubmissions: { [string]: number },
+    annMinerStats: {
+        [string]: {|
+            lastSeen: number,
+            kbps: number,
+            power: number,
+            hashesPerSecond: number,
+        |},
+    },
+    blkMinerStats: {
+        [string]: {|
+            lastSeen: number,
+            hashesPerSecond: number,
+        |},
+    },
     result: { [string]: number },
-};
+|};
 type AnnCompressorCredit_t = {
     credit: number,
     accepted: number,
@@ -188,7 +201,9 @@ const onShare = (ctx, elem /*:ShareEvent_t*/, warn) => {
         } else {
             // console.log("Difficulty: " + diff);
             // console.log("ShareTarget: " + Util.getWorkMultiple(elem.target));
-            elem.credit = Util.getWorkMultiple(elem.target) / diff;
+            const workMul = Util.getWorkMultiple(elem.target);
+            elem.workMul = workMul;
+            elem.credit = workMul / diff;
         }
         ctx.shares.insert(elem);
     }
@@ -427,7 +442,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
     //
     let remaining = ctx.mut.cfg.blockPayoutFraction;
     const payouts = {};
-    const payoutShares = {};
+    const blockMinerWork = {};
     const mostRecentlySeen = {};
     const warn = [];
     let earliestBlockPayout = Infinity;
@@ -438,8 +453,8 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         earliestBlockPayout = s.time;
         let toPay = s.credit / ctx.mut.cfg.pplnsBlkConstantX;
         if (toPay >= remaining) { toPay = remaining; }
+        blockMinerWork[s.payTo] = (blockMinerWork[s.payTo] || 0) + s.workMul;
         if (!mostRecentlySeen[s.payTo]) { mostRecentlySeen[s.payTo] = s.time; }
-        payoutShares[s.payTo] = (payoutShares[s.payTo] || 0) + 1;
         payouts[s.payTo] = (payouts[s.payTo] || 0) + toPay;
         remaining -= toPay;
         if (remaining === 0) { return false; }
@@ -455,6 +470,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
     remaining = 1 - ctx.mut.cfg.blockPayoutFraction;
     let earliestAnnPayout = Infinity;
     const payoutAnns = {};
+    const recentStats /*:{[string]: { time: number, credit: AnnCompressorCredit_t } }*/ = {};
     ctx.annCompressor.reach((a) => {
         if (a.time > maxtime) { return; }
         // console.error('ann');
@@ -465,7 +481,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
             earliestAnnPayout = a.time;
             let toPay = credit.credit / ctx.mut.cfg.pplnsAnnConstantX;
             if (toPay >= remaining) { toPay = remaining; }
-            if (!mostRecentlySeen[payTo]) { mostRecentlySeen[payTo] = a.time; }
+            if (!recentStats[payTo]) { recentStats[payTo] = { time: a.time, credit }; }
             payoutAnns[payTo] = (payoutAnns[payTo] || 0) + credit.accepted;
             payouts[payTo] = (payouts[payTo] || 0) + toPay;
             remaining -= toPay;
@@ -479,7 +495,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
             (payouts[ctx.mut.cfg.defaultAddress] || 0) + remaining;
     }
 
-    let latestPayout = (() => {
+    const latestPayout = (() => {
         const m = ctx.shares.max();
         const t0 = m ? m.time : 0;
         const a = ctx.annCompressor.max();
@@ -487,15 +503,46 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         return Math.max(t0, t1);
     })();
 
+    const annMinerStats = {};
+    let totalKbps = 0;
+    for (const payTo in recentStats) {
+        const rspt = recentStats[payTo];
+        const apms = rspt.credit.accepted / ctx.annCompressor.timespanMs;
+        const hpms = rspt.credit.credit / ctx.annCompressor.timespanMs;
+        const totalTimeMs = latestPayout - earliestAnnPayout;
+        const apmsEver = payoutAnns[payTo] / totalTimeMs;
+        const kbps = apms * 1000 * 8;
+        totalKbps += kbps;
+        //const diff = ctx.
+        let power = apms / apmsEver * 100;
+        //if (power > 95) { power = 100; }
+        annMinerStats[payTo] = {
+            kbps,
+            power,
+            hashesPerSecond: hpms * 1000,
+            lastSeen: rspt.time,
+        }
+    }
+
+    const blkMinerStats = {};
+    for (const payTo in blockMinerWork) {
+        const lastSeen = mostRecentlySeen[payTo];
+        const hpms = blockMinerWork[payTo] / (lastSeen - earliestBlockPayout);
+        blkMinerStats[payTo] = {
+            hashesPerSecond: hpms * 1000,
+            lastSeen
+        };
+    }
+
     return ctx.mut.cfg.updateHook({
         error: [],
         warn: warn,
-        earliestBlockPayout: earliestBlockPayout,
-        earliestAnnPayout: earliestAnnPayout,
+        totalKbps,
+        blkPayoutTimeWindow: latestPayout - earliestBlockPayout,
+        annPayoutTimeWindow: latestPayout - earliestAnnPayout,
         latestPayout: latestPayout,
-        payoutShares: payoutShares,
-        payoutAnns: payoutAnns,
-        lastSubmissions: mostRecentlySeen,
+        annMinerStats,
+        blkMinerStats,
         result: payouts
     });
 };
