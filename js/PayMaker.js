@@ -239,7 +239,7 @@ const getPayableAnnWork = (elem /*:AnnsEvent_t*/, payUnsigned /*:bool*/) => {
 
 const onAnns = (ctx, elem /*:AnnsEvent_t*/, warn) => {
     if (!Util.isValidPayTo(elem.payTo)) {
-        warn("Invalid payTo address [" + elem.payTo + "]");
+        // warn("Invalid payTo address [" + elem.payTo + "]");
     } else if (typeof (elem.accepted) !== 'number') {
         warn("accepted missing or not a number");
     } else if (typeof (elem.unsigned) !== 'number') {
@@ -493,6 +493,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
     remaining = 1 - ctx.mut.cfg.blockPayoutFraction;
     let earliestAnnPayout = Infinity;
     const payoutAnnStats /*:{[string]: PayoutAnnStat_t }*/ = {};
+    let mostRecentAnns = 0;
     ctx.annCompressor.reach((a) => {
         if (a.time > maxtime) { return; }
         // console.error('ann');
@@ -511,6 +512,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
                     lastSeen: a.time,
                     secondNewestCredit: null
                 };
+                if (a.time > mostRecentAnns) { mostRecentAnns = a.time; }
             } else if (ps.secondNewestCredit === null) {
                 ps.secondNewestCredit = credit;
             }
@@ -550,7 +552,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
             Math.floor(snc.encryptions * 1000 / ctx.annCompressor.timespanMs);
         totalEncryptionsPerSecond += encryptionsPerSecond;
         const minerLifetime = pas.lastSeen - pas.firstSeen;
-        const timespan = pas.lastSeen - earliestAnnPayout;
+        const timespan = mostRecentAnns - earliestAnnPayout;
 
         totalKbps += kbps;
         let warmupPercent = Math.floor(minerLifetime / timespan * 100);
