@@ -85,6 +85,9 @@ export type PayMaker_Result_t = {|
     blkPayoutWarmupPeriod: number,
     annPayoutWarmupPeriod: number,
     latestPayout: number,
+    lastWonBlock: string,
+    lastWonBlockTime: number,
+    generatedAt: number,
     annMinerStats: {
         [string]: {|
             lastSeen: number,
@@ -167,7 +170,9 @@ type Context_t = {
         connections: number,
         mostRecentEventTime: number,
         cfg: PayMaker_Config_t,
-        ready: bool
+        ready: bool,
+        mostRecentBlockHash: string,
+        mostRecentBlockTime: number,
     }
 };
 */
@@ -211,6 +216,11 @@ const onShare = (ctx, elem /*:ShareEvent_t*/, warn) => {
         }
         elem.target = diff;
         ctx.shares.insert(elem);
+    }
+
+    if (elem.headerHash) {
+        ctx.mut.mostRecentBlockHash = elem.headerHash;
+        ctx.mut.mostRecentBlockTime = elem.time;
     }
 };
 
@@ -569,7 +579,10 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         totalKbps,
         blkPayoutWarmupPeriod: latestPayout - earliestBlockPayout,
         annPayoutWarmupPeriod: latestPayout - earliestAnnPayout,
+        generatedAt: +new Date(),
         latestPayout: latestPayout,
+        lastWonBlock: ctx.mut.mostRecentBlockHash,
+        lastWonBlockTime: ctx.mut.mostRecentBlockTime,
         annMinerStats,
         blkMinerStats,
         result: payouts
@@ -910,7 +923,10 @@ module.exports.create = (cfg /*:PayMaker_Config_t*/) => {
                 connections: 0,
                 mostRecentEventTime: 0,
                 cfg: cfg,
-                ready: false
+                ready: false,
+
+                mostRecentBlockHash: '',
+                mostRecentBlockTime: -1,
             }
         });
         Http.createServer((req, res) => {
