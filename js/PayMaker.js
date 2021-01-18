@@ -568,13 +568,19 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
 
     const blkMinerStats = {};
     for (const payTo in blockMinerWork) {
-        const encryptionsPerSecond = blockMinerWork[payTo] / ENCRYPTIONS_PER_SECOND_WINDOW * 1000;
+        const encryptionsPerSecond =
+            Math.floor(blockMinerWork[payTo] / ENCRYPTIONS_PER_SECOND_WINDOW * 1000);
         totalEncryptionsPerSecond += encryptionsPerSecond;
         blkMinerStats[payTo] = {
             encryptionsPerSecond,
             lastSeen: mostRecentlySeen[payTo],
         };
     }
+
+    const payoutsList = Object.keys(payouts).map((x) => ([x, payouts[x]]));
+    payoutsList.sort((x, y) => y[1] - x[1]);
+    const payouts2 = {};
+    payoutsList.forEach((x) => payouts2[x[0]] = x[1]);
 
     return ctx.mut.cfg.updateHook({
         error: [],
@@ -589,7 +595,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         lastWonBlockTime: ctx.mut.mostRecentBlockTime,
         annMinerStats,
         blkMinerStats,
-        result: payouts
+        result: payouts2
     });
 };
 
