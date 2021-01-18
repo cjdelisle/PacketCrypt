@@ -462,12 +462,12 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
     // At this point, everything should sum to 1
     //
     let remaining = ctx.mut.cfg.blockPayoutFraction;
-    const payouts = {};
     const blockMinerWork = {};
     const mostRecentlySeen = {};
     const warn = [];
     let earliestBlockPayout = Infinity;
     const encryptionCountCutoff = (+new Date()) - ENCRYPTIONS_PER_SECOND_WINDOW;
+    const blockMinerCredits = {};
     ctx.shares.reach((s) => {
         if (s.time > maxtime) { return; }
         // console.error('share');
@@ -479,15 +479,15 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
             blockMinerWork[s.payTo] = (blockMinerWork[s.payTo] || 0) + s.encryptions;
         }
         if (!mostRecentlySeen[s.payTo]) { mostRecentlySeen[s.payTo] = s.time; }
-        payouts[s.payTo] = (payouts[s.payTo] || 0) + toPay;
+        blockMinerCredits[s.payTo] = (blockMinerCredits[s.payTo] || 0) + toPay;
         remaining -= toPay;
         if (remaining === 0) { return false; }
     });
     if (remaining) {
         warn.push("Ran out of block shares to pay paying [" + (remaining * 100) + "%] to " +
             "defaultAddress");
-        payouts[ctx.mut.cfg.defaultAddress] =
-            (payouts[ctx.mut.cfg.defaultAddress] || 0) + remaining;
+        blockMinerCredits[ctx.mut.cfg.defaultAddress] =
+            (blockMinerCredits[ctx.mut.cfg.defaultAddress] || 0) + remaining;
     }
 
     // Now we do announcements
@@ -495,6 +495,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
     let earliestAnnPayout = Infinity;
     const payoutAnnStats /*:{[string]: PayoutAnnStat_t }*/ = {};
     let mostRecentAnns = 0;
+    const annMinerCredits = {};
     ctx.annCompressor.reach((a) => {
         if (a.time > maxtime) { return; }
         // console.error('ann');
@@ -519,7 +520,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
             }
             ps.firstSeen = a.time;
             ps.accepted += credit.accepted;
-            payouts[payTo] = (payouts[payTo] || 0) + toPay;
+            annMinerCredits[payTo] = (annMinerCredits[payTo] || 0) + toPay;
             remaining -= toPay;
             if (remaining === 0) { return false; }
         }
@@ -527,8 +528,8 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
     if (remaining) {
         warn.push("Ran out of ann shares to pay paying [" + (remaining * 100) + "%] to " +
             "defaultAddress");
-        payouts[ctx.mut.cfg.defaultAddress] =
-            (payouts[ctx.mut.cfg.defaultAddress] || 0) + remaining;
+        annMinerCredits[ctx.mut.cfg.defaultAddress] =
+            (annMinerCredits[ctx.mut.cfg.defaultAddress] || 0) + remaining;
     }
 
     const latestPayout = (() => {
@@ -561,8 +562,9 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         annMinerStats[payTo] = {
             kbps,
             warmupPercent,
-            encryptionsPerSecond,
+            currentEncryptionsPerSecond: encryptionsPerSecond,
             lastSeen: pas.lastSeen,
+            credits: annMinerCredits[payTo],
         }
     }
 
@@ -575,12 +577,19 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
         }
         totalEncryptionsPerSecond += encryptionsPerSecond;
         blkMinerStats[payTo] = {
-            encryptionsPerSecond,
+            currentEncryptionsPerSecond: encryptionsPerSecond,
             lastSeen: mostRecentlySeen[payTo],
+            credits: blockMinerCredits[payTo],
         };
     }
 
-    const payoutsList = Object.keys(payouts).map((x) => ([x, payouts[x]]));
+    const payoutsList = [];
+    for (const bmc in blockMinerCredits) {
+        payoutsList.push([bmc, blockMinerCredits[bmc]]);
+    }
+    for (const amc in annMinerCredits) {
+        payoutsList.push([amc, annMinerCredits[amc]]);
+    }
     payoutsList.sort((x, y) => y[1] - x[1]);
     const payouts2 = {};
     payoutsList.forEach((x) => payouts2[x[0]] = x[1]);
