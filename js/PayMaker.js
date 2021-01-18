@@ -567,9 +567,12 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
     }
 
     const blkMinerStats = {};
-    for (const payTo in blockMinerWork) {
-        const encryptionsPerSecond =
-            Math.floor(blockMinerWork[payTo] / ENCRYPTIONS_PER_SECOND_WINDOW * 1000);
+    for (const payTo in mostRecentlySeen) {
+        let encryptionsPerSecond = 0;
+        if (payTo in blockMinerWork) {
+            encryptionsPerSecond =
+                Math.floor(blockMinerWork[payTo] / ENCRYPTIONS_PER_SECOND_WINDOW * 1000);
+        }
         totalEncryptionsPerSecond += encryptionsPerSecond;
         blkMinerStats[payTo] = {
             encryptionsPerSecond,
