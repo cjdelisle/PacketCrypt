@@ -592,7 +592,7 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
     }
     payoutsList.sort((x, y) => y[1] - x[1]);
     const payouts2 = {};
-    payoutsList.forEach((x) => payouts2[x[0]] = x[1]);
+    payoutsList.forEach((x) => payouts2[x[0]] = (payouts2[x[0]] || 0) + x[1]);
 
     return ctx.mut.cfg.updateHook({
         error: [],
