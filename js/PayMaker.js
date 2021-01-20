@@ -258,8 +258,7 @@ const onAnns = (ctx, elem /*:AnnsEvent_t*/, warn) => {
             // console.log("difficulty:", diff);
         }
         // Multiply by 4096 because getWorkMultiple divides, and then by 2 because even at
-        // difficulty 1, still 50% of the hashes are not valid.
-        elem.encryptions = Util.getWorkMultiple(elem.target) * 4096 * 2 * elem.accepted;
+        elem.encryptions = Util.getWorkMultiple(elem.target) * 4096 * elem.accepted;
         ctx.annCompressor.insertWarn(elem, warn);
     }
 };
