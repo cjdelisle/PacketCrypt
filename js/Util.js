@@ -558,10 +558,11 @@ module.exports.joinVarInt = (bufs /*:Array<Buffer>*/) /*:Buffer*/ => {
 };
 
 module.exports.getKeypair = (rootCfg /*:Config_t*/, height /*:number*/) /*:?Util_KeyPair_t*/ => {
-    if (!rootCfg.privateSeed) { return; }
+    const ps = rootCfg.privateSeed;
+    if (!ps) { return; }
     const h = Buffer.alloc(4);
     h.writeUInt32LE(height, 0);
-    const secBuf = Buffer.from(rootCfg.privateSeed, 'utf8');
+    const secBuf = Buffer.from(ps, 'utf8');
     const s = Crypto.createHash('sha256').update(Buffer.concat([secBuf, h])).digest();
     return Tweetnacl.sign.keyPair.fromSeed(s);
 };

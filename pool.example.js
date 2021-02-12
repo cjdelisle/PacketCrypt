@@ -12,20 +12,17 @@ const BlkHandler = require('./js/BlkHandler.js');
 const Util = require('./js/Util.js');
 
 /*::
-import type { Master_Config_t } from './js/Master.js'
-import type { AnnHandler_Config_t } from './js/AnnHandler.js'
-import type { BlkHandler_Config_t } from './js/BlkHandler.js'
-import type { Config_t } from './js/Config.js'
 import type { PayMaker_Result_t } from './js/PayMaker.js'
 */
 
 const config = {};
 
 // This seed is used for deriving keys which will be used for signing announcements.
-// Each round of work has a different key which is derived from this seed. If you use a weak
-// seed then one announcement signing key can be used to guess the seed.
-// If the seed is known, other pools can steal your announcements and use them.
-config.privateSeed = 'controls who can mine with your announcements, you should change it';
+// Announcement signing is one way to prevent other pools from stealing your announcements
+// but it also prevents multi-pool mining.
+// Unless you have a good reason to use this, you should use block_miner_passwd on the
+// ann handler config instead.
+config.privateSeed = null;
 
 // Anyone who has this password can make http posts to the paymaker (claim that shares were won)
 // You should make this random and also firewall the paymaker from the public.
@@ -35,14 +32,11 @@ config.privateSeed = 'controls who can mine with your announcements, you should 
 config.paymakerHttpPasswd = 'anyone with this password can post results to the paymaker';
 
 // Master URL as it is externally visible
-//config.masterUrl = 'http://pool.cjdns.fr/ng_master';
+// This is used by the PayMaker and the BlockHandler
 config.masterUrl = 'http://localhost:8080';
 
 // Path to the pool datastore
 config.rootWorkdir = './datastore/pool';
-
-// Path to the checkanns binary
-config.checkannsPath = './bin/checkanns';
 
 // pktd RPC connection info
 config.rpc = {
@@ -58,19 +52,8 @@ config.rpc = {
 config.annHandlers = [
     {
         // What address should be advertized for accessing this ann handler (external address)
-        //url:'http://pool.cjdns.fr/ng_ann0',
-        url: 'http://localhost:8081',
-
-        // What port to bind this ann handler on
-        port: 8081,
-
-        // Number of threads to use in the checkanns process
-        threads: 4,
-
-        // Maximum number of simultanious connections to accept before sending 500 errors
-        maxConnections: 200,
-
-        root: config
+        // You will also need to configure the handler itself in packetcrypt_rs
+        url: 'http://h1.mypool.tld',
     },
 ];
 
@@ -125,20 +108,6 @@ config.master = {
     root: config,
 };
 
-// Tracker config, for following the a remote master
-config.tracker = {
-    // Url of the remote master
-    masterUrl: 'http://example.pool.server/master',
-
-    // Config which will be used for generating master conf
-    masterConf: config.master,
-
-    // Port to bind to, attention: this is the same as the master
-    port: 8080,
-
-    root: config
-};
-
 // Paymaker config
 config.payMaker = {
     // How the miners should access the paymaker (external address)
@@ -157,7 +126,7 @@ config.payMaker = {
     updateCycle: 120,
 
     // How many seconds backward to keep history in memory
-    historyDepth: 60 * 60 * 24 * 30,
+    historyDepth: 60 * 60 * 24 * 2,
 
     // Maximum number of simultanious connections to accept before sending 500 errors
     maxConnections: 200,
@@ -172,6 +141,12 @@ config.payMaker = {
 
     // What fraction of the payout to pay to block miners (the rest will be paid to ann miners)
     blockPayoutFraction: 0.5,
+
+    // What percent of the total winnings should be taken for pool management
+    poolFee: 0.20,
+
+    // The address which should be paid the pool fee
+    poolFeeAddress: "pkt1q6hqsqhqdgqfd8t3xwgceulu7k9d9w5t2amath0qxyfjlvl3s3u4sjza2g2",
 
     // This constant will affect how far back into history we pay our announcement miners
     pplnsAnnConstantX: 0.125,
@@ -203,10 +178,6 @@ const main = (argv, config) => {
     if (argv.indexOf('--payMaker') > -1) {
         return void PayMaker.create(config.payMaker);
     }
-    for (let i = 0; i < config.annHandlers.length; i++) {
-        if (argv.indexOf('--ann' + i) === -1) { continue; }
-        return void AnnHandler.create(config.annHandlers[i]);
-    }
     for (let i = 0; i < config.blkHandlers.length; i++) {
         if (argv.indexOf('--blk' + i) === -1) { continue; }
         return void BlkHandler.create(config.blkHandlers[i]);
@@ -216,7 +187,6 @@ const main = (argv, config) => {
     console.log("    --master     # launch the master node");
     console.log("    --payMaker   # launch the paymaker on the master node server");
     console.log();
-    console.log("    --ann<n>     # launch an announcement validator node");
     console.log("    --blk<n>     # launch a block validator node");
     console.log("    NOTE: There are " + config.annHandlers.length + " announcement validators and" +
         " " + config.blkHandlers.length + " block validators which must be launched");
