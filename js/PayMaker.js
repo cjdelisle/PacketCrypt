@@ -168,12 +168,13 @@ export type PayMaker_Config_t = {
 };
 const _flow_typeof_saferphore = Saferphore.create(1);
 type Wins_t = {
+    hour: number,
     day: number,
     wins: number,
     total: number,
 };
 type Context_t = {
-    wins: Wins_t[],
+    wins: { [string]: Wins_t },
     workdir: string,
     rpcClient: Rpc_Client_t,
     blocks: BinTree_t<Protocol_BlockEvent_t>,
@@ -217,9 +218,14 @@ const earliestValidTime = (ctx) => {
 };
 
 const getWins = (ctx, date) => {
-    const w = ctx.wins[date.getHours()];
+    const w = ctx.wins['' + date.getHours()];
     if (!w || w.day != date.getDay()) {
-        return ctx.wins[date.getHours()] = { day: date.getDay(), wins: 0, total: 0, };
+        return ctx.wins['' + date.getHours()] = {
+            hour: date.getHours(),
+            day: date.getDay(),
+            wins: 0,
+            total: 0,
+        };
     }
     return w;
 };
@@ -632,31 +638,23 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
     payoutsList.forEach((x) => payouts2[x[0]] = (payouts2[x[0]] || 0) + x[1] * (1 - poolFee));
 
     const hour = (new Date()).getHours();
-    const yesterdayWins = [];
-    for (let i = hour + 1; i < ctx.wins.length; i++) {
-        yesterdayWins.push(ctx.wins[i] || { wins: 0, total: 0, day: -1 });
+    const wins /*:Array<Wins_t>*/ = [];
+    for (const w in ctx.wins) {
+        wins.push(JSON.parse(JSON.stringify(ctx.wins[w])));
     }
-    const todayWins = [];
-    for (let i = 0; i <= hour; i++) {
-        todayWins.push(ctx.wins[i] || { wins: 0, total: 0, day: -1 });
+    for (const w of wins) {
+        if (w.hour <= hour) {
+            w.hour += 100;
+        }
     }
-    const wins = [];
-    const total = [];
-    for (const w of yesterdayWins) {
-        wins.push(w.wins);
-        total.push(w.total);
-    }
-    for (const w of todayWins) {
-        wins.push(w.wins);
-        total.push(w.total);
-    }
+    wins.sort((a, b) => a.hour - b.hour);
 
     return ctx.mut.cfg.updateHook({
         error: [],
         warn: warn,
         totalKbps,
-        blocksPerHour: total,
-        winsPerHour: wins,
+        blocksPerHour: wins.map((w) => w.total),
+        winsPerHour: wins.map((w) => w.wins),
         totalEncryptionsPerSecond,
         blkPayoutWarmupPeriod: latestPayout - earliestBlockPayout,
         annPayoutWarmupPeriod: latestPayout - earliestAnnPayout,
@@ -1003,7 +1001,7 @@ module.exports.create = (cfg /*:PayMaker_Config_t*/) => {
             shares: mkTree/*::<ShareEvent_t>*/(),
             oes: Saferphore.create(1),
             startTime: +new Date(),
-            wins: [],
+            wins: {},
             mut: {
                 connections: 0,
                 mostRecentEventTime: 0,
