@@ -245,7 +245,7 @@ const onShare = (ctx, elem /*:ShareEvent_t*/, warn) => {
         ctx.mut.mostRecentBlockHash = elem.headerHash;
         ctx.mut.mostRecentBlockTime = elem.time;
 
-        const wins = getWins(ctx, new Date());
+        const wins = getWins(ctx, new Date(elem.time));
         wins.wins++;
     }
 };
@@ -294,7 +294,7 @@ const onBlock = (ctx, elem /*:Protocol_BlockEvent_t*/, warn) => {
     } else if (typeof (elem.difficulty) !== 'number') {
         warn("difficulty is missing or not a number");
     } else {
-        const wins = getWins(ctx, new Date());
+        const wins = getWins(ctx, new Date(elem.time));
         wins.total++;
         ctx.blocks.insert(elem);
     }
