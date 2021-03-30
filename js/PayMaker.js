@@ -83,6 +83,8 @@ export type PayMaker_Result_t = {|
     warn: Array<string>,
     error: Array<string>,
     totalKbps: number,
+    blocksPerHour: number[],
+    winsPerHour: number[],
     totalEncryptionsPerSecond: number,
     blkPayoutWarmupPeriod: number,
     annPayoutWarmupPeriod: number,
@@ -165,7 +167,13 @@ export type PayMaker_Config_t = {
     root: Config_t,
 };
 const _flow_typeof_saferphore = Saferphore.create(1);
+type Wins_t = {
+    day: number,
+    wins: number,
+    total: number,
+};
 type Context_t = {
+    wins: Wins_t[],
     workdir: string,
     rpcClient: Rpc_Client_t,
     blocks: BinTree_t<Protocol_BlockEvent_t>,
@@ -208,6 +216,14 @@ const earliestValidTime = (ctx) => {
     return ctx.mut.mostRecentEventTime - (1000 * ctx.mut.cfg.historyDepth);
 };
 
+const getWins = (ctx, date) => {
+    const w = ctx.wins[date.getHours()];
+    if (!w || w.day != date.getDay()) {
+        return ctx.wins[date.getHours()] = { day: date.getDay(), wins: 0, total: 0, };
+    }
+    return w;
+};
+
 const onShare = (ctx, elem /*:ShareEvent_t*/, warn) => {
     if (!Util.isValidPayTo(elem.payTo)) {
         warn("Invalid payTo address [" + elem.payTo + "]");
@@ -228,6 +244,9 @@ const onShare = (ctx, elem /*:ShareEvent_t*/, warn) => {
     if (elem.headerHash) {
         ctx.mut.mostRecentBlockHash = elem.headerHash;
         ctx.mut.mostRecentBlockTime = elem.time;
+
+        const wins = getWins(ctx, new Date());
+        wins.wins++;
     }
 };
 
@@ -275,6 +294,8 @@ const onBlock = (ctx, elem /*:Protocol_BlockEvent_t*/, warn) => {
     } else if (typeof (elem.difficulty) !== 'number') {
         warn("difficulty is missing or not a number");
     } else {
+        const wins = getWins(ctx, new Date());
+        wins.total++;
         ctx.blocks.insert(elem);
     }
 };
@@ -610,10 +631,32 @@ const computeWhoToPay = (ctx /*:Context_t*/, maxtime) => {
     }
     payoutsList.forEach((x) => payouts2[x[0]] = (payouts2[x[0]] || 0) + x[1] * (1 - poolFee));
 
+    const hour = (new Date()).getHours();
+    const yesterdayWins = [];
+    for (let i = hour + 1; i < ctx.wins.length; i++) {
+        yesterdayWins.push(ctx.wins[i] || { wins: 0, total: 0, day: -1 });
+    }
+    const todayWins = [];
+    for (let i = 0; i <= hour; i++) {
+        todayWins.push(ctx.wins[i] || { wins: 0, total: 0, day: -1 });
+    }
+    const wins = [];
+    const total = [];
+    for (const w of yesterdayWins) {
+        wins.push(w.wins);
+        total.push(w.total);
+    }
+    for (const w of todayWins) {
+        wins.push(w.wins);
+        total.push(w.total);
+    }
+
     return ctx.mut.cfg.updateHook({
         error: [],
         warn: warn,
         totalKbps,
+        blocksPerHour: total,
+        winsPerHour: wins,
         totalEncryptionsPerSecond,
         blkPayoutWarmupPeriod: latestPayout - earliestBlockPayout,
         annPayoutWarmupPeriod: latestPayout - earliestAnnPayout,
@@ -960,6 +1003,7 @@ module.exports.create = (cfg /*:PayMaker_Config_t*/) => {
             shares: mkTree/*::<ShareEvent_t>*/(),
             oes: Saferphore.create(1),
             startTime: +new Date(),
+            wins: [],
             mut: {
                 connections: 0,
                 mostRecentEventTime: 0,
