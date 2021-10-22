@@ -39,6 +39,7 @@ export type Protocol_Work_t = {|
     height: number,
     coinbase_no_witness: Buffer,
     shareTarget: number,
+    blkTarget: number,
     annTarget: number,
     header: Buffer,
     lastHash: Buffer,
@@ -137,12 +138,14 @@ const workEncode = (work /*:Protocol_Work_t*/) /*:Buffer*/ => {
     const height = bufferFromInt(work.height);
     const cnwlen = bufferFromInt(work.coinbase_no_witness.length);
     const shareTarget = bufferFromInt(work.shareTarget);
+    const blkTarget = bufferFromInt(work.blkTarget);
     const annTarget = bufferFromInt(work.annTarget);
     const merkles = Buffer.concat(work.proof);
     return Buffer.concat([
         work.header,
         work.signingKey,
         shareTarget,
+        blkTarget,
         annTarget,
         height,
         cnwlen,
@@ -157,6 +160,7 @@ module.exports.workFromRawBlockTemplate = (
     x /*:Protocol_RawBlockTemplate_t*/,
     signingKey /*:?Uint8Array*/,
     shareTarget /*:number*/,
+    blkTarget /*:number*/,
     annTarget /*:number*/
 ) /*:Protocol_Work_t*/ => {
     const header = Util.bufFromHex(x.header);
@@ -164,6 +168,7 @@ module.exports.workFromRawBlockTemplate = (
         height: x.height,
         coinbase_no_witness: Util.bufFromHex(x.coinbase_no_witness),
         shareTarget: shareTarget,
+        blkTarget: blkTarget,
         annTarget: annTarget,
         header: header,
         signingKey: signingKey ? Buffer.from(signingKey) : Buffer.alloc(32, 0),
@@ -180,6 +185,7 @@ const workDecode = (work /*:Buffer*/) /*:Protocol_Work_t*/ => {
     const header = work.slice(i, i += 80);
     const signingKey = work.slice(i, i += 32);
     const shareTarget = work.readInt32LE(i); i += 4;
+    const blkTarget = work.readInt32LE(i); i += 4;
     const annTarget = work.readInt32LE(i); i += 4;
     const height = work.readInt32LE(i); i += 4;
     const cnwlen = work.readInt32LE(i); i += 4;
@@ -193,6 +199,7 @@ const workDecode = (work /*:Buffer*/) /*:Protocol_Work_t*/ => {
         header: header,
         signingKey: signingKey,
         shareTarget: shareTarget,
+        blkTarget: blkTarget,
         annTarget: annTarget,
         height: height,
         coinbase_no_witness: coinbase_no_witness,

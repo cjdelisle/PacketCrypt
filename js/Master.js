@@ -157,7 +157,7 @@ const onBlock = (ctx /*:Context_t*/) => {
             const keyPair = Util.getKeypair(ctx.mut.cfg.root, ret.result.height);
             const sigKey = keyPair ? keyPair.publicKey : undefined;
             let work = Protocol.workFromRawBlockTemplate(ret.result, sigKey,
-                ctx.mut.shareTar, ctx.mut.cfg.annMinWork);
+                ctx.mut.shareTar, ctx.mut.blockTar, ctx.mut.cfg.annMinWork);
             newState = Object.freeze({
                 work: work,
                 blockTemplate: Protocol.blockTemplateEncode(ret.result)
